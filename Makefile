@@ -1,8 +1,24 @@
+# Detect architecture automatically, can be overridden with: make ARCH=mac or make ARCH=linux
+UNAME := $(shell uname -s)
+ifeq ($(UNAME),Darwin)
+	ARCH ?= mac
+else
+	ARCH ?= linux
+endif
+
 RAYLIB_CFLAGS = $(shell pkg-config --cflags raylib)
 RAYLIB_LIBS   = $(shell pkg-config --libs raylib)
 
-CFLAGS = -std=c11 -ggdb -g -Wall -Wextra -pedantic -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread -lm -framework Cocoa -framework IOKit -framework CoreVideo
-# CFLAGS = -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread -lm
+# Architecture-specific linker flags
+ifeq ($(ARCH),mac)
+	LDFLAGS := $(RAYLIB_LIB) -framework Cocoa -framework IOKit -framework CoreVideo -lm
+else ifeq ($(ARCH),linux)
+	LDFLAGS := $(RAYLIB_LIB) -lm
+else
+	$(error Unknown ARCH: $(ARCH). Use 'mac' or 'linux')
+endif
+
+CFLAGS = -std=c11 -ggdb -g -Wall -Wextra -pedantic -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
 
 # Web build settings (Emscripten)
 RAYLIB_WEB = raylib-web/src
