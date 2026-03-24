@@ -1,3 +1,8 @@
 compile_commands.json
 emsdk
 raylib-web
+lcars
+lcars-lib.so
+lcars.data
+lcars.js
+lcars.wasm
