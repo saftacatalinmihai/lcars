@@ -1,7 +1,7 @@
 RAYLIB_CFLAGS = $(shell pkg-config --cflags raylib)
 RAYLIB_LIBS   = $(shell pkg-config --libs raylib)
 
-CFLAGS = -std=c11 -Wall -Wextra -pedantic -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread -lm -framework Cocoa -framework IOKit -framework CoreVideo
+CFLAGS = -std=c11 -ggdb -g -Wall -Wextra -pedantic -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread -lm -framework Cocoa -framework IOKit -framework CoreVideo
 # CFLAGS = -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread -lm
 
 # Web build settings (Emscripten)
@@ -16,9 +16,12 @@ compile_commands.json: Makefile
 lcars: lcars.c
 	cc $(CFLAGS) -o lcars lcars.c -ldl
 
+lcars-lib: lcars_lib.h lcars_lib.c
+	cc $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS)  -o lcars-lib.so lcars_lib.c -ggdb -g -O0
+
 # Web build targets
 lcars-web: lcars.c style_cyber.rgs $(RAYLIB_WEB)/libraylib.web.a
-	emcc lcars.c -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
+	emcc lcars_lib.c lcars.c -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
 
 serve: lcars-web
 	@echo "Starting server at http://localhost:8080/lcars.html"

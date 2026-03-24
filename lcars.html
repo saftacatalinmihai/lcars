@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <!-- Elements the Emscripten code might need -->
+  <canvas id="canvas"></canvas>
+  <div id="output"></div>
+
+  <script>
+    // Configuration for the Emscripten module
+    var Module = {
+        canvas: document.getElementById('canvas'),
+        print: function(text) {
+            document.getElementById('output').innerHTML += text + "<br>";
+        },
+        // locateFile: function(path, prefix) {
+        //     return 'https://public.mihai-safta.dev/' + path;
+        // }
+    };
+  </script>
+  
+  <!-- Load the generated JS wrapper -->
+  <script src="/lcars.js"></script>
+</body>
+</html>
