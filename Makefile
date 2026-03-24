@@ -32,8 +32,11 @@ compile_commands.json: Makefile
 lcars: lcars.c
 	cc $(CFLAGS) -o lcars lcars.c -ldl
 
-lcars-lib: lcars_lib.h lcars_lib.c
+lcars-lib.so: lcars_lib.h lcars_lib.c
 	cc $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS)  -o lcars-lib.so lcars_lib.c -ggdb -g -O0
+
+run: lcars-lib.so lcars
+	./lcars
 
 # Web build targets
 lcars-web: lcars.c style_cyber.rgs $(RAYLIB_WEB)/libraylib.web.a
@@ -66,5 +69,9 @@ setup-web: setup-emsdk setup-raylib-web
 	@echo "Web build dependencies ready!"
 	@echo "Run 'source emsdk/emsdk_env.sh' then 'make lcars-web'"
 
+run-web: lcars-web
+	@echo "Starting server at http://localhost:8080/lcars.html"
+	python3 -m http.server 8080
+	
 .PHONY: run clean lcars-web serve setup-emsdk setup-raylib-web setup-web
 

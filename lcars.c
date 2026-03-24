@@ -19,13 +19,14 @@ typedef void (*Fn_Reload)(State *s, bool reset);
 
 int main(void) {
 
-    State s = {0};
+    State *s = (State*)calloc(sizeof(State), 1);
 
 #ifdef __EMSCRIPTEN__
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(800, 500, "LCARS Custom Elbow");
     // Let browser control frame rate
-    Init(&s);
-    emscripten_set_main_loop_arg((em_arg_callback_func)UpdateDrawFrame, &s, 0, 1);
+    Init(s);
+    emscripten_set_main_loop_arg((em_arg_callback_func)UpdateDrawFrame, s, 0, 1);
 #else
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(1600, 900, "LCARS Custom Elbow");
@@ -45,14 +46,14 @@ int main(void) {
     }
 
     // Initialize global state
-    Init(&s);
+    Init(s);
     SetTargetFPS(120);
     while (!WindowShouldClose()) {
 
         //Hot code reload library on 'R' key press
         if (IsKeyPressed(KEY_R)) {
             printf("Reloading library...\n");
-            system("make lcars-lib");
+            system("make lcars-lib.so");
 
             // Leaking memory - old dl still in mem.
             void *h = dlopen("./lcars-lib.so", RTLD_NOW);
@@ -60,14 +61,14 @@ int main(void) {
             Init = (Fn_Init)dlsym(h, "Init");
             Reload = (Fn_Reload)dlsym(h, "Reload");
             if (IsKeyDown(KEY_LEFT_SHIFT)) {
-                Reload(&s, true);
-                printf("Library reloaded and state reset successfully.\n");
-            } else {
-                Reload(&s, false);
+                Reload(s, false);
                 printf("Library reloaded successfully.\n");
+            } else {
+                Reload(s, true);
+                printf("Library reloaded and state reset successfully.\n");
             }
         }
-        Update(&s);
+        Update(s);
     }
 #endif
 
