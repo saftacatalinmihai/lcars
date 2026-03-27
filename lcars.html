@@ -1,8 +1,26 @@
 <!DOCTYPE html>
+<head>
+    <style>
+        body {
+            background-color: black;
+            color: black;
+            font-family: 'Arial', sans-serif;
+        }
+        #canvas {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid black;
+        }
+        #output {
+            text-align: center;
+            margin-top: 20px;
+        }  
+    </style>
+</head>
 <html>
 <body>
   <!-- Elements the Emscripten code might need -->
-  <canvas id="canvas"></canvas>
+  <canvas id="canvas" ></canvas>
   <div id="output"></div>
 
   <script>
@@ -12,13 +30,14 @@
         print: function(text) {
             document.getElementById('output').innerHTML += text + "<br>";
         },
-        // locateFile: function(path, prefix) {
-        //     return 'https://public.mihai-safta.dev/' + path;
-        // }
+        locateFile: function(path, prefix) {
+            return 'https://public.mihai-safta.dev/lcars_frame/' + path;
+        }
     };
   </script>
   
   <!-- Load the generated JS wrapper -->
-  <script src="/lcars.js"></script>
+  <!-- <script src="/lcars.js"></script> -->
+  <script src="https://public.mihai-safta.dev/lcars_frame/lcars.js"></script>
 </body>
 </html>

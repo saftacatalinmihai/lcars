@@ -28,7 +28,7 @@ int main(void) {
     emscripten_set_main_loop_arg((em_arg_callback_func)UpdateDrawFrame, s, 0, 1);
 #else
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(1600, 900, "LCARS Custom Elbow");
+    InitWindow(1600, 900, "LCARS ");
     Fn_Update Update = NULL;
     Fn_Init Init = NULL;
     Fn_Reload Reload = NULL;
@@ -36,8 +36,20 @@ int main(void) {
     void *handle = dlopen("./lcars-lib.so", RTLD_NOW);
     if (handle) {
         Update = (Fn_Update)dlsym(handle, "UpdateDrawFrame");
+        if (Update == NULL) {
+            printf("Failed to load UpdateDrawFrame: %s\n", dlerror());
+            return 1;
+        }
         Init = (Fn_Init)dlsym(handle, "Init");
+        if (Init == NULL) {
+            printf("Failed to load Init: %s\n", dlerror());
+            return 1;
+        }
         Reload = (Fn_Reload)dlsym(handle, "Reload");
+        if (Reload == NULL) {
+            printf("Failed to load Reload: %s\n", dlerror());
+            return 1;
+        }
         printf("Library loaded successfully.\n");
     } else {
         printf("Failed to load library: %s\n", dlerror());
@@ -46,7 +58,7 @@ int main(void) {
 
     // Initialize global state
     Init(s);
-    SetTargetFPS(120);
+    SetTargetFPS(240);
     while (!WindowShouldClose()) {
 
         //Hot code reload library on 'R' key press

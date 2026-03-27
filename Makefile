@@ -29,11 +29,11 @@ WEB_LDFLAGS = -s USE_GLFW=3 -s ASYNCIFY -s TOTAL_MEMORY=67108864 -s ALLOW_MEMORY
 compile_commands.json: Makefile
 	bear -- make -B lcars
 
-lcars: lcars.c
+lcars: lcars.c lcars-lib.so
 	cc $(CFLAGS) -o lcars lcars.c -ldl
 
 lcars-lib.so: lcars_lib.h lcars_lib.c
-	cc $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS)  -o lcars-lib.so lcars_lib.c -ggdb -g -O0
+	cc $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS)  -o lcars-lib.so lcars_lib.c
 
 run: lcars-lib.so lcars
 	./lcars

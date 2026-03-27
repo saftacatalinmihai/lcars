@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "raygui.h"
 #include "raylib.h"
 #include "rlgl.h"
@@ -8,6 +10,7 @@
 #define LCARS_ORANGE (Color){ 255, 154, 102, 255 }
 #define LCARS_YELLOW (Color){ 255, 205, 154, 255 }
 #define LCARS_BLUE (Color){ 155, 155, 255, 255 }
+#define TODO exit(1)
 
 #define MAX_ELEMENTS 100
 typedef struct iVec2 {
@@ -18,6 +21,7 @@ typedef enum ElemKind {
     ELEM_RECTANGLE = 0,
     ELEM_ELBOW,
     ELEM_BUTTON,
+    ELEM_TEXT,
 } ElemKind;
 
 typedef struct Element {
@@ -26,11 +30,12 @@ typedef struct Element {
     float width, height;
     Color color;
     int elbowOrientation; // Only used if kind == ELBOW
-    char* text; // Text on button  - optional
+    char* text; // Text on button or just text elem
+    int textSize; // Only used if kind == TEXT
 } Element;
 
-// Static buffers to avoid memory leaks from sprintf_alloc
 static char sliderText[10][32 * 1024];
+
 typedef struct State {
     Element elements[MAX_ELEMENTS];
     Color lcarsColor;
@@ -40,12 +45,17 @@ typedef struct State {
     int controllsX;
     int controllsY;
     bool textBoxEditMode;
+    char* notification;
+    int notificationOnElemIdx;
+    float notificationTimer;
+    Camera camera;
 } State;
 
 void UpdateDrawFrame(State *s);
 void Init(State *s);
 
-#define LCARS_IMPLEMENTATION // TEMP
+// #define LCARS_IMPLEMENTATION // TEMP
+
 #ifdef LCARS_IMPLEMENTATION
 char* sprintf_static(int index, const char* fmt, ...) {
     va_list args;
@@ -57,10 +67,197 @@ char* sprintf_static(int index, const char* fmt, ...) {
 
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
+float w[4] = {40, 140, 400, 40};
+
+#define NOTIFICATION_DURATION 2.0f
+#define NOTIFICATION_MAX_LEN 128
+
+static void ReLayout(State *s);
+
+void Init(State *s) {
+    s->debug = false;
+    s->hide_controlls = true; 
+    s->controllsX = 600;
+    s->controllsY = 400;
+    s->lcarsColor = (Color){ 204, 153, 204, 255 }; // Purple
+    // s->posX = 40;
+    s->posX = 0;
+    s->posY = 210;
+    // s->posY = 0;
+    s->columnWidth = 200;
+    s->columnHeight = 40;
+    s->barWidth = 400;
+    s->barHeight = 20;
+    s->innerRadius = 40;
+
+    Camera camera = { 0 };
+    camera.position = (Vector3){ 10.0f, 10.0f, 10.0f };
+    camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
+    camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    camera.fovy = 45.0f;
+    camera.projection = CAMERA_PERSPECTIVE;
+    s->camera = camera;
+
+    char* notificationText = (char*)malloc(NOTIFICATION_MAX_LEN);
+    notificationText[0] = '\0';
+    s->notification = notificationText;
+    ReLayout(s);
+    
+    GuiLoadStyle("style_cyber.rgs");
+}
+
+void Reload(State *s, bool reset) {
+    if (reset){
+        Init(s);
+    } else {
+        GuiLoadStyle("style_cyber.rgs");
+    }
+}
+
+void ReLayout(State *s) {
+    int elem_index = 0;
+
+    int gap = 6;
+
+    // Upper elbow
+    int yu = s->posY - s->columnHeight - s->innerRadius - s->barHeight;
+
+    s->elements[elem_index++] = (Element){ .kind = ELEM_ELBOW, .elbowOrientation = 3, .position = {s->posX, yu - gap}, .width = s->columnWidth, .height = s->columnHeight, .color = LCARS_BLUE }; yu -= gap;
+    s->elements[elem_index++] = (Element){ .position = {s->posX, yu - 100 - gap}, .width = s->columnWidth, .height = 100, .color = LCARS_PURPLE }; yu -= 100;
+
+    int xu = s->posX + s->columnWidth + s->barWidth;
+    s->elements[elem_index++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[0], .height = s->barHeight, .color = LCARS_ORANGE }; xu += 40 + gap;
+    s->elements[elem_index++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[1], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 140 + gap;
+    s->elements[elem_index++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 400 + gap;
+    s->elements[elem_index++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[3], .height = s->barHeight, .color = LCARS_RED_ORANGE }; xu += 40 + gap;
+
+    // Lower elbow
+    s->elements[elem_index++] = (Element){ .kind = ELEM_ELBOW, .position = {s->posX, s->posY}, .width = s->columnWidth, .height = s->columnHeight, .color = LCARS_RED_ORANGE, .text="03-975883"};
+    int y = s->posY + s->columnHeight + s->barHeight + s->innerRadius;
+    s->elements[elem_index++] = (Element){ .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 200, .color = LCARS_RED_ORANGE, .text="04-785466" }; y = y + 200 + gap;
+    s->elements[elem_index++] = (Element){ .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 60, .color = LCARS_ORANGE, .text="05-423512" }; y = y + 60 + gap;
+    s->elements[elem_index++] = (Element){ .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 250, .color = LCARS_ORANGE, .text="06-572983" }; y = y + 250 + gap;
+
+    int x = s->posX + s->columnWidth + s->barWidth;
+    s->elements[elem_index++] = (Element){ .position = {x + gap, s->posY}, .width = w[0], .height = s->barHeight, .color = LCARS_YELLOW, }; x = x + 40 + gap;
+    s->elements[elem_index++] = (Element){ .position = {x + gap, s->posY}, .width = w[1], .height = s->barHeight / 2, .color = LCARS_YELLOW }; x = x + 140 + gap;
+    s->elements[elem_index++] = (Element){ .position = {x + gap, s->posY}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; x = x + 400 + gap;
+    s->elements[elem_index++] = (Element){ .position = {x + gap, s->posY}, .width = w[3], .height = s->barHeight, .color = LCARS_ORANGE }; x = x + 40 + gap;
+
+    int buttonHeight = 50;
+    s->elements[elem_index++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = 210, .height = buttonHeight, .color = LCARS_ORANGE, .text="(d)ebug 9888-234" };
+    s->elements[elem_index++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = 210, .height = buttonHeight, .color = LCARS_BLUE, .text="(e)dit 0129-866" };
+    s->elements[elem_index++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - buttonHeight  }, .width = 210, .height = buttonHeight, .color = LCARS_BLUE, .text="(r)eset 7232-838" };
+    s->elements[elem_index++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight  }, .width = 210, .height = buttonHeight, .color = LCARS_ORANGE, .text="1014-819" };
+
+    s->elements[elem_index++] = (Element){ .kind=ELEM_TEXT, .position = { x - 220 - 220 - 20, yu }, .color = LCARS_YELLOW, .textSize = 48, .text="LCARS ACCESS 441" };
+    s->elements[elem_index++] = (Element){ .kind=ELEM_TEXT, .position = { s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight - s->barHeight - 40 - 10 }, .color = LCARS_YELLOW, .textSize = 20, .text="LShift to move camera perspective with mouse\nLShift + W,A,S,D to move object\n" };
+}
+
+void Update(State *s) {
+    UpdateCamera(&s->camera, CAMERA_ORBITAL);
+    if (IsKeyDown(KEY_LEFT_SHIFT)) {
+        UpdateCamera(&s->camera, CAMERA_THIRD_PERSON);
+    }
+    ReLayout(s);
+    for (int i = 0; i < MAX_ELEMENTS; i++) {
+        Element *e = &s->elements[i];
+        switch (s->elements[i].kind) {
+            case ELEM_RECTANGLE:
+                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width ? s->elements[i].width : 0, .height = s->elements[i].height})) {
+                    s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
+                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                        printf("Clicked element %d\n", i);
+                        snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Clicked element %d] %s", i,  s->elements[i].text ? s->elements[i].text : "");
+                        s->notificationTimer = NOTIFICATION_DURATION;
+                        s->notificationOnElemIdx = i;
+                    } else if (s->notificationOnElemIdx != i) {
+                        snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Hovering element %d] %s", i,  s->elements[i].text ? s->elements[i].text : "");
+                        s->notificationTimer = NOTIFICATION_DURATION;
+                        s->notificationOnElemIdx = i;
+                    }
+                }
+                break;
+            case ELEM_ELBOW:
+                switch (s->elements[i].elbowOrientation) {
+                    case 0: 
+                        if (
+                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height + s->barHeight + s->innerRadius}) ||
+                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->columnWidth + s->barWidth, .height = s->barHeight})
+                        ) {
+                            s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
+                            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                                printf("Clicked elbow element %d\n", i);
+                                snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Clicked elbow element %d] %s", i, s->elements[i].text ? s->elements[i].text : "");
+                                s->notificationTimer = NOTIFICATION_DURATION;
+                                s->notificationOnElemIdx = i;
+                            } else if (s->notificationOnElemIdx != i) {
+                                snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Hovering elbow element %d] %s", i, s->elements[i].text ? s->elements[i].text : "");
+                                s->notificationTimer = NOTIFICATION_DURATION;
+                                s->notificationOnElemIdx = i;
+                            }
+                        }
+                        break;
+                    case 1: 
+                        TODO;
+                        break;
+                    case 2: break;
+                    case 3: 
+                        if (
+                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height + s->barHeight + s->innerRadius}) ||
+                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y + s->columnHeight + s->innerRadius, .width = s->columnWidth + s->barWidth, .height = s->barHeight})
+                        ) {
+                            s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
+                            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                                printf("Clicked elbow element %d\n", i);
+                                snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Clicked elbow element %d] %s", i, s->elements[i].text ? s->elements[i].text : "");
+                                s->notificationTimer = NOTIFICATION_DURATION;
+                                s->notificationOnElemIdx = i;
+                            } else if (s->notificationOnElemIdx != i) {
+                                snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Hovering elbow element %d] %s", i, s->elements[i].text ? s->elements[i].text : "");
+                                s->notificationTimer = NOTIFICATION_DURATION;
+                                s->notificationOnElemIdx = i;
+                            }
+                        }
+                        break;
+                }
+                break;
+            case ELEM_BUTTON:
+                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height})) {
+                    s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
+                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                        if (e->text) {
+                            if (strstr(e->text, "(d)ebug")) {
+                                s->debug = !s->debug;
+                            }
+                            if (strstr(e->text, "(e)dit")) {
+                                s->hide_controlls = !s->hide_controlls;
+                            }
+                            if (strstr(e->text, "(r)eset")) {
+                                Reload(s, true);
+                            }
+                        }
+                        printf("Clicked button element %d\n", i);
+                        snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Clicked button element %d] %s", i, s->elements[i].text ? s->elements[i].text : "");
+                        s->notificationTimer = NOTIFICATION_DURATION;
+                        s->notificationOnElemIdx = i;
+                    } else if (s->notificationOnElemIdx != i) {
+                        snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Hovering button element %d] %s", i, s->elements[i].text ? s->elements[i].text : "");
+                        s->notificationTimer = NOTIFICATION_DURATION;
+                        s->notificationOnElemIdx = i;
+                    }
+                }
+                break;
+            default:
+                continue; // Skip uninitialized elements
+        }
+    }
+
+}
 
 // Orientation: 0 - corner at top-left, 1 - corner at top-right, 2 - corner at bottom-right, 3 - corner at bottom-left
 void DrawElbow(int posX, int posY, int columnWidth, int columnHeight, int barWidth, int barHeight, int innerRadius,  Color color, int orientation, bool debug) {
-    switch (orientation) {
+   switch (orientation) {
         case 0:
             if (columnWidth >= barHeight + innerRadius) {
                 DrawRectangle(posX, posY + barHeight + innerRadius,columnWidth,columnHeight, color); // Vertical bar
@@ -104,117 +301,31 @@ void DrawElbow(int posX, int posY, int columnWidth, int columnHeight, int barWid
     }
 }
 
-
-float w[4] = {40, 140, 400, 40};
-
-void Resize(State *s) {
-    int elem_index = 0;
-
-    int gap = 6;
-
-    // Upper elbow
-    int yu = s->posY - s->columnHeight - s->innerRadius - s->barHeight;
-
-    s->elements[elem_index++] = (Element){ .kind = ELEM_ELBOW, .elbowOrientation = 3, .position = {s->posX, yu - gap}, .width = s->columnWidth, .height = s->columnHeight, .color = LCARS_BLUE }; yu -= gap;
-    s->elements[elem_index++] = (Element){ .position = {s->posX, yu - 100 - gap}, .width = s->columnWidth, .height = 100, .color = LCARS_PURPLE }; yu -= 100;
-
-    int xu = s->posX + s->columnWidth + s->barWidth;
-    s->elements[elem_index++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[0], .height = s->barHeight, .color = LCARS_ORANGE }; xu += 40 + gap;
-    s->elements[elem_index++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[1], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 140 + gap;
-    s->elements[elem_index++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 400 + gap;
-    s->elements[elem_index++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[3], .height = s->barHeight, .color = LCARS_RED_ORANGE }; xu += 40 + gap;
-
-    // Lower elbow
-    s->elements[elem_index++] = (Element){ .kind = ELEM_ELBOW, .position = {s->posX, s->posY}, .width = s->columnWidth, .height = s->columnHeight, .color = LCARS_RED_ORANGE, .text="03-975883"};
-    int y = s->posY + s->columnHeight + s->barHeight + s->innerRadius;
-    s->elements[elem_index++] = (Element){ .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 200, .color = LCARS_RED_ORANGE, .text="04-785466" }; y = y + 200 + gap;
-    s->elements[elem_index++] = (Element){ .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 60, .color = LCARS_ORANGE, .text="05-423512" }; y = y + 60 + gap;
-    s->elements[elem_index++] = (Element){ .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 250, .color = LCARS_ORANGE, .text="06-572983" }; y = y + 250 + gap;
-
-    int x = s->posX + s->columnWidth + s->barWidth;
-    s->elements[elem_index++] = (Element){ .position = {x + gap, s->posY}, .width = w[0], .height = s->barHeight, .color = LCARS_YELLOW, }; x = x + 40 + gap;
-    s->elements[elem_index++] = (Element){ .position = {x + gap, s->posY}, .width = w[1], .height = s->barHeight / 2, .color = LCARS_YELLOW }; x = x + 140 + gap;
-    s->elements[elem_index++] = (Element){ .position = {x + gap, s->posY}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; x = x + 400 + gap;
-    s->elements[elem_index++] = (Element){ .position = {x + gap, s->posY}, .width = w[3], .height = s->barHeight, .color = LCARS_ORANGE }; x = x + 40 + gap;
-
-    int buttonHeight = 50;
-    s->elements[elem_index++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 210      , s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = 200, .height = buttonHeight, .color = LCARS_ORANGE, .text="9888-234" };
-    s->elements[elem_index++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 210 - 210, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = 200, .height = buttonHeight, .color = LCARS_BLUE, .text="0128-838" };
-    s->elements[elem_index++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 210      , s->posY - 20 - s->barHeight - buttonHeight  }, .width = 200, .height = buttonHeight, .color = LCARS_BLUE, .text="7232-838" };
-    s->elements[elem_index++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 210 - 210, s->posY - 20 - s->barHeight - buttonHeight  }, .width = 200, .height = buttonHeight, .color = LCARS_ORANGE, .text="1014-819" };
-}
-
-void Init(State *s) {
-    s->debug = false;
-    s->hide_controlls = false;
-    s->controllsX = 600;
-    s->controllsY = 370;
-    s->lcarsColor = (Color){ 204, 153, 204, 255 }; // Purple
-    s->posX = 40;
-    s->posY = 250;
-    s->columnWidth = 200;
-    s->columnHeight = 40;
-    s->barWidth = 400;
-    s->barHeight = 20;
-    s->innerRadius = 40;
-
-    Resize(s);
-    
-    GuiLoadStyle("style_cyber.rgs");
-}
-void Reload(State *s, bool reset) {
-    if (reset){
-        Init(s);
-    } else {
-        GuiLoadStyle("style_cyber.rgs");
-    }
-}
-
-void Update(State *s) {
-    Resize(s);
-    for (int i = 0; i < MAX_ELEMENTS; i++) {
-        switch (s->elements[i].kind) {
-            case ELEM_RECTANGLE:
-                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width ? s->elements[i].width : 0, .height = s->elements[i].height})) {
-                    s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
-                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                        printf("Clicked element %d\n", i);
-                    }
-                }
-                break;
-            case ELEM_ELBOW:
-                if (
-                    CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height + s->barHeight + s->innerRadius}) ||
-                    CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->columnWidth + s->barWidth, .height = s->barHeight})
-                ) {
-                    s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
-                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                        printf("Clicked elbow element %d\n", i);
-                    }
-                }
-                break;
-            case ELEM_BUTTON:
-                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height})) {
-                    s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
-                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                        printf("Clicked button element %d\n", i);
-                    }
-                }
-                break;
-            default:
-                continue; // Skip uninitialized elements
-        }
-    }
-}
-
 void UpdateDrawFrame(State *s) {
-    if (IsKeyPressed(KEY_D)) {s->debug = !s->debug;}
-    if (IsKeyPressed(KEY_H)) {s->hide_controlls = !s->hide_controlls;}
+    if (!IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_D)) {s->debug = !s->debug;}
+    if (!IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_R)) { Init(s); }
+    if (!IsKeyDown(KEY_LEFT_SHIFT) && (IsKeyPressed(KEY_H) || IsKeyPressed(KEY_E))) {s->hide_controlls = !s->hide_controlls;}
+    if (IsKeyDown(KEY_LEFT_SHIFT)) {
+        if (s->notificationOnElemIdx != -2) {
+            snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Changing Perspective]");
+            s->notificationTimer = NOTIFICATION_DURATION;
+            s->notificationOnElemIdx = -2;
+        } else {
+            s->notificationTimer = NOTIFICATION_DURATION; // Reset timer while holding shift
+        }
+        // HideCursor();
+    }
 
     Update(s);
 
     BeginDrawing();
         ClearBackground(BLACK);
+        if (s->hide_controlls) {
+            BeginMode3D(s->camera);
+            DrawSphereWires((Vector3){0.0f, 0.0f, 0.0f}, 2.0f, 16, 16, LIME);
+            if (s->debug) { DrawGrid(10, 1.0f); }
+            EndMode3D();
+        }
         for (int i = 0; i < MAX_ELEMENTS; i++) {
             Element *e = &s->elements[i];
             if (e->color.a == 0) continue; // Skip uninitialized elements
@@ -228,9 +339,12 @@ void UpdateDrawFrame(State *s) {
                 case ELEM_BUTTON:
                     DrawRectangleRounded((Rectangle){.x=e->position.x, .y=e->position.y, .width=e->width, .height=e->height}, 0.9f, 4, e->color);
                     break;
+                case ELEM_TEXT:
+                    DrawText(e->text, e->position.x, e->position.y, e->textSize, e->color);
+                    break;
             }
 
-            if (e->text) {
+            if (e->text && e->kind != ELEM_TEXT) {
                 int textWidth = MeasureText(e->text, 20);
                 if (e->kind == ELEM_ELBOW) {
                     DrawText(e->text, e->position.x + 3 * (e->width - textWidth) / 4, e->position.y + s->barHeight + s->innerRadius + (e->height - 20) / 2, 20, BLACK);
@@ -238,31 +352,41 @@ void UpdateDrawFrame(State *s) {
                     DrawText(e->text, e->position.x + 3 * (e->width - textWidth) / 4, e->position.y + (e->height - 20) / 2 + 10, 20, BLACK);
                 }
             }
+            
+        }
+
+        if (s->notification && s->notificationTimer > 0.0f) {
+            s->notificationTimer -= GetFrameTime();
+            DrawText(s->notification,  s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight - s->barHeight , 20, YELLOW);
+        } else {
+            s->notificationOnElemIdx = -1;
         }
 
         if (!s->hide_controlls) {
-        int i = 0;
-        GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col W ", sprintf_static(i, "%.0f", s->columnWidth) ,         &s->columnWidth , 0, 300); i++;
-        GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar H ", sprintf_static(i, "%.0f", s->barHeight)   , &s->barHeight   , 0, 300); i++;
-        GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Radius", sprintf_static(i, "%.0f", s->innerRadius) , &s->innerRadius , 0, 50 ); i++;
-        GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col H ", sprintf_static(i, "%.0f", s->columnHeight), &s->columnHeight, 0, 600); i++;
-        GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar W ", sprintf_static(i, "%.0f", s->barWidth)    , &s->barWidth    , 0, 600); i++;
-        GuiToggle(   (Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Debug (d)", &s->debug); i++;
-        GuiToggle(   (Rectangle){.x=s->controllsX + 130, .y=s->controllsY + (i - 1) * 30, .width=120, .height=20}, "Hide controlls (h)",&s->hide_controlls);
+            int i = 0;
+            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col W ", sprintf_static(i, "%.0f", s->columnWidth) ,         &s->columnWidth , 0, 300); i++;
+            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar H ", sprintf_static(i, "%.0f", s->barHeight)   , &s->barHeight   , 0, 300); i++;
+            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Radius", sprintf_static(i, "%.0f", s->innerRadius) , &s->innerRadius , 0, 50 ); i++;
+            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col H ", sprintf_static(i, "%.0f", s->columnHeight), &s->columnHeight, 0, 600); i++;
+            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar W ", sprintf_static(i, "%.0f", s->barWidth)    , &s->barWidth    , 0, 600); i++;
+            GuiToggle(   (Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Debug (d)", &s->debug); i++;
+            GuiToggle(   (Rectangle){.x=s->controllsX + 130, .y=s->controllsY + (i - 1) * 30, .width=120, .height=20}, "Hide controlls (h)",&s->hide_controlls);
 
-        char* code = sprintf_static(
-                    i, "DrawElbow(%.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, lcarsColor, %s);", 
-                    s->posX, s->posY, s->columnWidth, s->columnHeight, s->barWidth, s->barHeight, s->innerRadius, s->debug ? "true" : "false"
-                );
+            char* code = sprintf_static(
+                i, "DrawElbow(%.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, lcarsColor, %s);", 
+                s->posX, s->posY, s->columnWidth, s->columnHeight, s->barWidth, s->barHeight, s->innerRadius, s->debug ? "true" : "false"
+            );
 
-       if (GuiTextBox((Rectangle){.x=s->controllsX, .y=s->controllsY + i * 30, .width=500, .height=50},
-               code,
-               22,
-               0)) {s->textBoxEditMode = !s->textBoxEditMode;} 
-        i+=2;
-
+            if (GuiTextBox((Rectangle){.x=s->controllsX, .y=s->controllsY + i * 30, .width=500, .height=50},
+                        code,
+                        22,
+                        0)) {s->textBoxEditMode = !s->textBoxEditMode;} 
+            i+=2;
+        }
         if (s->debug) DrawFPS(10, 10);
-    }
+
     EndDrawing();
 }
+
 #endif // LCARS_IMPLEMENTATION
+
