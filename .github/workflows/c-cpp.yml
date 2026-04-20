@@ -13,7 +13,7 @@ jobs:
 
     steps:
     - name: Install bear
-      run: sudo apt-get install -y bear
+      run: sudo apt-get install -y bear raylib
     - uses: actions/checkout@v4
     - name: make
       run: make
