@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Install bear
+      run: sudo apt-get install -y bear
     - uses: actions/checkout@v4
     - name: make
       run: make
