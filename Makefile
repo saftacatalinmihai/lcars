@@ -19,28 +19,29 @@ else
 endif
 
 CFLAGS = -std=c11 -ggdb -g -Wall -Wextra -pedantic -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
+# CFLAGS = -std=c11 -ggdb -g -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
 
 # Web build settings (Emscripten)
 RAYLIB_WEB = raylib-web/src
-WEB_CFLAGS = -Os -Wall -std=c11 -DPLATFORM_WEB -I$(RAYLIB_WEB)
+WEB_CFLAGS = -Os -std=c11 -DPLATFORM_WEB -I$(RAYLIB_WEB)
 WEB_LDFLAGS = -s USE_GLFW=3 -s ASYNCIFY -s TOTAL_MEMORY=67108864 -s ALLOW_MEMORY_GROWTH=1 \
-              --preload-file style_cyber.rgs
+              --preload-file style_cyber.rgs --preload-file resources
 
 compile_commands.json: Makefile
 	bear -- make -B lcars
 
 lcars: lcars.c lcars-lib.so
-	cc $(CFLAGS) -o lcars lcars.c -ldl
+	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c  -ldl
 
 lcars-lib.so: lcars_lib.h lcars_lib.c
-	cc $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS)  -o lcars-lib.so lcars_lib.c
+	cc -DNOTDEV=1 $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -o lcars-lib.so lcars_lib.c
 
 run: lcars-lib.so lcars
 	./lcars
 
 # Web build targets
 lcars-web: lcars.c style_cyber.rgs $(RAYLIB_WEB)/libraylib.web.a
-	emcc lcars_lib.c lcars.c -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
+	emcc -DNOTDEV=1 lcars_lib.c lcars.c sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
 
 serve: lcars-web
 	@echo "Starting server at http://localhost:8080/lcars.html"

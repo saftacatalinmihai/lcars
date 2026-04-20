@@ -12,19 +12,20 @@
 #include <emscripten/emscripten.h>
 #else 
 typedef void (*Fn_Update)(State *s);
-typedef void (*Fn_Init  )(State *s);
+typedef void (*Fn_Init  )(State *s, bool firstInit);
 typedef void (*Fn_Reload)(State *s, bool reset);
 #endif
+// 1
 
 int main(void) {
 
-    State *s = (State*)calloc(sizeof(State), 1);
+    State *s = (State*)calloc(sizeof(State), 10); // Reserve some more space just in case we add more fields... hack
 
 #ifdef __EMSCRIPTEN__
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(800, 500, "LCARS Custom Elbow");
+    Init(s, true);
     // Let browser control frame rate
-    Init(s);
     emscripten_set_main_loop_arg((em_arg_callback_func)UpdateDrawFrame, s, 0, 1);
 #else
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
@@ -57,27 +58,24 @@ int main(void) {
     }
 
     // Initialize global state
-    Init(s);
+    Init(s, true);
     SetTargetFPS(240);
     while (!WindowShouldClose()) {
 
         //Hot code reload library on 'R' key press
-        if (IsKeyPressed(KEY_R)) {
+        if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_R)) {
             printf("Reloading library...\n");
             system("make lcars-lib.so");
 
             // Leaking memory - old dl still in mem.
-            void *h = dlopen("./lcars-lib.so", RTLD_NOW);
-            Update = (Fn_Update)dlsym(h, "UpdateDrawFrame");
-            Init = (Fn_Init)dlsym(h, "Init");
-            Reload = (Fn_Reload)dlsym(h, "Reload");
-            if (IsKeyDown(KEY_LEFT_SHIFT)) {
-                Reload(s, false);
-                printf("Library reloaded successfully.\n");
-            } else {
-                Reload(s, true);
-                printf("Library reloaded and state reset successfully.\n");
-            }
+            /* dlclose(handle); */
+            handle = dlopen("./lcars-lib.so", RTLD_NOW);
+            Update = (Fn_Update)dlsym(handle, "UpdateDrawFrame");
+            Init = (Fn_Init)dlsym(handle, "Init");
+            Reload = (Fn_Reload)dlsym(handle, "Reload");
+            Reload(s, false);
+            printf("Library reloaded successfully.\n");
+  
         }
         Update(s);
     }

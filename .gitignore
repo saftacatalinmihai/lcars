@@ -7,3 +7,8 @@ lcars.data
 lcars.js
 lcars.wasm
 .cache/clangd/index
+redate.sh
+.vscode/
+*dSYM/
+*.db
+*amalgamation*
