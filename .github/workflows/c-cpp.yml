@@ -13,7 +13,19 @@ jobs:
 
     steps:
     - name: Install bear
-      run: sudo apt-get install -y bear raylib
+      run: sudo apt-get install -y bear
+    - name: Install Raylib Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libasound2-dev mesa-common-dev libx11-dev libxrandr-dev \
+          libxi-dev xorg-dev libgl1-mesa-dev libglu1-mesa-dev \
+          libxcursor-dev libxinerama-dev  
+    - name: Install Raylib via PPA
+      run: |
+        sudo add-apt-repository ppa:texus/raylib
+        sudo apt-get update
+        sudo apt-get install -y libraylib5-dev
     - uses: actions/checkout@v4
     - name: make
       run: make
