@@ -28,12 +28,14 @@ typedef struct iVec2 {
 } iVec2;
 
 typedef enum ElemKind {
-    ELEM_RECTANGLE = 0,
+    ELEM_NOTHING = 0,
+    ELEM_RECTANGLE,
     ELEM_ELBOW,
     ELEM_BUTTON,
     ELEM_TEXT,
     ELEM_TEXT_EDITOR,
     ELEM_SPHERE,
+    ELEM_TOTAL_KINDS
 } ElemKind;
 
 typedef struct Element {
@@ -51,6 +53,8 @@ typedef struct Element {
     int textSize; // Only used if kind == TEXT / TEXTBOX for display size
     Model model;
     float rotation;
+    RenderTexture renderTexture;
+    Camera camera;
 } Element;
 
 typedef struct State {
@@ -68,7 +72,6 @@ typedef struct State {
     char* notification;
     int notificationOnElemIdx;
     float notificationTimer;
-    Camera camera;
     int mouseOnTextBox;
     int textSelectedFramesCounter;
     int selectTextStart;
@@ -229,14 +232,6 @@ void Init(State *s, bool firstInit) {
     s->innerRadius = 40;
     s->numElements = 0;
 
-    Camera camera = { 0 };
-    camera.position = (Vector3){ -13.0f, 10.0f, 10.0f };
-    camera.target = (Vector3){ -5.0f, 0.0f, -4.0f };
-    camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
-    camera.fovy = 45.0f;
-    camera.projection = CAMERA_PERSPECTIVE;
-    s->camera = camera;
-
     char* notificationText = (char*)malloc(NOTIFICATION_MAX_LEN);
     notificationText[0] = '\0';
     s->notification = notificationText;
@@ -262,7 +257,7 @@ void Init(State *s, bool firstInit) {
     int textLen = strlen(text);
     printf("Text len: %d\n", textLen);
     text[MAX_INPUT_CHARS] = '\0';
-    s->elements[s->numElements++] = (Element){ 
+    s->elements[s->numElements++] = (Element) {
         .kind=ELEM_TEXT_EDITOR,
         .position = { s->posX + s->columnWidth + s->innerRadius + 60, s->posY + s->barHeight + 80 },
         .width = 600,
@@ -303,6 +298,7 @@ void Init(State *s, bool firstInit) {
     }
     ImageRotateCW(&image);
     ImageFlipVertical(&image); 
+    ImageFlipHorizontal(&image); 
     Texture2D texture = LoadTextureFromImage(image);
     // GenTextureMipmaps(&texture);
     // SetTextureFilter(texture, TEXTURE_FILTER_BILINEAR);
@@ -316,10 +312,15 @@ void Init(State *s, bool firstInit) {
     Model earthModel = LoadModelFromMesh(GenMeshSphere(3.0f, 32, 32));
     earthModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture;
     earthModel.transform = MatrixRotateX(DEG2RAD * 90.0f);
+    // earthModel.transform = MatrixRotateY(DEG2RAD * 40.0f);
+    // earthModel.transform = MatrixRotateZ(DEG2RAD * 90.0f);
 
     s->elements[s->numElements++] = (Element){
         .kind=ELEM_SPHERE,
         .position3 = {0,0,0},
+        .position = {910, 310}, // Used to create the render texture area where the 3d element is inside.
+        .width = 300,
+        .height = 300,
         .color = WHITE,
         .originalColor = WHITE,
         .model = earthModel,
@@ -327,6 +328,35 @@ void Init(State *s, bool firstInit) {
     };
 
     GuiLoadStyle("style_cyber.rgs");
+
+    for (int i=0; i<MAX_ELEMENTS; i++) {
+        switch (s->elements[i].kind) {
+            case ELEM_SPHERE: {
+                // Element e = s->elements[i];
+                Element *e = &s->elements[i];
+
+                Camera camera = { 0 };
+                camera.position = (Vector3){ 10.0f, -10.0f, 10.0f };
+                camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
+                camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+                camera.fovy = 45.0f;
+                camera.projection = CAMERA_PERSPECTIVE;
+                e->camera = camera;
+
+                RenderTexture renderTexture = LoadRenderTexture(e->width, e->height);
+                e->renderTexture = renderTexture;
+                break;
+            }
+            case ELEM_TEXT:
+            case ELEM_RECTANGLE:
+            case ELEM_ELBOW:
+            case ELEM_BUTTON:
+            case ELEM_TEXT_EDITOR:
+            case ELEM_NOTHING:
+            case ELEM_TOTAL_KINDS:
+                break;
+        }
+    }
 }
 
 void Reload(State *s, bool reset) {
@@ -347,26 +377,26 @@ void ReLayout(State *s) {
     int yu = s->posY - s->columnHeight - s->innerRadius - s->barHeight;
 
     s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .elbowOrientation = 3, .position = {s->posX, yu - gap}, .width = s->columnWidth, .height = s->columnHeight, .color = LCARS_BLUE }; yu -= gap;
-    s->elements[s->numElements++] = (Element){ .position = {s->posX, yu - 100 - gap}, .width = s->columnWidth, .height = 100, .color = LCARS_PURPLE, .text=s->elements[1].text, .textSize = s->elements[1].textSize}; yu -= 100;
+    s->elements[s->numElements++] = (Element){ .kind = ELEM_RECTANGLE, .position = {s->posX, yu - 100 - gap}, .width = s->columnWidth, .height = 100, .color = LCARS_PURPLE, .text=s->elements[1].text, .textSize = s->elements[1].textSize}; yu -= 100;
 
     int xu = s->posX + s->columnWidth + s->barWidth;
-    s->elements[s->numElements++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[0], .height = s->barHeight, .color = LCARS_ORANGE }; xu += 40 + gap;
-    s->elements[s->numElements++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[1], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 140 + gap;
-    s->elements[s->numElements++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 400 + gap;
-    s->elements[s->numElements++] = (Element){ .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[3], .height = s->barHeight, .color = LCARS_RED_ORANGE }; xu += 40 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[0], .height = s->barHeight, .color = LCARS_ORANGE }; xu += 40 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[1], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 140 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 400 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[3], .height = s->barHeight, .color = LCARS_RED_ORANGE }; xu += 40 + gap;
 
     // Lower elbow
     s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .position = {s->posX, s->posY}, .width = s->columnWidth, .height = s->columnHeight, .color = LCARS_RED_ORANGE, .text="03-975883" , .textSize=20 };
     int y = s->posY + s->columnHeight + s->barHeight + s->innerRadius;
-    s->elements[s->numElements++] = (Element){ .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 200, .color = LCARS_RED_ORANGE, .text="04-785466", .textSize=20 }; y = y + 200 + gap;
-    s->elements[s->numElements++] = (Element){ .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 60, .color = LCARS_ORANGE, .text="05-423512", .textSize=20 }; y = y + 60 + gap;
-    s->elements[s->numElements++] = (Element){ .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 250, .color = LCARS_ORANGE, .text="06-572983", .textSize=20 }; y = y + 250 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 200, .color = LCARS_RED_ORANGE, .text="04-785466", .textSize=20 }; y = y + 200 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 60, .color = LCARS_ORANGE, .text="05-423512", .textSize=20 }; y = y + 60 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 250, .color = LCARS_ORANGE, .text="06-572983", .textSize=20 }; y = y + 250 + gap;
 
     int x = s->posX + s->columnWidth + s->barWidth;
-    s->elements[s->numElements++] = (Element){ .position = {x + gap, s->posY}, .width = w[0], .height = s->barHeight, .color = LCARS_YELLOW, }; x = x + 40 + gap;
-    s->elements[s->numElements++] = (Element){ .position = {x + gap, s->posY}, .width = w[1], .height = s->barHeight / 2, .color = LCARS_YELLOW }; x = x + 140 + gap;
-    s->elements[s->numElements++] = (Element){ .position = {x + gap, s->posY}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; x = x + 400 + gap;
-    s->elements[s->numElements++] = (Element){ .position = {x + gap, s->posY}, .width = w[3], .height = s->barHeight, .color = LCARS_ORANGE }; x = x + 40 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = w[0], .height = s->barHeight, .color = LCARS_YELLOW, }; x = x + 40 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = w[1], .height = s->barHeight / 2, .color = LCARS_YELLOW }; x = x + 140 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; x = x + 400 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = w[3], .height = s->barHeight, .color = LCARS_ORANGE }; x = x + 40 + gap;
 
     int buttonHeight = 50;
     s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = 210, .height = buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
@@ -525,16 +555,19 @@ void Update(State *s) {
                 }
                 break;
             case ELEM_SPHERE: {
-                s->ray = GetScreenToWorldRay(GetMousePosition(), s->camera);
-                s->collision = GetRayCollisionSphere(s->ray, e->position3, 3);
+                // Element e = s->elements[i];
+                // s->ray = GetScreenToWorldRay(GetMousePosition(), e->camera);
+                // s->collision = GetRayCollisionSphere(s->ray, e->position3, 3);
+                bool isHovering = CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height});
 
-                if (s->collision.hit) {
+                if (isHovering) {
+                // if (s->collision.hit) {
                     // printf("Hit sphere element %d\n", i);
                     e->color = ColorBrightness(YELLOW, 0.5f);
                     // if (!(memcmp(&e->color, &e->originalColor, sizeof(Color)) == 0)) e->color = BLUE;
                     clickOrHoverNotification(s, i, "sphere element");
                     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)){
-                        UpdateCamera(&s->camera, CAMERA_THIRD_PERSON);
+                        UpdateCamera(&e->camera, CAMERA_THIRD_PERSON);
                     } else {
                         e->rotation += 0.05f;
                     }
@@ -548,6 +581,9 @@ void Update(State *s) {
                 //     MatrixRotateX(DEG2RAD * 90.0f)        // Initial tilt to fix JPG orientation
                 // );
             }
+            case ELEM_NOTHING:
+            case ELEM_TOTAL_KINDS:
+                break;
         }
     }
     if (s->mouseOnTextBox != -1) s->textSelectedFramesCounter++;
@@ -889,13 +925,53 @@ void UpdateDrawFrame(State *s) {
     // }
 
     Update(s);
+    Vector2 mPos = GetMousePosition();
+
+    // Pre render on texture areas or any other requirements for first pass:
+    for (int i = 0; i < MAX_ELEMENTS; i++) {
+        Element *e = &s->elements[i];
+        if (e->kind == ELEM_NOTHING) continue; // Skip uninitialized elements
+        switch (e->kind) {
+            case ELEM_SPHERE: {
+                BeginTextureMode(e->renderTexture);
+                    ClearBackground(BLACK);
+                    BeginMode3D(e->camera);
+                        // DrawSphere(e->position3, 2.0f, e->color);
+                        // DrawModelWiresEx(e->model, 
+
+                        DrawModelEx(e->model, 
+                                    e->position3, 
+                                    (Vector3){0.0f, 1.0f, 0.0f}, 
+                                    e->rotation,
+                                    (Vector3){2.0f, 2.0f, 2.0f}, 
+                                    e->color);
+
+                        // DrawModel(e->model, e->position3, 1.0f, e->color);
+
+                        if (s->debug) { 
+                            DrawGrid(10, 2.0f);
+                        }
+                    EndMode3D();
+                EndTextureMode();
+                break;
+            }
+            case ELEM_RECTANGLE:
+            case ELEM_BUTTON:
+            case ELEM_TEXT:
+            case ELEM_TEXT_EDITOR:
+            case ELEM_ELBOW:
+            case ELEM_NOTHING:
+            case ELEM_TOTAL_KINDS:
+                break;
+        }
+    }
 
     BeginDrawing();
         ClearBackground(BLACK);
 
         for (int i = 0; i < MAX_ELEMENTS; i++) {
             Element *e = &s->elements[i];
-            if (e->color.a == 0) continue; // Skip uninitialized elements
+            if (e->kind == ELEM_NOTHING) continue; // Skip uninitialized elements
             switch (e->kind) {
                 case ELEM_RECTANGLE:
                     DrawRectangle(e->position.x, e->position.y, e->width, e->height, e->color);
@@ -918,40 +994,30 @@ void UpdateDrawFrame(State *s) {
                 }
                 case ELEM_SPHERE: {
                     if (s->hide_controlls) {
-                        BeginMode3D(s->camera);
-                        // DrawSphere(e->position3, 2.0f, e->color);
-                        // DrawModelWiresEx(e->model, 
+                        DrawTextureRec(e->renderTexture.texture, (Rectangle){0,0, e->width, e->height}, (Vector2){ e->position.x, e->position.y }, WHITE);
                         
-                        DrawModelEx(e->model, 
-                                        e->position3, 
-                                        (Vector3){0.0f, 1.0f, 0.0f}, 
-                                        e->rotation,
-                                        (Vector3){1.0f, 1.0f, 1.0f}, 
-                                        e->color);
-                        
-                        // DrawModel(e->model, e->position3, 1.0f, e->color);
-
-                        if (s->debug) { 
-                            DrawGrid(10, 1.0f);
-                        }
-                        EndMode3D();
                         if (s->debug) {
-                            Vector2 screenPos = GetWorldToScreen(e->position3, s->camera);
+                            // DrawRectangle(e->position.x- 5, e->position.y + 5, e->width + 10, e->height + 10, RED);
+                            // Vector2 screenPos = GetWorldToScreen(e->position3, e->camera);
+                            Vector2 screenPos = {e->position.x, e->position.y};
 
                             // Draw Text - position, rotation 
                             DrawText(TextFormat("Pos: (%.2f, %.2f, %.2f)", e->position3.x, e->position3.y, e->position3.z), screenPos.x, screenPos.y, 10, WHITE);
                             DrawText(TextFormat("Rot: (%.2f)", e->rotation), screenPos.x, screenPos.y + 20, 10, WHITE);
-                            
+
                             // Camera 
-                            DrawText(TextFormat("Camera Pos: (%.2f, %.2f, %.2f)", s->camera.position.x, s->camera.position.y, s->camera.position.z), screenPos.x, screenPos.y + 40, 10, WHITE);
-                            DrawText(TextFormat("Camera Target: (%.2f, %.2f, %.2f)", s->camera.target.x, s->camera.target.y, s->camera.target.z), screenPos.x, screenPos.y + 60, 10, WHITE);
-                            DrawText(TextFormat("Camera Up: (%.2f, %.2f, %.2f)", s->camera.up.x, s->camera.up.y, s->camera.up.z), screenPos.x, screenPos.y + 80, 10, WHITE);
-                            DrawText(TextFormat("Camera FOV: %.2f", s->camera.fovy), screenPos.x, screenPos.y + 100, 10, WHITE);
-                            DrawText(TextFormat("Camera Projection: %s", s->camera.projection == CAMERA_PERSPECTIVE ? "Perspective" : "Orthographic"), screenPos.x, screenPos.y + 120, 10, WHITE);
+                            DrawText(TextFormat("Camera Pos: (%.2f, %.2f, %.2f)", e->camera.position.x, e->camera.position.y, e->camera.position.z), screenPos.x, screenPos.y + 40, 10, WHITE);
+                            DrawText(TextFormat("Camera Target: (%.2f, %.2f, %.2f)", e->camera.target.x, e->camera.target.y, e->camera.target.z), screenPos.x, screenPos.y + 60, 10, WHITE);
+                            DrawText(TextFormat("Camera Up: (%.2f, %.2f, %.2f)", e->camera.up.x, e->camera.up.y, e->camera.up.z), screenPos.x, screenPos.y + 80, 10, WHITE);
+                            DrawText(TextFormat("Camera FOV: %.2f", e->camera.fovy), screenPos.x, screenPos.y + 100, 10, WHITE);
+                            DrawText(TextFormat("Camera Projection: %s", e->camera.projection == CAMERA_PERSPECTIVE ? "Perspective" : "Orthographic"), screenPos.x, screenPos.y + 120, 10, WHITE);
                         }
                     }
                     break;
                 }
+                case ELEM_NOTHING:
+                case ELEM_TOTAL_KINDS:
+                    break;
             }
 
             if (e->text && e->kind != ELEM_TEXT && e->kind != ELEM_TEXT_EDITOR) {
@@ -994,7 +1060,10 @@ void UpdateDrawFrame(State *s) {
             i+=2;
         }
 
-        if (s->debug) DrawFPS(10, 10);
+        if (s->debug) {
+            DrawFPS(10, 10);
+            DrawText(TextFormat("x:%.2f, y:%.2f", mPos.x, mPos.y), mPos.x + 20, mPos.y, 10, GREEN);
+        }
         // DrawText(TextFormat("Rotation: %.2f", s->elements[21].rotation), 10, 30, 10, WHITE);
 
     EndDrawing();
