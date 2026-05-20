@@ -88,6 +88,14 @@ typedef struct State {
 void UpdateDrawFrame(State *s);
 void Init(State *s, bool firstInit);
 
+#define NOTIFICATION_DURATION 3.0f
+#define NOTIFICATION_MAX_LEN 48
+
+void updateNotification(State* s, const char* notificationText) {
+    snprintf(s->notification, NOTIFICATION_MAX_LEN, "%s", notificationText);
+    s->notificationTimer = NOTIFICATION_DURATION;
+}
+
 // #ifndef NOTDEV // Used to allow the bellow 
 // #define LCARS_IMPLEMENTATION // TEMP used for dev editing this file
 // #endif // NOTDEV
@@ -96,9 +104,6 @@ void Init(State *s, bool firstInit);
 
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
-
-#define NOTIFICATION_DURATION 2.0f
-#define NOTIFICATION_MAX_LEN 48
 
 char* sprintf_static(State*s, int index, const char* fmt, ...) {
     va_list args;
@@ -109,7 +114,7 @@ char* sprintf_static(State*s, int index, const char* fmt, ...) {
 }
 
 static void ReLayout(State *s);
-static void updateNotification(State* s, const char* notificationText);
+// static void updateNotification(State* s, const char* notificationText);
 
 static int sqlite_callback(void *NotUsed, int argc, char **argv, char **azColName) {
    int i;
@@ -285,8 +290,8 @@ void Init(State *s, bool firstInit) {
         ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8); // Convert RGB to RGBA
         // PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
         TraceLog(LOG_WARNING, "Texture ready!");
-        s->elements[1].text = "Texture ready!";
-        s->elements[1].textSize=20;
+        s->elements[1].text = NULL;
+        s->elements[1].textSize = 0;
     } else {
         TraceLog(LOG_WARNING, "Texture not ready yet!");
         s->elements[1].text = "Texture not ready!";
@@ -338,7 +343,7 @@ void Init(State *s, bool firstInit) {
                 Camera camera = { 0 };
                 camera.position = (Vector3){ 10.0f, -10.0f, 10.0f };
                 camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
-                camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+                camera.up = (Vector3){ 0.0f, 1.0f, -0.23f };
                 camera.fovy = 45.0f;
                 camera.projection = CAMERA_PERSPECTIVE;
                 e->camera = camera;
@@ -405,13 +410,13 @@ void ReLayout(State *s) {
     s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight  }, .width = 210, .height = buttonHeight, .color = LCARS_ORANGE, .text="1014-819", .textSize=20 };
 
     s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { x - 220 - 220 - 20, yu }, .color = LCARS_YELLOW, .textSize = 48, .text="LCARS ACCESS 441" };
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight - s->barHeight - 40 - 10 }, .color = LCARS_YELLOW, .textSize = 20, .text="LShift to move camera perspective with mouse\nLShift + W,A,S,D to move object\n" };
+    // s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight - s->barHeight - 40 - 10 }, .color = LCARS_YELLOW, .textSize = 20, .text="LShift to move camera perspective with mouse\nLShift + W,A,S,D to move object\n" };
 }
 
-static void updateNotification(State* s, const char* notificationText) {
-    snprintf(s->notification, NOTIFICATION_MAX_LEN, "%s...", notificationText);
-    s->notificationTimer = NOTIFICATION_DURATION;
-}
+//  void updateNotification(State* s, const char* notificationText) {
+//     snprintf(s->notification, NOTIFICATION_MAX_LEN, "%s...", notificationText);
+//     s->notificationTimer = NOTIFICATION_DURATION;
+// }
 
 static void clickOrHoverNotification(State* s, int i, char* elem_pretty_name) {
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
@@ -563,7 +568,7 @@ void Update(State *s) {
                 if (isHovering) {
                 // if (s->collision.hit) {
                     // printf("Hit sphere element %d\n", i);
-                    e->color = ColorBrightness(YELLOW, 0.5f);
+                    e->color = ColorBrightness(GREEN, 0.8f);
                     // if (!(memcmp(&e->color, &e->originalColor, sizeof(Color)) == 0)) e->color = BLUE;
                     clickOrHoverNotification(s, i, "sphere element");
                     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)){
@@ -576,6 +581,7 @@ void Update(State *s) {
                     e->rotation += 0.1f;
                 }
                 e->rotation = fmodf(e->rotation, 360.0f);
+                // UpdateCamera(&e->camera, CAMERA_ORBITAL);
                 // e->model.transform = MatrixMultiply(
                 //     MatrixRotateY(DEG2RAD * e->rotation), // Spin around poles
                 //     MatrixRotateX(DEG2RAD * 90.0f)        // Initial tilt to fix JPG orientation

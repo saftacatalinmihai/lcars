@@ -19,6 +19,7 @@ else
 endif
 
 CFLAGS = -std=c11 -ggdb -g -Wall -Wextra -pedantic -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
+CFLAGS_RELEASE = -std=c11 -O3 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
 # CFLAGS = -std=c11 -ggdb -g -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
 
 # Web build settings (Emscripten)
@@ -32,6 +33,9 @@ compile_commands.json: Makefile
 
 lcars: lcars.c lcars-lib.so
 	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c  -ldl
+
+lcars-release: lcars.c lcars-lib.so
+	cc -DNOTDEV=1 $(CFLAGS_RELEASE) -o lcars lcars.c  -ldl
 
 lcars-lib.so: lcars_lib.h lcars_lib.c
 	cc -DNOTDEV=1 $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -o lcars-lib.so lcars_lib.c

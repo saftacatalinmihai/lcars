@@ -64,7 +64,7 @@ int main(void) {
 
         //Hot code reload library on 'R' key press
         if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_R)) {
-            printf("Reloading library...\n");
+            printf("Reloading ...\n");
             system("make lcars-lib.so");
 
             // Leaking memory - old dl still in mem.
@@ -74,8 +74,9 @@ int main(void) {
             Init = (Fn_Init)dlsym(handle, "Init");
             Reload = (Fn_Reload)dlsym(handle, "Reload");
             Reload(s, false);
-            printf("Library reloaded successfully.\n");
-  
+            printf("Reloaded successfully.\n");
+            updateNotification(s, "LCARS reloaded successfully!");
+
         }
         Update(s);
     }
