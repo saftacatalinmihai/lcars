@@ -55,6 +55,10 @@ typedef struct Element {
     float rotation;
     RenderTexture renderTexture;
     Camera camera;
+    float scrollY;
+    float textHeight;
+    float cursorY;
+    int snapToCursor;
 } Element;
 
 typedef struct State {
@@ -80,6 +84,9 @@ typedef struct State {
     bool isDeletingText;
     float deletingTextStartTime;
     bool selectingText;
+    bool draggingScrollbar;
+    float dragStartY;
+    float dragStartScrollY;
     Ray ray;                    // Picking line ray
     RayCollision collision;     // Ray collision hit info
     sqlite3 *db;
@@ -274,6 +281,9 @@ void Init(State *s, bool firstInit) {
     s->selectTextLength = 0;
     s->selectTextEnd = -1;
     s->selectingText = false;
+    s->draggingScrollbar = false;
+    s->dragStartY = 0.0f;
+    s->dragStartScrollY = 0.0f;
 
     s->font = GetFontDefault();
     // s->font = LoadFont("NotoColorEmoji-Regular.ttf");
@@ -318,7 +328,7 @@ void Init(State *s, bool firstInit) {
     s->elements[s->numElements++] = (Element){
         .kind=ELEM_SPHERE,
         .position3 = {0,0,0},
-        .position = {910, 310}, // Used to create the render texture area where the 3d element is inside.
+        .position = {950, 310}, // Used to create the render texture area where the 3d element is inside.
         .width = 300,
         .height = 300,
         .color = WHITE,
@@ -484,7 +494,6 @@ void Update(State *s) {
     // UpdateCamera(&s->camera, CAMERA_ORBITAL);
 
     ReLayout(s);
-    int textBoxIdx = -1;
     for (int i = 0; i < MAX_ELEMENTS; i++) {
         Element *e = &s->elements[i];
         switch (s->elements[i].kind) {
@@ -541,19 +550,114 @@ void Update(State *s) {
                 break;
 
             case ELEM_TEXT: break;
-            case ELEM_TEXT_EDITOR:
-                // s->elements[i].width = MeasureText(s->elements[i].text, s->elements[i].textSize) + 10;
-                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height})) { 
+            case ELEM_TEXT_EDITOR: {
+                float scrollbarX = e->position.x + e->width + 25;
+                float scrollbarY = e->position.y;
+                float scrollbarWidth = 18.0f;
+                float scrollbarHeight = e->height;
+                Rectangle activeRec = (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width + 55, .height = s->elements[i].height};
+                
+                if (CheckCollisionPointRec(GetMousePosition(), activeRec)) { 
                     clickOrHoverNotification(s, i, "text box element");
                     if (s->mouseOnTextBox != i ) s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
                     s->mouseOnTextBox = i;
-                    textBoxIdx = i;
+
+                    // Mouse wheel scrolling
+                    float wheelMove = GetMouseWheelMove();
+                    if (wheelMove != 0.0f) {
+                        e->scrollY -= wheelMove * 30.0f; // Scroll speed: 30 pixels per wheel tick
+                        if (e->scrollY < 0.0f) e->scrollY = 0.0f;
+                        float maxScroll = e->textHeight - e->height;
+                        if (maxScroll < 0.0f) maxScroll = 0.0f;
+                        if (e->scrollY > maxScroll) e->scrollY = maxScroll;
+                    }
+
+                    // Click handling
+                    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                        Rectangle upButton = (Rectangle){ scrollbarX, scrollbarY, scrollbarWidth, scrollbarWidth };
+                        Rectangle downButton = (Rectangle){ scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth, scrollbarWidth, scrollbarWidth };
+                        Rectangle track = (Rectangle){ scrollbarX, scrollbarY + scrollbarWidth + 5, scrollbarWidth, scrollbarHeight - 2 * scrollbarWidth - 10 };
+                        Vector2 mPos = GetMousePosition();
+
+                        if (CheckCollisionPointRec(mPos, upButton)) {
+                            e->scrollY -= 30.0f;
+                            if (e->scrollY < 0.0f) e->scrollY = 0.0f;
+                        } else if (CheckCollisionPointRec(mPos, downButton)) {
+                            e->scrollY += 30.0f;
+                            float maxScroll = e->textHeight - e->height;
+                            if (maxScroll < 0.0f) maxScroll = 0.0f;
+                            if (e->scrollY > maxScroll) e->scrollY = maxScroll;
+                        } else if (CheckCollisionPointRec(mPos, track)) {
+                            float visibleRatio = e->height / e->textHeight;
+                            if (visibleRatio > 1.0f) visibleRatio = 1.0f;
+                            float handleHeight = visibleRatio * track.height;
+                            if (handleHeight < 20.0f) handleHeight = 20.0f;
+
+                            float scrollRange = e->textHeight - e->height;
+                            float handleY = track.y;
+                            if (scrollRange > 0.0f) {
+                                handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
+                            }
+                            Rectangle handle = (Rectangle){ scrollbarX, handleY, scrollbarWidth, handleHeight };
+
+                            if (CheckCollisionPointRec(mPos, handle)) {
+                                s->draggingScrollbar = true;
+                                s->dragStartY = mPos.y;
+                                s->dragStartScrollY = e->scrollY;
+                            } else {
+                                // Jump scroll handle to clicked position
+                                float clickY = mPos.y;
+                                float relativeY = clickY - track.y - handleHeight / 2.0f;
+                                float pct = relativeY / (track.height - handleHeight);
+                                if (pct < 0.0f) pct = 0.0f;
+                                if (pct > 1.0f) pct = 1.0f;
+                                if (scrollRange > 0.0f) {
+                                    e->scrollY = pct * scrollRange;
+                                } else {
+                                    e->scrollY = 0.0f;
+                                }
+
+                                s->draggingScrollbar = true;
+                                s->dragStartY = clickY;
+                                s->dragStartScrollY = e->scrollY;
+                            }
+                        }
+                    }
                 } else {
-                    s->mouseOnTextBox = -1;
-                    s->elements[i].color = s->elements[i].originalColor;
-                    textBoxIdx = -1;
+                    if (!s->draggingScrollbar) {
+                        s->mouseOnTextBox = -1;
+                        s->elements[i].color = s->elements[i].originalColor;
+                    }
+                }
+
+                // Active dragging logic (independent of mouse hovering over activeRec)
+                if (s->draggingScrollbar) {
+                    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                        float trackHeight = e->height - 2 * scrollbarWidth - 10;
+                        float visibleRatio = e->height / e->textHeight;
+                        if (visibleRatio > 1.0f) visibleRatio = 1.0f;
+                        float handleHeight = visibleRatio * trackHeight;
+                        if (handleHeight < 20.0f) handleHeight = 20.0f;
+
+                        float dragRange = trackHeight - handleHeight;
+                        if (dragRange > 0.0f) {
+                            float deltaY = GetMousePosition().y - s->dragStartY;
+                            float scrollRange = e->textHeight - e->height;
+                            float deltaScrollY = (deltaY / dragRange) * scrollRange;
+                            e->scrollY = s->dragStartScrollY + deltaScrollY;
+
+                            // Clamp
+                            if (e->scrollY < 0.0f) e->scrollY = 0.0f;
+                            float maxScroll = e->textHeight - e->height;
+                            if (maxScroll < 0.0f) maxScroll = 0.0f;
+                            if (e->scrollY > maxScroll) e->scrollY = maxScroll;
+                        }
+                    } else {
+                        s->draggingScrollbar = false;
+                    }
                 }
                 break;
+            }
             case ELEM_SPHERE: {
                 // Element e = s->elements[i];
                 // s->ray = GetScreenToWorldRay(GetMousePosition(), e->camera);
@@ -590,9 +694,18 @@ void Update(State *s) {
     else s->textSelectedFramesCounter = 0;
 
     if (s->mouseOnTextBox != -1) {
-        Element *e = &s->elements[textBoxIdx];
-        // Set the window's cursor to the I-Beam
-        SetMouseCursor(MOUSE_CURSOR_IBEAM);
+        Element *e = &s->elements[s->mouseOnTextBox];
+        float scrollbarX = e->position.x + e->width + 25;
+        float scrollbarY = e->position.y;
+        float scrollbarWidth = 18.0f;
+        float scrollbarHeight = e->height;
+        Rectangle scrollbarRec = (Rectangle){ scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight };
+
+        if (CheckCollisionPointRec(mPos, scrollbarRec)) {
+            SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+        } else {
+            SetMouseCursor(MOUSE_CURSOR_IBEAM);
+        }
 
         // Get char pressed (unicode character) on the queue
         int key = GetCharPressed();
@@ -602,7 +715,7 @@ void Update(State *s) {
         {
             // printf("Char: %c\n", key);
             // NOTE: Only allow keys in range [32..125]
-            if ((key >= 32) && (key <= 125) && (s->elements[textBoxIdx].textLen  < MAX_INPUT_CHARS))
+            if ((key >= 32) && (key <= 125) && (e->textLen < MAX_INPUT_CHARS))
             {
                 // printf("Mouse on text box element %d\n", textBoxIdx);
                 // printf("Text box %d: %s\n", textBoxIdx, e->text);
@@ -610,6 +723,7 @@ void Update(State *s) {
                 e->text[e->textLen + 1] = '\0'; // Add null terminator at the end of the string
                 e->textLen++;
                 e->textLineLen++;
+                e->snapToCursor = 2;
                 UpdateLogInDB(s, e->text); // Inefficient ... 
                 // printf("Text Line Len: %d\n", e->textLineLen);
                 // printf("Text box %d: %s\n", textBoxIdx, e->text);
@@ -642,6 +756,7 @@ void Update(State *s) {
             e->textLen += clipboardTextLen;
             e->textLineLen += clipboardTextLen;
             e->text[e->textLen] = '\0'; // Add null terminator at the end of the string
+            e->snapToCursor = 2;
             printf("Pasted from clipboard: |%s|\n", clipboardText);
             updateNotification(s, "Clipboard text pasted");
         }
@@ -657,12 +772,13 @@ void Update(State *s) {
             e->textLen++;
             e->textLines++;
             e->textLineLen = 0;
+            e->snapToCursor = 2;
             UpdateLogInDB(s, e->text); // Inefficient ...
         }
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(mPos, scrollbarRec)) {
             s->selectingText = true;
-            s->selectTextStart = GetCharIndexAtMouse(s, s->font, e->text, V2fromiVec2(e->position), e->textSize, 2.0, mPos);
+            s->selectTextStart = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos);
             s->selectTextEnd = s->selectTextStart;
             s->selectTextLength = 0;
         }
@@ -675,7 +791,7 @@ void Update(State *s) {
         }
 
         if (s->selectingText) {
-            int textEnd = GetCharIndexAtMouse(s, s->font, e->text, V2fromiVec2(e->position), e->textSize, 2.0, mPos);
+            int textEnd = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos);
             if (textEnd == 0) {
                 
             } else {
@@ -698,6 +814,7 @@ void Update(State *s) {
             e->text[e->textLen] = '\0'; // Add null terminator at the end of the string
             s->selectTextLength = 0;
             s->selectTextStart = -1;
+            e->snapToCursor = 2;
         } else if (IsKeyDown(KEY_BACKSPACE)) {
             if (!s->isDeletingText) s->deletingTextStartTime = GetTime();
             s->isDeletingText = true;
@@ -713,13 +830,30 @@ void Update(State *s) {
                     if (e->textLen < 0) e->textLen  = 0;
                     e->text[e->textLen] = '\0'; 
                 }
+                e->snapToCursor = 2;
             }
             UpdateLogInDB(s, e->text); // Inefficient ...
         } if (IsKeyUp(KEY_BACKSPACE)) {
             s->isDeletingText = false;
             s->deletingTextStartTime = 0;
         }
-   
+        
+        // Auto-scroll to cursor
+        if (e->snapToCursor > 0) {
+            e->snapToCursor--;
+            float lineHeight = (s->font.baseSize + (float)s->font.baseSize/2) * (e->textSize / (float)s->font.baseSize);
+            if (e->cursorY > e->scrollY + e->height - lineHeight) {
+                e->scrollY = e->cursorY - e->height + lineHeight;
+            } else if (e->cursorY < e->scrollY) {
+                e->scrollY = e->cursorY;
+            }
+        }
+        
+        // Clamp scrollY to valid range
+        if (e->scrollY < 0.0f) e->scrollY = 0.0f;
+        float maxScroll = e->textHeight - e->height;
+        if (maxScroll < 0.0f) maxScroll = 0.0f;
+        if (e->scrollY > maxScroll) e->scrollY = maxScroll;
     }
     else {
         SetMouseCursor(MOUSE_CURSOR_DEFAULT);
@@ -774,13 +908,14 @@ void DrawElbow(int posX, int posY, int columnWidth, int columnHeight, int barWid
 }
 
 // Draw text using font inside rectangle limits with support for text selection
-static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Rectangle rec, float fontSize, float spacing, bool wordWrap, Color tint, int selectStart, int selectLength, Color selectTint, Color selectBackTint) {
+static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Rectangle rec, float fontSize, float spacing, bool wordWrap, Color tint, int selectStart, int selectLength, Color selectTint, Color selectBackTint, float scrollY, float *outTextHeight, float *outCursorY) {
     int length = TextLength(text);  // Total length in bytes of the text, scanned by codepoints in loop
 
     float textOffsetY = 0;          // Offset between lines (on line break '\n')
     float textOffsetX = 0.0f;       // Offset X to next character to draw
 
     float scaleFactor = fontSize/(float)font.baseSize;     // Character rectangle scaling factor
+    float lineHeight = (font.baseSize + (float)font.baseSize/2)*scaleFactor;
 
     // Word/character wrapping mechanism variables
     enum { MEASURE_STATE = 0, DRAW_STATE = 1 };
@@ -789,6 +924,9 @@ static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Recta
     int startLine = -1;         // Index where to begin drawing (where a line begins)
     int endLine = -1;           // Index where to stop drawing (where a line ends)
     int lastk = -1;             // Holds last value of the character position
+
+    float maxTextOffsetY = 0.0f;
+    float cursorY = 0.0f;
 
     for (int i = 0, k = 0; i < length; i++, k++) {
         // Get next codepoint from byte string and glyph index in font
@@ -845,42 +983,58 @@ static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Recta
         else {
             if (codepoint == '\n') {
                 if (!wordWrap) {
-                    textOffsetY += (font.baseSize + (float)font.baseSize/2)*scaleFactor;
+                    textOffsetY += lineHeight;
                     textOffsetX = 0;
                 }
-                // if (s->textSelectedFramesCounter / 80 % 2 == 0) DrawTextCodepoint(font, '_', (Vector2){ rec.x + textOffsetX + glyphWidth, rec.y + textOffsetY }, fontSize, RED);
+                if (i == length - 1) {
+                    cursorY = textOffsetY;
+                    bool isVisible = (textOffsetY - scrollY + (float)font.baseSize*scaleFactor >= 0) && (textOffsetY - scrollY < rec.height);
+                    if (isVisible) {
+                        if (s->textSelectedFramesCounter / 80 % 2 == 0) {
+                            DrawTextCodepoint(font, '_', (Vector2){ rec.x, rec.y + textOffsetY - scrollY }, fontSize, RED);
+                        }
+                    }
+                }
             }
             else {
                 if (!wordWrap && ((textOffsetX + glyphWidth) > rec.width)) {
-                    textOffsetY += (font.baseSize + (float)font.baseSize/2)*scaleFactor;
+                    textOffsetY += lineHeight;
                     textOffsetX = 0;
                 }
 
-                // When text overflows rectangle height limit, just stop drawing
-                if ((textOffsetY + font.baseSize*scaleFactor) > rec.height) break;
+                if (textOffsetY > maxTextOffsetY) maxTextOffsetY = textOffsetY;
+
+                bool isVisible = (textOffsetY - scrollY + (float)font.baseSize*scaleFactor >= 0) && (textOffsetY - scrollY < rec.height);
 
                 // Draw selection background
                 bool isGlyphSelected = false;
                 if ((selectStart >= 0) && (k >= selectStart) && (k < (selectStart + selectLength))) {
-                    DrawRectangleRec((Rectangle){ rec.x + textOffsetX - 1, rec.y + textOffsetY, glyphWidth, (float)font.baseSize*scaleFactor }, selectBackTint);
+                    if (isVisible) {
+                        DrawRectangleRec((Rectangle){ rec.x + textOffsetX - 1, rec.y + textOffsetY - scrollY, glyphWidth, (float)font.baseSize*scaleFactor }, selectBackTint);
+                    }
                     isGlyphSelected = true;
                 }
 
                 // Draw current character glyph
                 if ((codepoint != ' ') && (codepoint != '\t')) {
-                    if(isGlyphSelected && s->debug) {
-                        // DrawText(TextFormat("%d", k),  rec.x + textOffsetX - 1, rec.y + textOffsetY, 10, GREEN);
-                        // DrawText(TextFormat("Sel start %03d, Sel Len %03d", selectStart, selectLength), rec.x, rec.y - 30, 10, RED);
+                    if (isVisible) {
+                        DrawTextCodepoint(font, codepoint, (Vector2){ rec.x + textOffsetX, rec.y + textOffsetY - scrollY }, fontSize, isGlyphSelected? selectTint : tint);
                     }
-                    DrawTextCodepoint(font, codepoint, (Vector2){ rec.x + textOffsetX, rec.y + textOffsetY }, fontSize, isGlyphSelected? selectTint : tint);
                 }
+                
+                // Track cursor position
                 if (i == length - 1) {
-                    if (s->textSelectedFramesCounter / 80 % 2 == 0) DrawTextCodepoint(font, '_', (Vector2){ rec.x + textOffsetX + glyphWidth, rec.y + textOffsetY }, fontSize, RED);
+                    cursorY = textOffsetY;
+                    if (isVisible) {
+                        if (s->textSelectedFramesCounter / 80 % 2 == 0) {
+                            DrawTextCodepoint(font, '_', (Vector2){ rec.x + textOffsetX + glyphWidth, rec.y + textOffsetY - scrollY }, fontSize, RED);
+                        }
+                    }
                 }
             }
 
             if (wordWrap && (i == endLine)) {
-                textOffsetY += (font.baseSize + (float)font.baseSize/2)*scaleFactor;
+                textOffsetY += lineHeight;
                 textOffsetX = 0;
                 startLine = endLine;
                 endLine = -1;
@@ -889,24 +1043,37 @@ static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Recta
                 k = lastk;
 
                 state = !state;
-                // if (i == length - 1) {
-                //     if (s->textSelectedFramesCounter / 80 % 2 == 0) DrawTextCodepoint(font, '_', (Vector2){ rec.x + textOffsetX + glyphWidth, rec.y + textOffsetY }, fontSize, RED);
-                // }
             }
         }
 
         if ((textOffsetX != 0) || (codepoint != ' ')) textOffsetX += glyphWidth;  // avoid leading spaces
     }
-    // if (s->debug) s->debug = false;
+
+    if (textOffsetY > maxTextOffsetY) maxTextOffsetY = textOffsetY;
+
+    // If text was completely empty, the loop didn't run, so cursor is at 0
+    if (length == 0) {
+        cursorY = 0.0f;
+        // Still draw the cursor when focused and visible
+        bool isVisible = (0.0f - scrollY + (float)font.baseSize*scaleFactor >= 0) && (0.0f - scrollY < rec.height);
+        if (isVisible && s->mouseOnTextBox != -1) {
+            if (s->textSelectedFramesCounter / 80 % 2 == 0) {
+                DrawTextCodepoint(font, '_', (Vector2){ rec.x, rec.y - scrollY }, fontSize, RED);
+            }
+        }
+    }
+
+    if (outTextHeight) *outTextHeight = maxTextOffsetY + lineHeight;
+    if (outCursorY) *outCursorY = cursorY;
 } 
 
 // Draw text using font inside rectangle limits
-static void DrawTextBoxed(State* s, Font font, const char *text, Rectangle rec, float fontSize, float spacing, bool wordWrap, Color tint) {
+static void DrawTextBoxed(State* s, Font font, const char *text, Rectangle rec, float fontSize, float spacing, bool wordWrap, Color tint, float scrollY, float *outTextHeight, float *outCursorY) {
     if (s->debug) DrawText(TextFormat("Selection start: %d, end: %d, length: %d", s->selectTextStart, s->selectTextEnd, s->selectTextLength), rec.x, rec.y - 20, 10, RED);
 
     int selStart = s->selectTextLength > 0 ? s->selectTextStart : s->selectTextStart + s->selectTextLength;
     int selLength = s->selectTextLength > 0 ? s->selectTextLength : -s->selectTextLength;
-    DrawTextBoxedSelectable(s, font, text, rec, fontSize, spacing, wordWrap, tint, selStart, selLength, BLACK, LCARS_RED_ORANGE);
+    DrawTextBoxedSelectable(s, font, text, rec, fontSize, spacing, wordWrap, tint, selStart, selLength, BLACK, LCARS_RED_ORANGE, scrollY, outTextHeight, outCursorY);
 }
 
 void UpdateDrawFrame(State *s) {
@@ -987,9 +1154,49 @@ void UpdateDrawFrame(State *s) {
                     break;
                 case ELEM_TEXT_EDITOR: {
                     DrawRectangleLines(e->position.x, e->position.y, e->width + 10, e->height, LCARS_BLUE);
-                    // DrawText(e->text, e->position.x + 5, e->position.y+5, e->textSize, e->color);
                     Rectangle r = (Rectangle){e->position.x + 5, e->position.y + 5, e->width, e->height};
-                    DrawTextBoxed(s, s->font, e->text, r, e->textSize, 2.0f, false, e->color);
+                    BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
+                    DrawTextBoxed(s, s->font, e->text, r, e->textSize, 2.0f, false, e->color, e->scrollY, &e->textHeight, &e->cursorY);
+                    EndScissorMode();
+
+                    // Render scrollbar
+                    float scrollbarX = e->position.x + e->width + 25;
+                    float scrollbarY = e->position.y;
+                    float scrollbarWidth = 18.0f;
+                    float scrollbarHeight = e->height;
+
+                    Rectangle upButton = (Rectangle){ scrollbarX, scrollbarY, scrollbarWidth, scrollbarWidth };
+                    Rectangle downButton = (Rectangle){ scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth, scrollbarWidth, scrollbarWidth };
+                    Rectangle track = (Rectangle){ scrollbarX, scrollbarY + scrollbarWidth + 5, scrollbarWidth, scrollbarHeight - 2 * scrollbarWidth - 10 };
+
+                    // Draw up/down buttons
+                    DrawRectangleRounded(upButton, 0.5f, 4, e->color);
+                    DrawRectangleRounded(downButton, 0.5f, 4, e->color);
+
+                    // Draw Up/Down arrow indicators
+                    DrawText("^", upButton.x + upButton.width/2 - MeasureText("^", 12)/2, upButton.y + upButton.height/2 - 6, 12, BLACK);
+                    DrawText("v", downButton.x + downButton.width/2 - MeasureText("v", 12)/2, downButton.y + downButton.height/2 - 6, 12, BLACK);
+
+                    // Draw track background
+                    DrawRectangleRounded(track, 0.5f, 4, (Color){ 30, 30, 30, 255 });
+
+                    // Calculate and draw handle
+                    float visibleRatio = e->height / e->textHeight;
+                    if (visibleRatio > 1.0f) visibleRatio = 1.0f;
+                    float handleHeight = visibleRatio * track.height;
+                    if (handleHeight < 20.0f) handleHeight = 20.0f;
+
+                    float scrollRange = e->textHeight - e->height;
+                    float handleY = track.y;
+                    if (scrollRange > 0.0f) {
+                        handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
+                    }
+                    Rectangle handle = (Rectangle){ scrollbarX, handleY, scrollbarWidth, handleHeight };
+
+                    bool hoverHandle = CheckCollisionPointRec(GetMousePosition(), handle);
+                    Color handleColor = (hoverHandle || s->draggingScrollbar) ? LCARS_YELLOW : LCARS_ORANGE;
+                    DrawRectangleRounded(handle, 0.5f, 4, handleColor);
+
                     break;
                 }
                 case ELEM_SPHERE: {
