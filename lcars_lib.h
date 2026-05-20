@@ -59,6 +59,10 @@ typedef struct Element {
     float textHeight;
     float cursorY;
     int snapToCursor;
+    char* gapBuffer;
+    int gapStart;
+    int gapEnd;
+    int textCapacity;
 } Element;
 
 typedef struct State {
@@ -83,6 +87,14 @@ typedef struct State {
     int selectTextEnd;
     bool isDeletingText;
     float deletingTextStartTime;
+    bool isMovingCursorLeft;
+    float moveCursorLeftStartTime;
+    bool isMovingCursorRight;
+    float moveCursorRightStartTime;
+    bool isMovingCursorUp;
+    float moveCursorUpStartTime;
+    bool isMovingCursorDown;
+    float moveCursorDownStartTime;
     bool selectingText;
     bool draggingScrollbar;
     float dragStartY;
@@ -221,6 +233,91 @@ static void UpdateLogInDB(State* s, const char* newLog) {
     }
 }
 
+static void MoveGap(Element* e, int index) {
+    if (index < 0) index = 0;
+    int currentLen = e->gapStart + (e->textCapacity - e->gapEnd);
+    if (index > currentLen) index = currentLen;
+
+    while (e->gapStart < index) {
+        e->gapBuffer[e->gapStart] = e->gapBuffer[e->gapEnd];
+        e->gapStart++;
+        e->gapEnd++;
+    }
+    while (e->gapStart > index) {
+        e->gapStart--;
+        e->gapEnd--;
+        e->gapBuffer[e->gapEnd] = e->gapBuffer[e->gapStart];
+    }
+}
+
+static void GapInsertChar(Element* e, char c) {
+    if (e->gapStart == e->gapEnd) {
+        int newCapacity = e->textCapacity * 2;
+        if (newCapacity < 1024) newCapacity = 1024;
+        char* newBuf = malloc(newCapacity + 1);
+        
+        memcpy(newBuf, e->gapBuffer, e->gapStart);
+        int afterGapLen = e->textCapacity - e->gapEnd;
+        int newGapEnd = newCapacity - afterGapLen;
+        memcpy(newBuf + newGapEnd, e->gapBuffer + e->gapEnd, afterGapLen);
+        
+        free(e->gapBuffer);
+        e->gapBuffer = newBuf;
+        e->gapEnd = newGapEnd;
+        e->textCapacity = newCapacity;
+    }
+    
+    e->gapBuffer[e->gapStart] = c;
+    e->gapStart++;
+}
+
+static void GapDeleteBack(Element* e) {
+    if (e->gapStart > 0) {
+        e->gapStart--;
+    }
+}
+
+static void GapDeleteForward(Element* e) {
+    if (e->gapEnd < e->textCapacity) {
+        e->gapEnd++;
+    }
+}
+
+static void ReconstructText(Element* e) {
+    int beforeLen = e->gapStart;
+    int afterLen = e->textCapacity - e->gapEnd;
+    int totalLen = beforeLen + afterLen;
+    
+    e->text = realloc(e->text, totalLen + 1);
+    memcpy(e->text, e->gapBuffer, beforeLen);
+    memcpy(e->text + beforeLen, e->gapBuffer + e->gapEnd, afterLen);
+    e->text[totalLen] = '\0';
+    e->textLen = totalLen;
+}
+
+static int GetLines(const char* text, int* lineStarts, int maxLines) {
+    int count = 0;
+    lineStarts[count++] = 0;
+    int len = strlen(text);
+    for (int i = 0; i < len; i++) {
+        if (text[i] == '\n') {
+            if (count < maxLines) {
+                lineStarts[count++] = i + 1;
+            }
+        }
+    }
+    return count;
+}
+
+static int GetLineForIndex(int index, const int* lineStarts, int numLines) {
+    for (int i = 0; i < numLines - 1; i++) {
+        if (index >= lineStarts[i] && index < lineStarts[i+1]) {
+            return i;
+        }
+    }
+    return numLines - 1;
+}
+
 Vector2 V2fromiVec2(iVec2 v) {
     return (Vector2){ v.x, v.y };
 }
@@ -269,6 +366,13 @@ void Init(State *s, bool firstInit) {
     int textLen = strlen(text);
     printf("Text len: %d\n", textLen);
     text[MAX_INPUT_CHARS] = '\0';
+
+    int textCapacity = 4096;
+    char* gapBuffer = malloc(textCapacity + 1);
+    memcpy(gapBuffer, text, textLen);
+    int gapStart = textLen;
+    int gapEnd = textCapacity;
+
     s->elements[s->numElements++] = (Element) {
         .kind=ELEM_TEXT_EDITOR,
         .position = { s->posX + s->columnWidth + s->innerRadius + 60, s->posY + s->barHeight + 80 },
@@ -279,12 +383,24 @@ void Init(State *s, bool firstInit) {
         .textSize = 20,
         .text=text,
         .textLen = textLen,
-        .textLineLen = textLen
+        .textLineLen = textLen,
+        .gapBuffer = gapBuffer,
+        .gapStart = gapStart,
+        .gapEnd = gapEnd,
+        .textCapacity = textCapacity
     };
     s->mouseOnTextBox = -1;
     s->selectTextStart = -1;
     s->selectTextLength = 0;
     s->selectTextEnd = -1;
+    s->isMovingCursorLeft = false;
+    s->moveCursorLeftStartTime = 0.0f;
+    s->isMovingCursorRight = false;
+    s->moveCursorRightStartTime = 0.0f;
+    s->isMovingCursorUp = false;
+    s->moveCursorUpStartTime = 0.0f;
+    s->isMovingCursorDown = false;
+    s->moveCursorDownStartTime = 0.0f;
     s->selectingText = false;
     s->draggingScrollbar = false;
     s->dragStartY = 0.0f;
@@ -715,30 +831,21 @@ void Update(State *s) {
 
         // Get char pressed (unicode character) on the queue
         int key = GetCharPressed();
+        bool textChanged = false;
 
         // Check if more characters have been pressed on the same frame
         while (key > 0)
         {
-            // printf("Char: %c\n", key);
             // NOTE: Only allow keys in range [32..125]
             if ((key >= 32) && (key <= 125) && (e->textLen < MAX_INPUT_CHARS))
             {
-                // printf("Mouse on text box element %d\n", textBoxIdx);
-                // printf("Text box %d: %s\n", textBoxIdx, e->text);
-                e->text[e->textLen] = (char)key;
-                e->text[e->textLen + 1] = '\0'; // Add null terminator at the end of the string
-                e->textLen++;
-                e->textLineLen++;
+                GapInsertChar(e, (char)key);
+                textChanged = true;
                 e->snapToCursor = 2;
-                UpdateLogInDB(s, e->text); // Inefficient ... 
-                // printf("Text Line Len: %d\n", e->textLineLen);
-                // printf("Text box %d: %s\n", textBoxIdx, e->text);
             }
 
             key = GetCharPressed();  // Check next character in the queue
         }
-
-
 
         if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) && IsKeyPressed(KEY_C)) {
             if (s->selectTextLength <= 0) {
@@ -746,9 +853,12 @@ void Update(State *s) {
                 updateNotification(s, "All text copied to clipboard");
                 printf("Copied all text to clipboard: |%s|\n", e->text);
             } else {
-                char* selectedText = (char*)malloc(s->selectTextLength + 1);
-                selectedText[s->selectTextLength] = '\0'; // Null-terminate the selected text
-                SetClipboardText(strncpy(selectedText, e->text + s->selectTextStart, s->selectTextLength));
+                int selStart = s->selectTextLength > 0 ? s->selectTextStart : s->selectTextStart + s->selectTextLength;
+                int selLength = s->selectTextLength > 0 ? s->selectTextLength : -s->selectTextLength;
+                char* selectedText = (char*)malloc(selLength + 1);
+                memcpy(selectedText, e->text + selStart, selLength);
+                selectedText[selLength] = '\0';
+                SetClipboardText(selectedText);
                 printf("Copied to clipboard: |%s|\n", selectedText);
                 updateNotification(s, "Selected text copied to clipboard");
                 free(selectedText);
@@ -756,30 +866,109 @@ void Update(State *s) {
         }
         if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) && IsKeyPressed(KEY_V)) {
             const char* clipboardText = GetClipboardText();
-            int clipboardTextLen = strlen(clipboardText);
-            printf("Clipboard text length: %d\n", clipboardTextLen);
-            snprintf(e->text + e->textLen, clipboardTextLen + 1, "%s", clipboardText);
-            e->textLen += clipboardTextLen;
-            e->textLineLen += clipboardTextLen;
-            e->text[e->textLen] = '\0'; // Add null terminator at the end of the string
-            e->snapToCursor = 2;
-            printf("Pasted from clipboard: |%s|\n", clipboardText);
-            updateNotification(s, "Clipboard text pasted");
+            if (clipboardText) {
+                int clipboardTextLen = strlen(clipboardText);
+                printf("Clipboard text length: %d\n", clipboardTextLen);
+                for (int j = 0; j < clipboardTextLen; j++) {
+                    GapInsertChar(e, clipboardText[j]);
+                }
+                textChanged = true;
+                e->snapToCursor = 2;
+                printf("Pasted from clipboard: |%s|\n", clipboardText);
+                updateNotification(s, "Clipboard text pasted");
+            }
         }
-        // Saving on every keystroke so the save controll is not needed.
-        // if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) && IsKeyPressed(KEY_S)) {
-        //     UpdateLogInDB(s, e->text);
-        //     updateNotification(s, "Saved to LCARS database");
-        // }
 
         if (IsKeyPressed(KEY_ENTER)) {
-            e->text[e->textLen] = (char)'\n';
-            e->text[e->textLen + 1] = '\0'; // Add null terminator at the end of the string
-            e->textLen++;
-            e->textLines++;
-            e->textLineLen = 0;
+            GapInsertChar(e, '\n');
+            textChanged = true;
             e->snapToCursor = 2;
-            UpdateLogInDB(s, e->text); // Inefficient ...
+        }
+
+        // Cursor movements
+        if (IsKeyDown(KEY_LEFT)) {
+            if (!s->isMovingCursorLeft) s->moveCursorLeftStartTime = GetTime();
+            s->isMovingCursorLeft = true;
+            if (IsKeyPressed(KEY_LEFT) || (GetTime() - s->moveCursorLeftStartTime > 0.4f && s->textSelectedFramesCounter % 2 == 0)) {
+                MoveGap(e, e->gapStart - 1);
+                e->snapToCursor = 2;
+            }
+        } else {
+            s->isMovingCursorLeft = false;
+        }
+
+        if (IsKeyDown(KEY_RIGHT)) {
+            if (!s->isMovingCursorRight) s->moveCursorRightStartTime = GetTime();
+            s->isMovingCursorRight = true;
+            if (IsKeyPressed(KEY_RIGHT) || (GetTime() - s->moveCursorRightStartTime > 0.4f && s->textSelectedFramesCounter % 2 == 0)) {
+                MoveGap(e, e->gapStart + 1);
+                e->snapToCursor = 2;
+            }
+        } else {
+            s->isMovingCursorRight = false;
+        }
+        bool triggerMoveUp = false;
+        if (IsKeyDown(KEY_UP)) {
+            if (!s->isMovingCursorUp) s->moveCursorUpStartTime = GetTime();
+            s->isMovingCursorUp = true;
+            if (IsKeyPressed(KEY_UP) || (GetTime() - s->moveCursorUpStartTime > 0.4f && s->textSelectedFramesCounter % 2 == 0)) {
+                triggerMoveUp = true;
+            }
+        } else {
+            s->isMovingCursorUp = false;
+        }
+
+        bool triggerMoveDown = false;
+        if (IsKeyDown(KEY_DOWN)) {
+            if (!s->isMovingCursorDown) s->moveCursorDownStartTime = GetTime();
+            s->isMovingCursorDown = true;
+            if (IsKeyPressed(KEY_DOWN) || (GetTime() - s->moveCursorDownStartTime > 0.4f && s->textSelectedFramesCounter % 2 == 0)) {
+                triggerMoveDown = true;
+            }
+        } else {
+            s->isMovingCursorDown = false;
+        }
+
+        if (triggerMoveUp || triggerMoveDown) {
+            int lineStarts[1024];
+            int numLines = GetLines(e->text, lineStarts, 1024);
+            int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
+            int col = e->gapStart - lineStarts[currLine];
+            
+            if (triggerMoveUp) {
+                if (currLine > 0) {
+                    int targetLineLen = lineStarts[currLine] - 1 - lineStarts[currLine - 1];
+                    int targetCol = col < targetLineLen ? col : targetLineLen;
+                    MoveGap(e, lineStarts[currLine - 1] + targetCol);
+                }
+            } else if (triggerMoveDown) {
+                if (currLine < numLines - 1) {
+                    int targetLineLen = 0;
+                    if (currLine + 1 < numLines - 1) {
+                        targetLineLen = lineStarts[currLine + 2] - 1 - lineStarts[currLine + 1];
+                    } else {
+                        targetLineLen = e->textLen - lineStarts[currLine + 1];
+                    }
+                    int targetCol = col < targetLineLen ? col : targetLineLen;
+                    MoveGap(e, lineStarts[currLine + 1] + targetCol);
+                }
+            }
+            e->snapToCursor = 2;
+        }
+        if (IsKeyPressed(KEY_HOME)) {
+            int lineStarts[1024];
+            int numLines = GetLines(e->text, lineStarts, 1024);
+            int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
+            MoveGap(e, lineStarts[currLine]);
+            e->snapToCursor = 2;
+        }
+        if (IsKeyPressed(KEY_END)) {
+            int lineStarts[1024];
+            int numLines = GetLines(e->text, lineStarts, 1024);
+            int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
+            int targetIndex = (currLine < numLines - 1) ? lineStarts[currLine + 1] - 1 : e->textLen;
+            MoveGap(e, targetIndex);
+            e->snapToCursor = 2;
         }
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(mPos, scrollbarRec)) {
@@ -787,6 +976,8 @@ void Update(State *s) {
             s->selectTextStart = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos);
             s->selectTextEnd = s->selectTextStart;
             s->selectTextLength = 0;
+            MoveGap(e, s->selectTextStart);
+            e->snapToCursor = 2;
         }
 
         if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_A)) {
@@ -798,12 +989,8 @@ void Update(State *s) {
 
         if (s->selectingText) {
             int textEnd = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos);
-            if (textEnd == 0) {
-                
-            } else {
-                s->selectTextEnd = textEnd;
-                s->selectTextLength = s->selectTextEnd - s->selectTextStart;
-            }
+            s->selectTextEnd = textEnd;
+            s->selectTextLength = s->selectTextEnd - s->selectTextStart;
 
             if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                 s->selectingText = false;
@@ -813,37 +1000,40 @@ void Update(State *s) {
         if (s->selectTextStart >= 0 && s->selectTextEnd != s->selectTextStart && (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))) {
             int selStart = s->selectTextLength > 0 ? s->selectTextStart : s->selectTextStart + s->selectTextLength;
             int selLength = s->selectTextLength > 0 ? s->selectTextLength : -s->selectTextLength;
-            int selEnd = selStart + selLength;
-            memmove(e->text + selStart, e->text + selEnd, e->textLen - selLength + 1);
-            e->textLen -= selLength;
-            e->textLineLen -= selLength;
-            e->text[e->textLen] = '\0'; // Add null terminator at the end of the string
+            MoveGap(e, selStart);
+            e->gapEnd += selLength;
             s->selectTextLength = 0;
             s->selectTextStart = -1;
+            textChanged = true;
             e->snapToCursor = 2;
         } else if (IsKeyDown(KEY_BACKSPACE)) {
             if (!s->isDeletingText) s->deletingTextStartTime = GetTime();
             s->isDeletingText = true;
             if (IsKeyPressed(KEY_BACKSPACE) || ( GetTime() - s->deletingTextStartTime > 0.5f  && s->textSelectedFramesCounter % 10 == 0) ) {
-                if (e->textLen > 0 && e->text[e->textLen - 1] == '\n') {
-                    e->textLines--;
-                    e->textLineLen = 0;
-                    e->textLen -= 2 ;
-                    e->text[e->textLen] = '\0'; 
-                } else {
-                    e->textLen--;
-                    e->textLineLen--;
-                    if (e->textLen < 0) e->textLen  = 0;
-                    e->text[e->textLen] = '\0'; 
-                }
+                GapDeleteBack(e);
+                textChanged = true;
                 e->snapToCursor = 2;
             }
-            UpdateLogInDB(s, e->text); // Inefficient ...
-        } if (IsKeyUp(KEY_BACKSPACE)) {
+        } else if (IsKeyDown(KEY_DELETE)) {
+            if (!s->isDeletingText) s->deletingTextStartTime = GetTime();
+            s->isDeletingText = true;
+            if (IsKeyPressed(KEY_DELETE) || ( GetTime() - s->deletingTextStartTime > 0.5f  && s->textSelectedFramesCounter % 10 == 0) ) {
+                GapDeleteForward(e);
+                textChanged = true;
+                e->snapToCursor = 2;
+            }
+        }
+
+        if (IsKeyUp(KEY_BACKSPACE) && IsKeyUp(KEY_DELETE)) {
             s->isDeletingText = false;
             s->deletingTextStartTime = 0;
         }
-        
+
+        if (textChanged) {
+            ReconstructText(e);
+            UpdateLogInDB(s, e->text);
+        }
+
         // Auto-scroll to cursor
         if (e->snapToCursor > 0) {
             e->snapToCursor--;
@@ -914,7 +1104,7 @@ void DrawElbow(int posX, int posY, int columnWidth, int columnHeight, int barWid
 }
 
 // Draw text using font inside rectangle limits with support for text selection
-static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Rectangle rec, float fontSize, float spacing, bool wordWrap, Color tint, int selectStart, int selectLength, Color selectTint, Color selectBackTint, float scrollY, float *outTextHeight, float *outCursorY) {
+static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Rectangle rec, float fontSize, float spacing, bool wordWrap, Color tint, int selectStart, int selectLength, Color selectTint, Color selectBackTint, float scrollY, float *outTextHeight, float *outCursorY, int cursorIndex) {
     int length = TextLength(text);  // Total length in bytes of the text, scanned by codepoints in loop
 
     float textOffsetY = 0;          // Offset between lines (on line break '\n')
@@ -934,7 +1124,19 @@ static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Recta
     float maxTextOffsetY = 0.0f;
     float cursorY = 0.0f;
 
+    float cursorX_screen = rec.x;
+    float cursorY_screen = rec.y - scrollY;
+    bool cursorPositionFound = false;
+
     for (int i = 0, k = 0; i < length; i++, k++) {
+        // Track cursor position
+        if (k == cursorIndex) {
+            cursorX_screen = rec.x + textOffsetX;
+            cursorY_screen = rec.y + textOffsetY - scrollY;
+            cursorY = textOffsetY;
+            cursorPositionFound = true;
+        }
+
         // Get next codepoint from byte string and glyph index in font
         int codepointByteCount = 0;
         int codepoint = GetCodepoint(&text[i], &codepointByteCount);
@@ -992,15 +1194,6 @@ static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Recta
                     textOffsetY += lineHeight;
                     textOffsetX = 0;
                 }
-                if (i == length - 1) {
-                    cursorY = textOffsetY;
-                    bool isVisible = (textOffsetY - scrollY + (float)font.baseSize*scaleFactor >= 0) && (textOffsetY - scrollY < rec.height);
-                    if (isVisible) {
-                        if (s->textSelectedFramesCounter / 80 % 2 == 0) {
-                            DrawTextCodepoint(font, '_', (Vector2){ rec.x, rec.y + textOffsetY - scrollY }, fontSize, RED);
-                        }
-                    }
-                }
             }
             else {
                 if (!wordWrap && ((textOffsetX + glyphWidth) > rec.width)) {
@@ -1027,16 +1220,6 @@ static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Recta
                         DrawTextCodepoint(font, codepoint, (Vector2){ rec.x + textOffsetX, rec.y + textOffsetY - scrollY }, fontSize, isGlyphSelected? selectTint : tint);
                     }
                 }
-                
-                // Track cursor position
-                if (i == length - 1) {
-                    cursorY = textOffsetY;
-                    if (isVisible) {
-                        if (s->textSelectedFramesCounter / 80 % 2 == 0) {
-                            DrawTextCodepoint(font, '_', (Vector2){ rec.x + textOffsetX + glyphWidth, rec.y + textOffsetY - scrollY }, fontSize, RED);
-                        }
-                    }
-                }
             }
 
             if (wordWrap && (i == endLine)) {
@@ -1057,15 +1240,16 @@ static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Recta
 
     if (textOffsetY > maxTextOffsetY) maxTextOffsetY = textOffsetY;
 
-    // If text was completely empty, the loop didn't run, so cursor is at 0
-    if (length == 0) {
-        cursorY = 0.0f;
-        // Still draw the cursor when focused and visible
-        bool isVisible = (0.0f - scrollY + (float)font.baseSize*scaleFactor >= 0) && (0.0f - scrollY < rec.height);
-        if (isVisible && s->mouseOnTextBox != -1) {
-            if (s->textSelectedFramesCounter / 80 % 2 == 0) {
-                DrawTextCodepoint(font, '_', (Vector2){ rec.x, rec.y - scrollY }, fontSize, RED);
-            }
+    if (!cursorPositionFound && cursorIndex >= length) {
+        cursorX_screen = rec.x + textOffsetX;
+        cursorY_screen = rec.y + textOffsetY - scrollY;
+        cursorY = textOffsetY;
+    }
+
+    // Draw the cursor if focused
+    if (s->mouseOnTextBox != -1) {
+        if (s->textSelectedFramesCounter / 40 % 2 == 0) {
+            DrawRectangleRec((Rectangle){ cursorX_screen, cursorY_screen, 2.0f, (float)font.baseSize * scaleFactor }, RED);
         }
     }
 
@@ -1074,12 +1258,12 @@ static void DrawTextBoxedSelectable(State* s, Font font, const char *text, Recta
 } 
 
 // Draw text using font inside rectangle limits
-static void DrawTextBoxed(State* s, Font font, const char *text, Rectangle rec, float fontSize, float spacing, bool wordWrap, Color tint, float scrollY, float *outTextHeight, float *outCursorY) {
+static void DrawTextBoxed(State* s, Font font, const char *text, Rectangle rec, float fontSize, float spacing, bool wordWrap, Color tint, float scrollY, float *outTextHeight, float *outCursorY, int cursorIndex) {
     if (s->debug) DrawText(TextFormat("Selection start: %d, end: %d, length: %d", s->selectTextStart, s->selectTextEnd, s->selectTextLength), rec.x, rec.y - 20, 10, RED);
 
     int selStart = s->selectTextLength > 0 ? s->selectTextStart : s->selectTextStart + s->selectTextLength;
     int selLength = s->selectTextLength > 0 ? s->selectTextLength : -s->selectTextLength;
-    DrawTextBoxedSelectable(s, font, text, rec, fontSize, spacing, wordWrap, tint, selStart, selLength, BLACK, LCARS_RED_ORANGE, scrollY, outTextHeight, outCursorY);
+    DrawTextBoxedSelectable(s, font, text, rec, fontSize, spacing, wordWrap, tint, selStart, selLength, BLACK, LCARS_RED_ORANGE, scrollY, outTextHeight, outCursorY, cursorIndex);
 }
 
 void UpdateDrawFrame(State *s) {
@@ -1162,7 +1346,7 @@ void UpdateDrawFrame(State *s) {
                     DrawRectangleLines(e->position.x, e->position.y, e->width + 10, e->height, LCARS_BLUE);
                     Rectangle r = (Rectangle){e->position.x + 5, e->position.y + 5, e->width, e->height};
                     BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
-                    DrawTextBoxed(s, s->font, e->text, r, e->textSize, 2.0f, false, e->color, e->scrollY, &e->textHeight, &e->cursorY);
+                    DrawTextBoxed(s, s->font, e->text, r, e->textSize, 2.0f, false, e->color, e->scrollY, &e->textHeight, &e->cursorY, e->gapStart);
                     EndScissorMode();
 
                     // Render scrollbar
