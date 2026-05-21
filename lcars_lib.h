@@ -297,6 +297,20 @@ static void ReconstructText(Element* e) {
     e->textLen = totalLen;
 }
 
+static bool DeleteSelection(Element* e) {
+    if (e->selectTextStart >= 0 && e->selectTextEnd != e->selectTextStart) {
+        int selStart = e->selectTextLength > 0 ? e->selectTextStart : e->selectTextStart + e->selectTextLength;
+        int selLength = e->selectTextLength > 0 ? e->selectTextLength : -e->selectTextLength;
+        MoveGap(e, selStart);
+        e->gapEnd += selLength;
+        e->selectTextLength = 0;
+        e->selectTextStart = -1;
+        e->selectTextEnd = -1;
+        return true;
+    }
+    return false;
+}
+
 static int GetLines(const char* text, int* lineStarts, int maxLines) {
     int count = 0;
     lineStarts[count++] = 0;
@@ -795,6 +809,8 @@ void Update(State *s) {
                         SetMouseCursor(MOUSE_CURSOR_IBEAM);
                     }
 
+                    bool shiftDown = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+
                     // Get char pressed (unicode character) on the queue
                     int key = GetCharPressed();
                     bool textChanged = false;
@@ -805,6 +821,9 @@ void Update(State *s) {
                         // NOTE: Only allow keys in range [32..125]
                         if ((key >= 32) && (key <= 125) && (e->textLen < MAX_INPUT_CHARS))
                         {
+                            if (DeleteSelection(e)) {
+                                textChanged = true;
+                            }
                             GapInsertChar(e, (char)key);
                             textChanged = true;
                             e->snapToCursor = 2;
@@ -833,6 +852,9 @@ void Update(State *s) {
                     if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) && IsKeyPressed(KEY_V)) {
                         const char* clipboardText = GetClipboardText();
                         if (clipboardText) {
+                            if (DeleteSelection(e)) {
+                                textChanged = true;
+                            }
                             int clipboardTextLen = strlen(clipboardText);
                             printf("Clipboard text length: %d\n", clipboardTextLen);
                             for (int j = 0; j < clipboardTextLen; j++) {
@@ -846,6 +868,9 @@ void Update(State *s) {
                     }
 
                     if (IsKeyPressed(KEY_ENTER)) {
+                        if (DeleteSelection(e)) {
+                            textChanged = true;
+                        }
                         GapInsertChar(e, '\n');
                         textChanged = true;
                         e->snapToCursor = 2;
@@ -856,7 +881,20 @@ void Update(State *s) {
                         if (!e->isMovingCursorLeft) e->moveCursorLeftStartTime = GetTime();
                         e->isMovingCursorLeft = true;
                         if (IsKeyPressed(KEY_LEFT) || (GetTime() - e->moveCursorLeftStartTime > 0.4f && e->textSelectedFramesCounter % 2 == 0)) {
+                            if (shiftDown) {
+                                if (e->selectTextStart == -1) {
+                                    e->selectTextStart = e->gapStart;
+                                }
+                            } else {
+                                e->selectTextStart = -1;
+                                e->selectTextEnd = -1;
+                                e->selectTextLength = 0;
+                            }
                             MoveGap(e, e->gapStart - 1);
+                            if (shiftDown) {
+                                e->selectTextEnd = e->gapStart;
+                                e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+                            }
                             e->snapToCursor = 2;
                         }
                     } else {
@@ -867,7 +905,20 @@ void Update(State *s) {
                         if (!e->isMovingCursorRight) e->moveCursorRightStartTime = GetTime();
                         e->isMovingCursorRight = true;
                         if (IsKeyPressed(KEY_RIGHT) || (GetTime() - e->moveCursorRightStartTime > 0.4f && e->textSelectedFramesCounter % 2 == 0)) {
+                            if (shiftDown) {
+                                if (e->selectTextStart == -1) {
+                                    e->selectTextStart = e->gapStart;
+                                }
+                            } else {
+                                e->selectTextStart = -1;
+                                e->selectTextEnd = -1;
+                                e->selectTextLength = 0;
+                            }
                             MoveGap(e, e->gapStart + 1);
+                            if (shiftDown) {
+                                e->selectTextEnd = e->gapStart;
+                                e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+                            }
                             e->snapToCursor = 2;
                         }
                     } else {
@@ -901,6 +952,16 @@ void Update(State *s) {
                         int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
                         int col = e->gapStart - lineStarts[currLine];
                         
+                        if (shiftDown) {
+                            if (e->selectTextStart == -1) {
+                                e->selectTextStart = e->gapStart;
+                            }
+                        } else {
+                            e->selectTextStart = -1;
+                            e->selectTextEnd = -1;
+                            e->selectTextLength = 0;
+                        }
+
                         if (triggerMoveUp) {
                             if (currLine > 0) {
                                 int targetLineLen = lineStarts[currLine] - 1 - lineStarts[currLine - 1];
@@ -919,30 +980,68 @@ void Update(State *s) {
                                 MoveGap(e, lineStarts[currLine + 1] + targetCol);
                             }
                         }
+
+                        if (shiftDown) {
+                            e->selectTextEnd = e->gapStart;
+                            e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+                        }
                         e->snapToCursor = 2;
                     }
                     if (IsKeyPressed(KEY_HOME)) {
+                        if (shiftDown) {
+                            if (e->selectTextStart == -1) {
+                                e->selectTextStart = e->gapStart;
+                            }
+                        } else {
+                            e->selectTextStart = -1;
+                            e->selectTextEnd = -1;
+                            e->selectTextLength = 0;
+                        }
                         int lineStarts[1024];
                         int numLines = GetLines(e->text, lineStarts, 1024);
                         int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
                         MoveGap(e, lineStarts[currLine]);
+                        if (shiftDown) {
+                            e->selectTextEnd = e->gapStart;
+                            e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+                        }
                         e->snapToCursor = 2;
                     }
                     if (IsKeyPressed(KEY_END)) {
+                        if (shiftDown) {
+                            if (e->selectTextStart == -1) {
+                                e->selectTextStart = e->gapStart;
+                            }
+                        } else {
+                            e->selectTextStart = -1;
+                            e->selectTextEnd = -1;
+                            e->selectTextLength = 0;
+                        }
                         int lineStarts[1024];
                         int numLines = GetLines(e->text, lineStarts, 1024);
                         int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
                         int targetIndex = (currLine < numLines - 1) ? lineStarts[currLine + 1] - 1 : e->textLen;
                         MoveGap(e, targetIndex);
+                        if (shiftDown) {
+                            e->selectTextEnd = e->gapStart;
+                            e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+                        }
                         e->snapToCursor = 2;
                     }
 
                     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(mPos, scrollbarRec)) {
                         e->selectingText = true;
-                        e->selectTextStart = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos);
-                        e->selectTextEnd = e->selectTextStart;
-                        e->selectTextLength = 0;
-                        MoveGap(e, e->selectTextStart);
+                        int clickedIndex = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos);
+                        if (shiftDown) {
+                            if (e->selectTextStart == -1) {
+                                e->selectTextStart = e->gapStart;
+                            }
+                        } else {
+                            e->selectTextStart = clickedIndex;
+                        }
+                        e->selectTextEnd = clickedIndex;
+                        e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+                        MoveGap(e, clickedIndex);
                         e->snapToCursor = 2;
                     }
 
@@ -964,12 +1063,7 @@ void Update(State *s) {
                     }
 
                     if (e->selectTextStart >= 0 && e->selectTextEnd != e->selectTextStart && (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))) {
-                        int selStart = e->selectTextLength > 0 ? e->selectTextStart : e->selectTextStart + e->selectTextLength;
-                        int selLength = e->selectTextLength > 0 ? e->selectTextLength : -e->selectTextLength;
-                        MoveGap(e, selStart);
-                        e->gapEnd += selLength;
-                        e->selectTextLength = 0;
-                        e->selectTextStart = -1;
+                        DeleteSelection(e);
                         textChanged = true;
                         e->snapToCursor = 2;
                     } else if (IsKeyDown(KEY_BACKSPACE)) {
