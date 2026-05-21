@@ -582,55 +582,99 @@ static void clickOrHoverNotification(State* s, int i, char* elem_pretty_name) {
 }
 
 // Helper function to find the character index under the mouse
-int GetCharIndexAtMouse(const State* s, Font font, const char *text, Vector2 textPos, float fontSize, float spacing, Vector2 mousePos) {
-    int len = strlen(text);
-    float currentWidth = 0.0f;
-    int lineNr = 0;
+int GetCharIndexAtMouse(const State* s, Font font, const char *text, Vector2 textPos, float fontSize, float spacing, Vector2 mousePos, float recWidth) {
+    (void)s;
+    if (text == NULL) return 0;
+    int length = strlen(text);
+
+    float textOffsetY = 0.0f;
+    float textOffsetX = 0.0f;
 
     float scaleFactor = fontSize/(float)font.baseSize;
-    float textOffsetY = (font.baseSize + (float)font.baseSize/2)*scaleFactor;
-    
-    if (mousePos.x < textPos.x) return 0;
-    if (mousePos.y < textPos.y) return 0;
+    float lineHeight = (font.baseSize + (float)font.baseSize/2)*scaleFactor;
 
-    for (int i = 0; i < len; i++) {
+    int bestIndex = 0;
+    float bestYDist = 1e30f;
+    float bestXDist = 1e30f;
+
+    // Evaluate initial position (before the first character)
+    {
+        float absX = textPos.x + textOffsetX;
+        float absY = textPos.y + textOffsetY;
         
-        if (text[i] == '\n') {
-            lineNr++;
-            currentWidth = 0;
+        float yDist = 0.0f;
+        if (mousePos.y < absY) {
+            yDist = absY - mousePos.y;
+        } else if (mousePos.y > absY + lineHeight) {
+            yDist = mousePos.y - (absY + lineHeight);
+        } else {
+            yDist = 0.0f;
         }
 
-        // Measure text up to the CURRENT character
-        char subStr[2] = { text[i], '\0' };
-        Vector2 textMeasure = MeasureTextEx(font, subStr, fontSize, spacing);
-        float charWidth = textMeasure.x;
-        // float charHeight = textMeasure.y;
-        
-        // If the mouse hits the left half or right half of the character
-        if (s->debug) DrawRectangleLinesEx((Rectangle){ 
-            .x = textPos.x + currentWidth + spacing, 
-            .y = textPos.y + textOffsetY * lineNr, 
-            .width = charWidth + spacing, 
-            .height = textOffsetY 
-        }, 1, RED);
-
-        if (mousePos.y >= textPos.y + textOffsetY * lineNr && mousePos.y < textPos.y + textOffsetY * (lineNr + 1) && 
-            mousePos.x >= textPos.x + currentWidth + spacing && mousePos.x < textPos.x + currentWidth + charWidth + spacing) {
-            // printf("1\n");
-            // Snap to the closest edge of the character
-            if (s->debug) DrawRectangleLinesEx((Rectangle){ 
-                .x = textPos.x + currentWidth + spacing, 
-                .y = textPos.y + textOffsetY * lineNr, 
-                .width = charWidth + spacing, 
-                .height = textOffsetY 
-            }, 2, GREEN);
-            if (mousePos.x > textPos.x + currentWidth + (charWidth / 2.0f)) return i + 1;
-            return i;
-        }
-        currentWidth += charWidth + spacing;
+        float xDist = fabsf(mousePos.x - absX);
+        bestYDist = yDist;
+        bestXDist = xDist;
+        bestIndex = 0;
     }
 
-    return 0;
+    for (int i = 0; i < length; ) {
+        int codepointByteCount = 0;
+        int codepoint = GetCodepoint(&text[i], &codepointByteCount);
+        int index = GetGlyphIndex(font, codepoint);
+
+        if (codepoint == 0x3f) codepointByteCount = 1;
+
+        float glyphWidth = 0.0f;
+        if (codepoint != '\n') {
+            glyphWidth = (font.glyphs[index].advanceX == 0) ? font.recs[index].width*scaleFactor : font.glyphs[index].advanceX*scaleFactor;
+            if (i + codepointByteCount < length) glyphWidth = glyphWidth + spacing;
+        }
+
+        if (codepoint == '\n') {
+            textOffsetY += lineHeight;
+            textOffsetX = 0.0f;
+        } else {
+            if ((textOffsetX + glyphWidth) > recWidth) {
+                textOffsetY += lineHeight;
+                textOffsetX = 0.0f;
+            }
+            if ((textOffsetX != 0.0f) || (codepoint != ' ')) {
+                textOffsetX += glyphWidth;
+            }
+        }
+
+        i += codepointByteCount;
+
+        // Evaluate candidate boundary position after the current codepoint
+        {
+            float absX = textPos.x + textOffsetX;
+            float absY = textPos.y + textOffsetY;
+            
+            float yDist = 0.0f;
+            if (mousePos.y < absY) {
+                yDist = absY - mousePos.y;
+            } else if (mousePos.y > absY + lineHeight) {
+                yDist = mousePos.y - (absY + lineHeight);
+            } else {
+                yDist = 0.0f;
+            }
+
+            float xDist = fabsf(mousePos.x - absX);
+
+            if (yDist < bestYDist) {
+                bestYDist = yDist;
+                bestXDist = xDist;
+                bestIndex = i;
+            } else if (yDist == bestYDist) {
+                if (xDist < bestXDist) {
+                    bestXDist = xDist;
+                    bestIndex = i;
+                }
+            }
+        }
+    }
+
+    return bestIndex;
 }
 
 void Update(State *s) {
@@ -1073,7 +1117,7 @@ void Update(State *s) {
 
                     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(mPos, scrollbarRec)) {
                         e->selectingText = true;
-                        int clickedIndex = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos);
+                        int clickedIndex = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos, e->width);
                         if (shiftDown) {
                             if (e->selectTextStart == -1) {
                                 e->selectTextStart = e->gapStart;
@@ -1095,7 +1139,7 @@ void Update(State *s) {
                     }
 
                     if (e->selectingText) {
-                        int textEnd = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos);
+                        int textEnd = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos, e->width);
                         e->selectTextEnd = textEnd;
                         e->selectTextLength = e->selectTextEnd - e->selectTextStart;
 
@@ -1266,8 +1310,9 @@ static void DrawTextBoxedSelectable(State* s, Element *e, Font font, const char 
     bool cursorPositionFound = false;
 
     for (int i = 0, k = 0; i < length; i++, k++) {
+        int charByteIndex = i;
         // Track cursor position
-        if (k == cursorIndex) {
+        if (charByteIndex == cursorIndex) {
             cursorX_screen = rec.x + textOffsetX;
             cursorY_screen = rec.y + textOffsetY - e->scrollY;
             cursorY = textOffsetY;
@@ -1344,7 +1389,7 @@ static void DrawTextBoxedSelectable(State* s, Element *e, Font font, const char 
 
                 // Draw selection background
                 bool isGlyphSelected = false;
-                if ((selectStart >= 0) && (k >= selectStart) && (k < (selectStart + selectLength))) {
+                if ((selectStart >= 0) && (charByteIndex >= selectStart) && (charByteIndex < (selectStart + selectLength))) {
                     if (isVisible) {
                         DrawRectangleRec((Rectangle){ rec.x + textOffsetX - 1, rec.y + textOffsetY - e->scrollY, glyphWidth, (float)font.baseSize*scaleFactor }, selectBackTint);
                     }
