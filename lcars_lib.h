@@ -235,6 +235,10 @@ static void UpdateLogInDB(State* s, const char* newLog) {
     }
 }
 
+static bool IsWordChar(char c) {
+    return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_');
+}
+
 static void MoveGap(Element* e, int index) {
     if (index < 0) index = 0;
     int currentLen = e->gapStart + (e->textCapacity - e->gapEnd);
@@ -890,7 +894,26 @@ void Update(State *s) {
                                 e->selectTextEnd = -1;
                                 e->selectTextLength = 0;
                             }
-                            MoveGap(e, e->gapStart - 1);
+                            bool isWordJump = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
+                                              IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
+                            if (isWordJump) {
+                                int target = e->gapStart;
+                                if (target > 0) {
+                                    if (e->text[target - 1] == '\n') {
+                                        target--;
+                                    } else {
+                                        while (target > 0 && !IsWordChar(e->text[target - 1]) && e->text[target - 1] != '\n') {
+                                            target--;
+                                        }
+                                        while (target > 0 && IsWordChar(e->text[target - 1])) {
+                                            target--;
+                                        }
+                                    }
+                                }
+                                MoveGap(e, target);
+                            } else {
+                                MoveGap(e, e->gapStart - 1);
+                            }
                             if (shiftDown) {
                                 e->selectTextEnd = e->gapStart;
                                 e->selectTextLength = e->selectTextEnd - e->selectTextStart;
@@ -914,7 +937,26 @@ void Update(State *s) {
                                 e->selectTextEnd = -1;
                                 e->selectTextLength = 0;
                             }
-                            MoveGap(e, e->gapStart + 1);
+                            bool isWordJump = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
+                                              IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
+                            if (isWordJump) {
+                                int target = e->gapStart;
+                                if (target < e->textLen) {
+                                    if (e->text[target] == '\n') {
+                                        target++;
+                                    } else {
+                                        while (target < e->textLen && !IsWordChar(e->text[target]) && e->text[target] != '\n') {
+                                            target++;
+                                        }
+                                        while (target < e->textLen && IsWordChar(e->text[target])) {
+                                            target++;
+                                        }
+                                    }
+                                }
+                                MoveGap(e, target);
+                            } else {
+                                MoveGap(e, e->gapStart + 1);
+                            }
                             if (shiftDown) {
                                 e->selectTextEnd = e->gapStart;
                                 e->selectTextLength = e->selectTextEnd - e->selectTextStart;
