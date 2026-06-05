@@ -42,7 +42,7 @@ typedef struct Element {
     ElemKind kind;
     iVec2 position;
     Vector3 position3;
-    float width, height;
+    float *width, *height;
     Color color;
     Color originalColor;
     int elbowOrientation; // Only used if kind == ELBOW
@@ -84,6 +84,10 @@ typedef struct Element {
     bool draggingScrollbar;
     float dragStartY;
     float dragStartScrollY;
+    bool isDragging;
+    bool isResizing;
+    float dragOffsetX;
+    float dragOffsetY;
 } Element;
 
 typedef struct State {
@@ -93,7 +97,7 @@ typedef struct State {
     Color lcarsColor;
     float posX, posY, columnWidth, columnHeight, barWidth, barHeight, innerRadius;
     bool debug;
-    bool hide_controlls;
+    bool is_editing;
     int controllsX;
     int controllsY;
     bool textBoxEditMode;
@@ -346,7 +350,7 @@ Vector2 V2fromiVec2(iVec2 v) {
 
 void Init(State *s, bool firstInit) {
     s->debug = false;
-    s->hide_controlls = true; 
+    s->is_editing = false; 
     s->controllsX = 600;
     s->controllsY = 400;
     s->lcarsColor = (Color){ 204, 153, 204, 255 }; // Purple
@@ -393,11 +397,17 @@ void Init(State *s, bool firstInit) {
     int gapStart = textLen;
     int gapEnd = textCapacity;
 
+    float* w600h400 = malloc(2 * sizeof(float));
+    w600h400[0] = 600;
+    w600h400[1] = 400;
+
+    static float w600 = 600;
+    
     s->elements[s->numElements++] = (Element) {
         .kind=ELEM_TEXT_EDITOR,
         .position = { s->posX + s->columnWidth + s->innerRadius + 60, s->posY + s->barHeight + 80 },
-        .width = 600,
-        .height = 400,
+        .width = &w600,
+        .height = &w600h400[1],
         .color = LCARS_PURPLE,
         .originalColor = LCARS_PURPLE,
         .textSize = 20,
@@ -468,13 +478,17 @@ void Init(State *s, bool firstInit) {
     earthModel.transform = MatrixRotateX(DEG2RAD * 90.0f);
     // earthModel.transform = MatrixRotateY(DEG2RAD * 40.0f);
     // earthModel.transform = MatrixRotateZ(DEG2RAD * 90.0f);
-
+    
+    float* w300h300 = malloc(2 * sizeof(float));
+    w300h300[0] = 300;
+    w300h300[1] = 300;
+    
     s->elements[s->numElements++] = (Element){
         .kind=ELEM_SPHERE,
         .position3 = {0,0,0},
         .position = {950, 310}, // Used to create the render texture area where the 3d element is inside.
-        .width = 300,
-        .height = 300,
+        .width = &w300h300[0],
+        .height = &w300h300[1],
         .color = WHITE,
         .originalColor = WHITE,
         .model = earthModel,
@@ -484,6 +498,11 @@ void Init(State *s, bool firstInit) {
     GuiLoadStyle("style_cyber.rgs");
 
     for (int i=0; i<MAX_ELEMENTS; i++) {
+        Element e = s->elements[i];
+        if (ColorIsEqual(e.originalColor, (Color){0,0,0,0})) {
+            s->elements[i].originalColor = e.color;
+        }
+
         switch (s->elements[i].kind) {
             case ELEM_SPHERE: {
                 // Element e = s->elements[i];
@@ -497,7 +516,7 @@ void Init(State *s, bool firstInit) {
                 camera.projection = CAMERA_PERSPECTIVE;
                 e->camera = camera;
 
-                RenderTexture renderTexture = LoadRenderTexture(e->width, e->height);
+                RenderTexture renderTexture = LoadRenderTexture(*e->width, *e->height);
                 e->renderTexture = renderTexture;
                 break;
             }
@@ -522,44 +541,69 @@ void Reload(State *s, bool reset) {
 }
 
 void ReLayout(State *s) {
+    // Clone elements to preserve manually adjusted layouts and other elements
+    Element temp[MAX_ELEMENTS];
+    for (int i = 0; i < MAX_ELEMENTS; i++) {
+        temp[i] = s->elements[i];
+    }
+
     s->numElements = 0; // Clear existing elements before re-adding them with new layout
     int gap = 6;
 
-    float w[4] = {40, 140, 400, 40};
+    // float w[4] = {40, 140, 400, 40};
+    float *w = malloc(4 * sizeof(float));
+    w[0] = 40;
+    w[1] = 140;
+    w[2] = 400;
+    w[3] = 40;
 
     // Upper elbow
     int yu = s->posY - s->columnHeight - s->innerRadius - s->barHeight;
-
-    s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .elbowOrientation = 3, .position = {s->posX, yu - gap}, .width = s->columnWidth, .height = s->columnHeight, .color = LCARS_BLUE }; yu -= gap;
-    s->elements[s->numElements++] = (Element){ .kind = ELEM_RECTANGLE, .position = {s->posX, yu - 100 - gap}, .width = s->columnWidth, .height = 100, .color = LCARS_PURPLE, .text=s->elements[1].text, .textSize = s->elements[1].textSize}; yu -= 100;
+    
+    float* h100 = malloc(sizeof(float));
+    *h100 = 100;
+    s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .elbowOrientation = 3, .position = {s->posX, yu - gap}, .width = &s->columnWidth, .height = &s->columnHeight, .color = LCARS_BLUE }; yu -= gap;
+    s->elements[s->numElements++] = (Element){ .kind = ELEM_RECTANGLE, .position = {s->posX, yu - 100 - gap}, .width = &s->columnWidth, .height = h100, .color = LCARS_PURPLE, .text=s->elements[1].text, .textSize = s->elements[1].textSize}; yu -= 100;
 
     int xu = s->posX + s->columnWidth + s->barWidth;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[0], .height = s->barHeight, .color = LCARS_ORANGE }; xu += 40 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[1], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 140 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; xu += 400 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = w[3], .height = s->barHeight, .color = LCARS_RED_ORANGE }; xu += 40 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = &w[0], .height = &s->barHeight, .color = LCARS_ORANGE }; xu += 40 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = &w[1], .height = &s->barHeight, .color = LCARS_PURPLE }; xu += 140 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = &w[2], .height = &s->barHeight, .color = LCARS_PURPLE }; xu += 400 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = &w[3], .height = &s->barHeight, .color = LCARS_RED_ORANGE }; xu += 40 + gap;
 
-    // Lower elbow
-    s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .position = {s->posX, s->posY}, .width = s->columnWidth, .height = s->columnHeight, .color = LCARS_RED_ORANGE, .text="03-975883" , .textSize=20 };
+    // Lower elbo
+    s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .position = {s->posX, s->posY}, .width = &s->columnWidth, .height = &s->columnHeight, .color = LCARS_RED_ORANGE, .text="03-975883" , .textSize=20 };
     int y = s->posY + s->columnHeight + s->barHeight + s->innerRadius;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 200, .color = LCARS_RED_ORANGE, .text="04-785466", .textSize=20 }; y = y + 200 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 60, .color = LCARS_ORANGE, .text="05-423512", .textSize=20 }; y = y + 60 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = s->columnWidth, .height = 250, .color = LCARS_ORANGE, .text="06-572983", .textSize=20 }; y = y + 250 + gap;
+
+    float *h200_60_250 = malloc(3 * sizeof(float));
+    h200_60_250[0] = 200;
+    h200_60_250[1] = 60;
+    h200_60_250[2] = 250;
+
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &h200_60_250[0], .color = LCARS_RED_ORANGE, .text="04-785466", .textSize=20 }; y = y + 200 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &h200_60_250[1], .color = LCARS_ORANGE, .text="05-423512", .textSize=20 }; y = y + 60 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &h200_60_250[2], .color = LCARS_ORANGE, .text="06-572983", .textSize=20 }; y = y + 250 + gap;
 
     int x = s->posX + s->columnWidth + s->barWidth;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = w[0], .height = s->barHeight, .color = LCARS_YELLOW, }; x = x + 40 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = w[1], .height = s->barHeight / 2, .color = LCARS_YELLOW }; x = x + 140 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = w[2], .height = s->barHeight, .color = LCARS_PURPLE }; x = x + 400 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = w[3], .height = s->barHeight, .color = LCARS_ORANGE }; x = x + 40 + gap;
+    float* halfBarHeight = malloc(sizeof(float));
+    halfBarHeight[0] = s->barHeight / 2;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[0], .height = &s->barHeight, .color = LCARS_YELLOW, }; x = x + 40 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[1], .height = halfBarHeight, .color = LCARS_YELLOW }; x = x + 140 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[2], .height = &s->barHeight, .color = LCARS_PURPLE }; x = x + 400 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[3], .height = &s->barHeight, .color = LCARS_ORANGE }; x = x + 40 + gap;
 
-    int buttonHeight = 50;
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = 210, .height = buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = 210, .height = buttonHeight, .color = LCARS_BLUE, .text="(LC+e)dit 0129-86" ,.textSize=20};
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - buttonHeight  }, .width = 210, .height = buttonHeight, .color = LCARS_BLUE, .text="(LC+r)eset 7232-83", .textSize=20 };
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight  }, .width = 210, .height = buttonHeight, .color = LCARS_ORANGE, .text="1014-819", .textSize=20 };
+    float *buttonHeight = malloc(sizeof(float));
+    *buttonHeight = 50;
+    float* w210 = malloc(sizeof(float));
+    *w210 = 210;
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * *buttonHeight - 10 }, .width = w210, .height = buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * *buttonHeight - 10 }, .width = w210, .height = buttonHeight, .color = LCARS_BLUE, .text="(LC+e)dit 0129-86" ,.textSize=20};
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - *buttonHeight  }, .width = w210, .height = buttonHeight, .color = LCARS_BLUE, .text="(LC+r)eset 7232-83", .textSize=20 };
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - *buttonHeight  }, .width = w210, .height = buttonHeight, .color = LCARS_ORANGE, .text="1014-819", .textSize=20 };
 
     s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { x - 220 - 220 - 20, yu }, .color = LCARS_YELLOW, .textSize = 48, .text="LCARS ACCESS 441" };
     // s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight - s->barHeight - 40 - 10 }, .color = LCARS_YELLOW, .textSize = 20, .text="LShift to move camera perspective with mouse\nLShift + W,A,S,D to move object\n" };
+
 }
 
 //  void updateNotification(State* s, const char* notificationText) {
@@ -677,30 +721,120 @@ int GetCharIndexAtMouse(const State* s, Font font, const char *text, Vector2 tex
     return bestIndex;
 }
 
+static Rectangle GetElementBoundingBox(const Element *e) {
+    // printf("Getting bounding box for element at position (%d, %d)\n", e->position.x, e->position.y);
+    // printf("Element kind: %d\n", e->kind);
+    float w = 0;
+    float h = 0;
+    if (e->kind == ELEM_TEXT) {
+        if (e->width == NULL) w = MeasureText(e->text ? e->text : "", e->textSize);
+        if (e->height == NULL) h = e->textSize;
+    } else {
+        w = *e->width;
+        h = *e->height;
+    }
+    return (Rectangle){ (float)e->position.x, (float)e->position.y, w, h };
+}
+
 void Update(State *s) {
     Vector2 mPos = GetMousePosition();
     SetMouseCursor(MOUSE_CURSOR_DEFAULT);
     // UpdateCamera(&s->camera, CAMERA_ORBITAL);
 
-    ReLayout(s);
+    // ReLayout(s);
+
+    // Handle element dragging and resizing
+    int draggingIdx = -1;
+    int resizingIdx = -1;
+    for (int i = 0; i < MAX_ELEMENTS; i++) {
+        if (s->elements[i].kind == ELEM_NOTHING) continue;
+        if (s->elements[i].isDragging) draggingIdx = i;
+        if (s->elements[i].isResizing) resizingIdx = i;
+    }
+
+    if (draggingIdx != -1) {
+        Element *e = &s->elements[draggingIdx];
+        SetMouseCursor(MOUSE_CURSOR_RESIZE_ALL);
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            e->position.x = (int)(mPos.x - e->dragOffsetX);
+            e->position.y = (int)(mPos.y - e->dragOffsetY);
+        } else {
+            e->isDragging = false;
+        }
+    } else if (resizingIdx != -1) {
+        Element *e = &s->elements[resizingIdx];
+        SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            float newWidth = mPos.x - e->position.x - e->dragOffsetX;
+            float newHeight = mPos.y - e->position.y - e->dragOffsetY;
+            if (newWidth < 20.0f) newWidth = 20.0f;
+            if (newHeight < 20.0f) newHeight = 20.0f;
+
+            // Recreate render texture for sphere if dimensions changed
+            if (e->kind == ELEM_SPHERE && ((int)newWidth != (int)*e->width || (int)newHeight != (int)*e->height)) {
+                UnloadRenderTexture(e->renderTexture);
+                e->renderTexture = LoadRenderTexture((int)newWidth, (int)newHeight);
+            }
+
+            *e->width = newWidth;
+            *e->height = newHeight;
+        } else {
+            e->isResizing = false;
+        }
+    } else {
+        // Find which element to interact with (reverse order for top-most)
+        for (int i = MAX_ELEMENTS - 1; i >= 0; i--) {
+            Element *e = &s->elements[i];
+            if (e->kind == ELEM_NOTHING) continue;
+
+            Rectangle r = GetElementBoundingBox(e);
+
+            // Drag handle at top-left
+            Rectangle dragHandle = { r.x - 8, r.y - 8, 16, 16 };
+            // Resize handle at bottom-right
+            Rectangle resizeHandle = { r.x + r.width - 8, r.y + r.height - 8, 16, 16 };
+
+            if (CheckCollisionPointRec(mPos, resizeHandle)) {
+                SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    e->isResizing = true;
+                    e->dragOffsetX = mPos.x - (e->position.x + *e->width);
+                    e->dragOffsetY = mPos.y - (e->position.y + *e->height);
+                    break;
+                }
+            } else if (CheckCollisionPointRec(mPos, dragHandle)) {
+                SetMouseCursor(MOUSE_CURSOR_RESIZE_ALL);
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    e->isDragging = true;
+                    e->dragOffsetX = mPos.x - e->position.x;
+                    e->dragOffsetY = mPos.y - e->position.y;
+                    break;
+                }
+            }
+        }
+    }
     for (int i = 0; i < MAX_ELEMENTS; i++) {
         Element *e = &s->elements[i];
         switch (s->elements[i].kind) {
             case ELEM_RECTANGLE:
-                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width ? s->elements[i].width : 0, .height = s->elements[i].height})) {
-                    s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
+                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *(s->elements[i].width) ? *(s->elements[i].width) : 0, .height = *(s->elements[i].height)})) {
+                    s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
                     clickOrHoverNotification(s, i, "element");
+                } else {
+                    s->elements[i].color = s->elements[i].originalColor;
                 }
                 break;
             case ELEM_ELBOW:
                 switch (s->elements[i].elbowOrientation) {
                     case 0: 
                         if (
-                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height + s->barHeight + s->innerRadius}) ||
+                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *(s->elements[i].width), .height = *(s->elements[i].height) + s->barHeight + s->innerRadius}) ||
                             CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->columnWidth + s->barWidth, .height = s->barHeight})
                         ) {
-                            s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
+                            s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
                             clickOrHoverNotification(s, i, "elbow element");
+                        } else {
+                            s->elements[i].color = s->elements[i].originalColor;
                         }
                         break;
                     case 1: 
@@ -709,18 +843,20 @@ void Update(State *s) {
                     case 2: break;
                     case 3: 
                         if (
-                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height + s->barHeight + s->innerRadius}) ||
+                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *(s->elements[i].width), .height = *(s->elements[i].height) + s->barHeight + s->innerRadius}) ||
                             CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y + s->columnHeight + s->innerRadius, .width = s->columnWidth + s->barWidth, .height = s->barHeight})
                         ) {
-                            s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
+                            s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
                             clickOrHoverNotification(s, i, "elbow element");
+                        } else {
+                            s->elements[i].color = s->elements[i].originalColor;
                         }
                         break;
                 }
                 break;
             case ELEM_BUTTON:
-                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height})) {
-                    s->elements[i].color = ColorBrightness(s->elements[i].color, 0.2f);
+                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *s->elements[i].width, .height = *s->elements[i].height})) {
+                    s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
                     clickOrHoverNotification(s, i, "button element");
                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                         if (e->text) {
@@ -728,27 +864,29 @@ void Update(State *s) {
                                 s->debug = !s->debug;
                             }
                             if (strstr(e->text, "(LC+e)dit")) {
-                                s->hide_controlls = !s->hide_controlls;
+                                s->is_editing = !s->is_editing;
                             }
                             if (strstr(e->text, "(LC+r)eset")) {
                                 Reload(s, true);
                             }
                         }
                     }
+                } else {
+                    s->elements[i].color = s->elements[i].originalColor;
                 }
                 break;
 
             case ELEM_TEXT: break;
             case ELEM_TEXT_EDITOR: {
-                float scrollbarX = e->position.x + e->width + 25;
+                float scrollbarX = e->position.x + *e->width + 25;
                 float scrollbarY = e->position.y;
                 float scrollbarWidth = 18.0f;
-                float scrollbarHeight = e->height;
-                Rectangle activeRec = (Rectangle){.x=e->position.x, .y=e->position.y, .width = e->width + 55, .height = e->height};
+                float scrollbarHeight = *e->height;
+                Rectangle activeRec = (Rectangle){.x=e->position.x, .y=e->position.y, .width = *e->width + 55, .height = *e->height};
                 
                 if (CheckCollisionPointRec(GetMousePosition(), activeRec)) { 
                     clickOrHoverNotification(s, i, "text box element");
-                    if (!e->isFocused) e->color = ColorBrightness(e->color, 0.2f);
+                    if (!e->isFocused) e->color = ColorBrightness(e->originalColor, 0.2f);
                     e->isFocused = true;
 
                     // Mouse wheel scrolling
@@ -756,7 +894,7 @@ void Update(State *s) {
                     if (wheelMove != 0.0f) {
                         e->scrollY -= wheelMove * 30.0f; // Scroll speed: 30 pixels per wheel tick
                         if (e->scrollY < 0.0f) e->scrollY = 0.0f;
-                        float maxScroll = e->textHeight - e->height;
+                        float maxScroll = e->textHeight - *e->height;
                         if (maxScroll < 0.0f) maxScroll = 0.0f;
                         if (e->scrollY > maxScroll) e->scrollY = maxScroll;
                     }
@@ -773,16 +911,16 @@ void Update(State *s) {
                             if (e->scrollY < 0.0f) e->scrollY = 0.0f;
                         } else if (CheckCollisionPointRec(mPos, downButton)) {
                             e->scrollY += 30.0f;
-                            float maxScroll = e->textHeight - e->height;
+                            float maxScroll = e->textHeight - *e->height;
                             if (maxScroll < 0.0f) maxScroll = 0.0f;
                             if (e->scrollY > maxScroll) e->scrollY = maxScroll;
                         } else if (CheckCollisionPointRec(mPos, track)) {
-                            float visibleRatio = e->height / e->textHeight;
+                            float visibleRatio = *e->height / e->textHeight;
                             if (visibleRatio > 1.0f) visibleRatio = 1.0f;
                             float handleHeight = visibleRatio * track.height;
                             if (handleHeight < 20.0f) handleHeight = 20.0f;
 
-                            float scrollRange = e->textHeight - e->height;
+                            float scrollRange = e->textHeight - *e->height;
                             float handleY = track.y;
                             if (scrollRange > 0.0f) {
                                 handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
@@ -822,8 +960,8 @@ void Update(State *s) {
                 // Active dragging logic (independent of mouse hovering over activeRec)
                 if (e->draggingScrollbar) {
                     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-                        float trackHeight = e->height - 2 * scrollbarWidth - 10;
-                        float visibleRatio = e->height / e->textHeight;
+                        float trackHeight = *e->height - 2 * scrollbarWidth - 10;
+                        float visibleRatio = *e->height / e->textHeight;
                         if (visibleRatio > 1.0f) visibleRatio = 1.0f;
                         float handleHeight = visibleRatio * trackHeight;
                         if (handleHeight < 20.0f) handleHeight = 20.0f;
@@ -831,13 +969,13 @@ void Update(State *s) {
                         float dragRange = trackHeight - handleHeight;
                         if (dragRange > 0.0f) {
                             float deltaY = GetMousePosition().y - e->dragStartY;
-                            float scrollRange = e->textHeight - e->height;
+                            float scrollRange = e->textHeight - *e->height;
                             float deltaScrollY = (deltaY / dragRange) * scrollRange;
                             e->scrollY = e->dragStartScrollY + deltaScrollY;
 
                             // Clamp
                             if (e->scrollY < 0.0f) e->scrollY = 0.0f;
-                            float maxScroll = e->textHeight - e->height;
+                            float maxScroll = e->textHeight - *e->height;
                             if (maxScroll < 0.0f) maxScroll = 0.0f;
                             if (e->scrollY > maxScroll) e->scrollY = maxScroll;
                         }
@@ -853,7 +991,7 @@ void Update(State *s) {
 
                     if (CheckCollisionPointRec(mPos, scrollbarRec)) {
                         SetMouseCursor(MOUSE_CURSOR_DEFAULT);
-                    } else {
+                    } else if (draggingIdx == -1 && resizingIdx == -1) {
                         SetMouseCursor(MOUSE_CURSOR_IBEAM);
                     }
 
@@ -1117,7 +1255,7 @@ void Update(State *s) {
 
                     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(mPos, scrollbarRec)) {
                         e->selectingText = true;
-                        int clickedIndex = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos, e->width);
+                        int clickedIndex = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos, *e->width);
                         if (shiftDown) {
                             if (e->selectTextStart == -1) {
                                 e->selectTextStart = e->gapStart;
@@ -1139,7 +1277,7 @@ void Update(State *s) {
                     }
 
                     if (e->selectingText) {
-                        int textEnd = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos, e->width);
+                        int textEnd = GetCharIndexAtMouse(s, s->font, e->text, (Vector2){ e->position.x + 5, e->position.y + 5 - e->scrollY }, e->textSize, 2.0, mPos, *e->width);
                         e->selectTextEnd = textEnd;
                         e->selectTextLength = e->selectTextEnd - e->selectTextStart;
 
@@ -1184,8 +1322,8 @@ void Update(State *s) {
                     if (e->snapToCursor > 0) {
                         e->snapToCursor--;
                         float lineHeight = (s->font.baseSize + (float)s->font.baseSize/2) * (e->textSize / (float)s->font.baseSize);
-                        if (e->cursorY > e->scrollY + e->height - lineHeight) {
-                            e->scrollY = e->cursorY - e->height + lineHeight;
+                        if (e->cursorY > e->scrollY + *e->height - lineHeight) {
+                            e->scrollY = e->cursorY - *e->height + lineHeight;
                         } else if (e->cursorY < e->scrollY) {
                             e->scrollY = e->cursorY;
                         }
@@ -1193,7 +1331,7 @@ void Update(State *s) {
                     
                     // Clamp scrollY to valid range
                     if (e->scrollY < 0.0f) e->scrollY = 0.0f;
-                    float maxScroll = e->textHeight - e->height;
+                    float maxScroll = e->textHeight - *e->height;
                     if (maxScroll < 0.0f) maxScroll = 0.0f;
                     if (e->scrollY > maxScroll) e->scrollY = maxScroll;
                 } else {
@@ -1205,7 +1343,7 @@ void Update(State *s) {
                 // Element e = s->elements[i];
                 // s->ray = GetScreenToWorldRay(GetMousePosition(), e->camera);
                 // s->collision = GetRayCollisionSphere(s->ray, e->position3, 3);
-                bool isHovering = CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->elements[i].width, .height = s->elements[i].height});
+                bool isHovering = CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *s->elements[i].width, .height = *s->elements[i].height});
 
                 if (isHovering) {
                 // if (s->collision.hit) {
@@ -1451,7 +1589,7 @@ static void DrawTextBoxed(State* s, Element *e, Font font, const char *text, Rec
 void UpdateDrawFrame(State *s) {
     if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_D)) {s->debug = !s->debug;}
     if (IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_R)) { Init(s, false); }
-    if (IsKeyDown(KEY_LEFT_CONTROL) && (IsKeyPressed(KEY_H) || IsKeyPressed(KEY_E))) {s->hide_controlls = !s->hide_controlls;}
+    if (IsKeyDown(KEY_LEFT_CONTROL) && (IsKeyPressed(KEY_H) || IsKeyPressed(KEY_E))) {s->is_editing = !s->is_editing;}
     // if (IsKeyDown(KEY_LEFT_CONTROL)) { 
     //     if (s->notificationOnElemIdx != -2) {
     //         snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Changing Perspective]");
@@ -1513,29 +1651,30 @@ void UpdateDrawFrame(State *s) {
             if (e->kind == ELEM_NOTHING) continue; // Skip uninitialized elements
             switch (e->kind) {
                 case ELEM_RECTANGLE:
-                    DrawRectangle(e->position.x, e->position.y, e->width, e->height, e->color);
+                    DrawRectangle(e->position.x, e->position.y, *e->width, *e->height, e->color);
                     break;
                 case ELEM_ELBOW:
-                    DrawElbow(e->position.x, e->position.y, e->width, e->height, s->barWidth, s->barHeight, s->innerRadius, e->color, e->elbowOrientation, s->debug);
+                    DrawElbow(e->position.x, e->position.y, *e->width, *e->height, s->barWidth, s->barHeight, s->innerRadius, e->color, e->elbowOrientation, s->debug);
                     break;
                 case ELEM_BUTTON:
-                    DrawRectangleRounded((Rectangle){.x=e->position.x, .y=e->position.y, .width=e->width, .height=e->height}, 0.9f, 4, e->color);
+                    // printf("Drawing button element %d at (%.2d, %.2d) with size (%.2f, %.2f)\n", i, e->position.x, e->position.y, *e->width, *e->height);
+                    DrawRectangleRounded((Rectangle){.x=e->position.x, .y=e->position.y, .width=*e->width, .height=*e->height}, 0.9f, 4, e->color);
                     break;
                 case ELEM_TEXT:
                     DrawText(e->text, e->position.x, e->position.y, e->textSize, e->color);
                     break;
                 case ELEM_TEXT_EDITOR: {
-                    DrawRectangleLines(e->position.x, e->position.y, e->width + 10, e->height, LCARS_BLUE);
-                    Rectangle r = (Rectangle){e->position.x + 5, e->position.y + 5, e->width, e->height};
+                    DrawRectangleLines(e->position.x, e->position.y, *e->width + 10, *e->height, LCARS_BLUE);
+                    Rectangle r = (Rectangle){e->position.x + 5, e->position.y + 5, *e->width, *e->height};
                     BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
                     DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false, e->color, &e->textHeight, &e->cursorY, e->gapStart);
                     EndScissorMode();
 
                     // Render scrollbar
-                    float scrollbarX = e->position.x + e->width + 25;
+                    float scrollbarX = e->position.x + *e->width + 25;
                     float scrollbarY = e->position.y;
                     float scrollbarWidth = 18.0f;
-                    float scrollbarHeight = e->height;
+                    float scrollbarHeight = *e->height;
 
                     Rectangle upButton = (Rectangle){ scrollbarX, scrollbarY, scrollbarWidth, scrollbarWidth };
                     Rectangle downButton = (Rectangle){ scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth, scrollbarWidth, scrollbarWidth };
@@ -1553,12 +1692,12 @@ void UpdateDrawFrame(State *s) {
                     DrawRectangleRounded(track, 0.5f, 4, (Color){ 30, 30, 30, 255 });
 
                     // Calculate and draw handle
-                    float visibleRatio = e->height / e->textHeight;
+                    float visibleRatio = *e->height / e->textHeight;
                     if (visibleRatio > 1.0f) visibleRatio = 1.0f;
                     float handleHeight = visibleRatio * track.height;
                     if (handleHeight < 20.0f) handleHeight = 20.0f;
 
-                    float scrollRange = e->textHeight - e->height;
+                    float scrollRange = e->textHeight - *e->height;
                     float handleY = track.y;
                     if (scrollRange > 0.0f) {
                         handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
@@ -1572,8 +1711,8 @@ void UpdateDrawFrame(State *s) {
                     break;
                 }
                 case ELEM_SPHERE: {
-                    if (s->hide_controlls) {
-                        DrawTextureRec(e->renderTexture.texture, (Rectangle){0,0, e->width, e->height}, (Vector2){ e->position.x, e->position.y }, WHITE);
+                    // if (s->is_editing) {
+                        DrawTextureRec(e->renderTexture.texture, (Rectangle){0,0, *e->width, *e->height}, (Vector2){ e->position.x, e->position.y }, WHITE);
                         
                         if (s->debug) {
                             // DrawRectangle(e->position.x- 5, e->position.y + 5, e->width + 10, e->height + 10, RED);
@@ -1591,7 +1730,7 @@ void UpdateDrawFrame(State *s) {
                             DrawText(TextFormat("Camera FOV: %.2f", e->camera.fovy), screenPos.x, screenPos.y + 100, 10, WHITE);
                             DrawText(TextFormat("Camera Projection: %s", e->camera.projection == CAMERA_PERSPECTIVE ? "Perspective" : "Orthographic"), screenPos.x, screenPos.y + 120, 10, WHITE);
                         }
-                    }
+                    // }
                     break;
                 }
                 case ELEM_NOTHING:
@@ -1602,9 +1741,9 @@ void UpdateDrawFrame(State *s) {
             if (e->text && e->kind != ELEM_TEXT && e->kind != ELEM_TEXT_EDITOR) {
                 int textWidth = MeasureText(e->text, e->textSize);
                 if (e->kind == ELEM_ELBOW) {
-                    DrawText(e->text, e->position.x + 3 * (e->width - textWidth) / 4, e->position.y + s->barHeight + s->innerRadius + (e->height - e->textSize) / 2, e->textSize, BLACK);
+                    DrawText(e->text, e->position.x + 3 * (*e->width - textWidth) / 4, e->position.y + s->barHeight + s->innerRadius + (*e->height - e->textSize) / 2, e->textSize, BLACK);
                 } else {
-                    DrawText(e->text, e->position.x + 3 * (e->width - textWidth) / 4, e->position.y + (e->height - e->textSize) / 2 + 10, e->textSize, BLACK);
+                    DrawText(e->text, e->position.x + 3 * (*e->width - textWidth) / 4, e->position.y + (*e->height - e->textSize) / 2 + 10, e->textSize, BLACK);
                 }
             }
 
@@ -1617,33 +1756,71 @@ void UpdateDrawFrame(State *s) {
             s->notificationOnElemIdx = -1;
         }
 
-        if (!s->hide_controlls) {
-            int i = 0;
-            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col W ", sprintf_static(s, i, "%.0f", s->columnWidth) ,         &s->columnWidth , 0, 300); i++;
-            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar H ", sprintf_static(s, i, "%.0f", s->barHeight)   , &s->barHeight   , 0, 300); i++;
-            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Radius", sprintf_static(s, i, "%.0f", s->innerRadius) , &s->innerRadius , 0, 50 ); i++;
-            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col H ", sprintf_static(s, i, "%.0f", s->columnHeight), &s->columnHeight, 0, 600); i++;
-            GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar W ", sprintf_static(s, i, "%.0f", s->barWidth)    , &s->barWidth    , 0, 600); i++;
-            GuiToggle(   (Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Debug (d)", &s->debug); i++;
-            GuiToggle(   (Rectangle){.x=s->controllsX + 130, .y=s->controllsY + (i - 1) * 30, .width=120, .height=20}, "Hide controlls (h)",&s->hide_controlls);
-
-            char* code = sprintf_static(s, 
-                i, "DrawElbow(%.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, lcarsColor, %s);", 
-                s->posX, s->posY, s->columnWidth, s->columnHeight, s->barWidth, s->barHeight, s->innerRadius, s->debug ? "true" : "false"
-            );
-
-            if (GuiTextBox((Rectangle){.x=s->controllsX, .y=s->controllsY + i * 30, .width=500, .height=50},
-                        code,
-                        22,
-                        0)) {s->textBoxEditMode = !s->textBoxEditMode;} 
-            i+=2;
-        }
+        // if (!s->is_editing) {
+        //     int i = 0;
+        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col W ", sprintf_static(s, i, "%.0f", s->columnWidth) ,         &s->columnWidth , 0, 300); i++;
+        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar H ", sprintf_static(s, i, "%.0f", s->barHeight)   , &s->barHeight   , 0, 300); i++;
+        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Radius", sprintf_static(s, i, "%.0f", s->innerRadius) , &s->innerRadius , 0, 50 ); i++;
+        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col H ", sprintf_static(s, i, "%.0f", s->columnHeight), &s->columnHeight, 0, 600); i++;
+        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar W ", sprintf_static(s, i, "%.0f", s->barWidth)    , &s->barWidth    , 0, 600); i++;
+        //     GuiToggle(   (Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Debug (d)", &s->debug); i++;
+        //     GuiToggle(   (Rectangle){.x=s->controllsX + 130, .y=s->controllsY + (i - 1) * 30, .width=120, .height=20}, "Hide controlls (h)",&s->is_editing);
+        //
+        //     char* code = sprintf_static(s, 
+        //         i, "DrawElbow(%.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, lcarsColor, %s);", 
+        //         s->posX, s->posY, s->columnWidth, s->columnHeight, s->barWidth, s->barHeight, s->innerRadius, s->debug ? "true" : "false"
+        //     );
+        //
+        //     if (GuiTextBox((Rectangle){.x=s->controllsX, .y=s->controllsY + i * 30, .width=500, .height=50},
+        //                 code,
+        //                 22,
+        //                 0)) {s->textBoxEditMode = !s->textBoxEditMode;} 
+        //     i+=2;
+        // }
 
         if (s->debug) {
             DrawFPS(10, 10);
             DrawText(TextFormat("x:%.2f, y:%.2f", mPos.x, mPos.y), mPos.x + 20, mPos.y, 10, GREEN);
         }
         // DrawText(TextFormat("Rotation: %.2f", s->elements[21].rotation), 10, 30, 10, WHITE);
+
+        // Draw interactive handles on top of all elements
+        if (s->is_editing) {
+            Vector2 mousePos = GetMousePosition();
+            for (int i = 0; i < MAX_ELEMENTS; i++) {
+                Element *e = &s->elements[i];
+                if (e->kind == ELEM_NOTHING) continue;
+
+                Rectangle r = GetElementBoundingBox(e);
+                bool isElementHovered = CheckCollisionPointRec(mousePos, r);
+
+                // Drag handle at top-left
+                Rectangle dragHandle = { r.x - 8, r.y - 8, 16, 16 };
+                // Resize handle at bottom-right
+                Rectangle resizeHandle = { r.x + r.width - 8, r.y + r.height - 8, 16, 16 };
+
+                bool isHoveredDrag = CheckCollisionPointRec(mousePos, dragHandle);
+                bool isHoveredResize = CheckCollisionPointRec(mousePos, resizeHandle);
+
+                // Show handles if hovering the element, or if dragging/resizing it
+                if (isElementHovered || e->isDragging || e->isResizing || isHoveredDrag || isHoveredResize) {
+                    // Draw outline around element
+                    DrawRectangleLinesEx((Rectangle){ r.x - 2, r.y - 2, r.width + 4, r.height + 4 }, 1.0f, (Color){ 255, 255, 255, 128 });
+
+                    // Draw drag handle (top-left circle)
+                    DrawCircle(r.x, r.y, 6, (e->isDragging || isHoveredDrag) ? LCARS_YELLOW : (Color){ 155, 155, 255, 200 });
+                    DrawCircleLines(r.x, r.y, 6, BLACK);
+
+                    // Draw resize handle (bottom-right triangle)
+                    DrawTriangle(
+                        (Vector2){ r.x + r.width - 10, r.y + r.height },
+                        (Vector2){ r.x + r.width, r.y + r.height },
+                        (Vector2){ r.x + r.width, r.y + r.height - 10 },
+                        (e->isResizing || isHoveredResize) ? LCARS_YELLOW : (Color){ 255, 154, 102, 200 }
+                    );
+                }
+            }
+        }
 
     EndDrawing();
 }
