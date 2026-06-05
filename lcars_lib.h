@@ -1,7 +1,7 @@
+#define _POSIX_C_SOURCE 200809L
 // #include <_locale_posix2008.h>
 #include <stdio.h>
 #include <stdlib.h>
-#define _POSIX_C_SOURCE 200809L
 #include <string.h>
 #include "raygui.h"
 #include "raylib.h"
@@ -139,6 +139,19 @@ char* sprintf_static(State*s, int index, const char* fmt, ...) {
 }
 
 static void ReLayout(State *s);
+
+// Shared layout static variables
+static float w600 = 600;
+static float h400 = 400;
+static float w300 = 300;
+static float h300 = 300;
+
+static float w[4];
+static float h100;
+static float h200_60_250[3];
+static float halfBarHeight;
+static float buttonHeight;
+static float w210;
 // static void updateNotification(State* s, const char* notificationText);
 
 static int sqlite_callback(void *NotUsed, int argc, char **argv, char **azColName) {
@@ -397,17 +410,12 @@ void Init(State *s, bool firstInit) {
     int gapStart = textLen;
     int gapEnd = textCapacity;
 
-    float* w600h400 = malloc(2 * sizeof(float));
-    w600h400[0] = 600;
-    w600h400[1] = 400;
-
-    static float w600 = 600;
     
     s->elements[s->numElements++] = (Element) {
         .kind=ELEM_TEXT_EDITOR,
         .position = { s->posX + s->columnWidth + s->innerRadius + 60, s->posY + s->barHeight + 80 },
         .width = &w600,
-        .height = &w600h400[1],
+        .height = &h400,
         .color = LCARS_PURPLE,
         .originalColor = LCARS_PURPLE,
         .textSize = 20,
@@ -479,16 +487,13 @@ void Init(State *s, bool firstInit) {
     // earthModel.transform = MatrixRotateY(DEG2RAD * 40.0f);
     // earthModel.transform = MatrixRotateZ(DEG2RAD * 90.0f);
     
-    float* w300h300 = malloc(2 * sizeof(float));
-    w300h300[0] = 300;
-    w300h300[1] = 300;
     
     s->elements[s->numElements++] = (Element){
         .kind=ELEM_SPHERE,
         .position3 = {0,0,0},
         .position = {950, 310}, // Used to create the render texture area where the 3d element is inside.
-        .width = &w300h300[0],
-        .height = &w300h300[1],
+        .width = &w300,
+        .height = &h300,
         .color = WHITE,
         .originalColor = WHITE,
         .model = earthModel,
@@ -550,8 +555,6 @@ void ReLayout(State *s) {
     s->numElements = 0; // Clear existing elements before re-adding them with new layout
     int gap = 6;
 
-    // float w[4] = {40, 140, 400, 40};
-    float *w = malloc(4 * sizeof(float));
     w[0] = 40;
     w[1] = 140;
     w[2] = 400;
@@ -560,10 +563,9 @@ void ReLayout(State *s) {
     // Upper elbow
     int yu = s->posY - s->columnHeight - s->innerRadius - s->barHeight;
     
-    float* h100 = malloc(sizeof(float));
-    *h100 = 100;
+    h100 = 100;
     s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .elbowOrientation = 3, .position = {s->posX, yu - gap}, .width = &s->columnWidth, .height = &s->columnHeight, .color = LCARS_BLUE }; yu -= gap;
-    s->elements[s->numElements++] = (Element){ .kind = ELEM_RECTANGLE, .position = {s->posX, yu - 100 - gap}, .width = &s->columnWidth, .height = h100, .color = LCARS_PURPLE, .text=s->elements[1].text, .textSize = s->elements[1].textSize}; yu -= 100;
+    s->elements[s->numElements++] = (Element){ .kind = ELEM_RECTANGLE, .position = {s->posX, yu - 100 - gap}, .width = &s->columnWidth, .height = &h100, .color = LCARS_PURPLE, .text=temp[1].text, .textSize = temp[1].textSize}; yu -= 100;
 
     int xu = s->posX + s->columnWidth + s->barWidth;
     s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = &w[0], .height = &s->barHeight, .color = LCARS_ORANGE }; xu += 40 + gap;
@@ -575,7 +577,6 @@ void ReLayout(State *s) {
     s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .position = {s->posX, s->posY}, .width = &s->columnWidth, .height = &s->columnHeight, .color = LCARS_RED_ORANGE, .text="03-975883" , .textSize=20 };
     int y = s->posY + s->columnHeight + s->barHeight + s->innerRadius;
 
-    float *h200_60_250 = malloc(3 * sizeof(float));
     h200_60_250[0] = 200;
     h200_60_250[1] = 60;
     h200_60_250[2] = 250;
@@ -585,21 +586,18 @@ void ReLayout(State *s) {
     s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &h200_60_250[2], .color = LCARS_ORANGE, .text="06-572983", .textSize=20 }; y = y + 250 + gap;
 
     int x = s->posX + s->columnWidth + s->barWidth;
-    float* halfBarHeight = malloc(sizeof(float));
-    halfBarHeight[0] = s->barHeight / 2;
+    halfBarHeight = s->barHeight / 2;
     s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[0], .height = &s->barHeight, .color = LCARS_YELLOW, }; x = x + 40 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[1], .height = halfBarHeight, .color = LCARS_YELLOW }; x = x + 140 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[1], .height = &halfBarHeight, .color = LCARS_YELLOW }; x = x + 140 + gap;
     s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[2], .height = &s->barHeight, .color = LCARS_PURPLE }; x = x + 400 + gap;
     s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[3], .height = &s->barHeight, .color = LCARS_ORANGE }; x = x + 40 + gap;
 
-    float *buttonHeight = malloc(sizeof(float));
-    *buttonHeight = 50;
-    float* w210 = malloc(sizeof(float));
-    *w210 = 210;
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * *buttonHeight - 10 }, .width = w210, .height = buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * *buttonHeight - 10 }, .width = w210, .height = buttonHeight, .color = LCARS_BLUE, .text="(LC+e)dit 0129-86" ,.textSize=20};
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - *buttonHeight  }, .width = w210, .height = buttonHeight, .color = LCARS_BLUE, .text="(LC+r)eset 7232-83", .textSize=20 };
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - *buttonHeight  }, .width = w210, .height = buttonHeight, .color = LCARS_ORANGE, .text="1014-819", .textSize=20 };
+    buttonHeight = 50;
+    w210 = 210;
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+e)edit 0129-86" ,.textSize=20};
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - buttonHeight  }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+r)eset 7232-83", .textSize=20 };
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight  }, .width = &w210, .height = &buttonHeight, .color = LCARS_ORANGE, .text="1014-819", .textSize=20 };
 
     s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { x - 220 - 220 - 20, yu }, .color = LCARS_YELLOW, .textSize = 48, .text="LCARS ACCESS 441" };
     // s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight - s->barHeight - 40 - 10 }, .color = LCARS_YELLOW, .textSize = 20, .text="LShift to move camera perspective with mouse\nLShift + W,A,S,D to move object\n" };
