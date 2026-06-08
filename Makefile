@@ -31,10 +31,18 @@ WEB_LDFLAGS = -s USE_GLFW=3 -s ASYNCIFY -s TOTAL_MEMORY=67108864 -s ALLOW_MEMORY
 compile_commands.json: Makefile
 	bear -- make -B lcars
 
-lcars: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so
+# Helper to download missing resources before building (needed for libvosk.so linking)
+RESOURCE_HELPER = /tmp/lcars-download-resources
+$(RESOURCE_HELPER): resources_download_main.c resources_download.c resources_download.h
+	$(CC) -std=c11 -g resources_download_main.c resources_download.c -lcurl -o $@
+
+ensure-resources: $(RESOURCE_HELPER)
+	@$(RESOURCE_HELPER)
+
+lcars: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
 	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk -Wl,-rpath,resources/
 
-lcars-release: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so
+lcars-release: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
 	cc -DNOTDEV=1 $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk -Wl,-rpath,resources/
 
 lcars-lib.so: lcars_lib.h lcars_lib.c voice_rec.h
