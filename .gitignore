@@ -12,3 +12,4 @@ redate.sh
 *dSYM/
 *.db
 *amalgamation*
+resources/

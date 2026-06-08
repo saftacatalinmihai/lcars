@@ -26,26 +26,26 @@ CFLAGS_RELEASE = -std=c11 -O3 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAG
 RAYLIB_WEB = raylib-web/src
 WEB_CFLAGS = -Os -std=c11 -DPLATFORM_WEB -I$(RAYLIB_WEB)
 WEB_LDFLAGS = -s USE_GLFW=3 -s ASYNCIFY -s TOTAL_MEMORY=67108864 -s ALLOW_MEMORY_GROWTH=1 \
-              --preload-file style_cyber.rgs --preload-file resources
+              --preload-file resources
 
 compile_commands.json: Makefile
 	bear -- make -B lcars
 
-lcars: lcars.c lcars-lib.so
-	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c  -ldl
+lcars: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so
+	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -L. -lvosk -Wl,-rpath,.
 
-lcars-release: lcars.c lcars-lib.so
-	cc -DNOTDEV=1 $(CFLAGS_RELEASE) -o lcars lcars.c  -ldl
+lcars-release: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so
+	cc -DNOTDEV=1 $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -L. -lvosk -Wl,-rpath,.
 
-lcars-lib.so: lcars_lib.h lcars_lib.c
+lcars-lib.so: lcars_lib.h lcars_lib.c voice_rec.h
 	cc -DNOTDEV=1 $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -o lcars-lib.so lcars_lib.c
 
 run: lcars-lib.so lcars
 	./lcars
 
 # Web build targets
-lcars-web: lcars.c style_cyber.rgs $(RAYLIB_WEB)/libraylib.web.a
-	emcc -DNOTDEV=1 lcars_lib.c lcars.c sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
+lcars-web: lcars.c voice_rec.c resources_download.c $(RAYLIB_WEB)/libraylib.web.a
+	emcc -DNOTDEV=1 lcars_lib.c lcars.c voice_rec.c resources_download.c sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
 
 serve: lcars-web
 	@echo "Starting server at http://localhost:8080/lcars.html"

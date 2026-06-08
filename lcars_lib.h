@@ -9,6 +9,7 @@
 #include "rlgl.h"
 #include "sqlite3.h"
 #include <time.h>
+#include "voice_rec.h"
 
 #define _ISOC99_SOURCE
 #include <math.h>
@@ -108,6 +109,7 @@ typedef struct State {
     Ray ray;                    // Picking line ray
     RayCollision collision;     // Ray collision hit info
     sqlite3 *db;
+    void *voiceApi;
 } State;
 
 void UpdateDrawFrame(State *s);
@@ -116,7 +118,7 @@ void Init(State *s, bool firstInit);
 #define NOTIFICATION_DURATION 3.0f
 #define NOTIFICATION_MAX_LEN 48
 
-void updateNotification(State* s, const char* notificationText) {
+static inline void updateNotification(State* s, const char* notificationText) {
     snprintf(s->notification, NOTIFICATION_MAX_LEN, "%s", notificationText);
     s->notificationTimer = NOTIFICATION_DURATION;
 }
@@ -500,7 +502,7 @@ void Init(State *s, bool firstInit) {
         .rotation = 0
     };
 
-    GuiLoadStyle("style_cyber.rgs");
+        GuiLoadStyle("resources/style_cyber.rgs");
 
     for (int i=0; i<MAX_ELEMENTS; i++) {
         Element e = s->elements[i];
@@ -541,7 +543,7 @@ void Reload(State *s, bool reset) {
     if (reset){
         Init(s, false);
     } else {
-        GuiLoadStyle("style_cyber.rgs");
+    GuiLoadStyle("resources/style_cyber.rgs");
     }
 }
 
@@ -597,7 +599,7 @@ void ReLayout(State *s) {
     s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
     s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+e)edit 0129-86" ,.textSize=20};
     s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - buttonHeight  }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+r)eset 7232-83", .textSize=20 };
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight  }, .width = &w210, .height = &buttonHeight, .color = LCARS_ORANGE, .text="1014-819", .textSize=20 };
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight  }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="Voice Input", .textSize=20 };
 
     s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { x - 220 - 220 - 20, yu }, .color = LCARS_YELLOW, .textSize = 48, .text="LCARS ACCESS 441" };
     // s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight - s->barHeight - 40 - 10 }, .color = LCARS_YELLOW, .textSize = 20, .text="LShift to move camera perspective with mouse\nLShift + W,A,S,D to move object\n" };
@@ -735,6 +737,54 @@ static Rectangle GetElementBoundingBox(const Element *e) {
 }
 
 void Update(State *s) {
+    // Voice recognition updates
+    VoiceRecApi *vapi = (VoiceRecApi*)s->voiceApi;
+    if (vapi) {
+        if (vapi->IsRecording()) {
+            char partialBuf[256];
+            if (vapi->PollPartial(partialBuf, sizeof(partialBuf))) {
+                if (strlen(partialBuf) > 0) {
+                    char fullNotify[300];
+                    snprintf(fullNotify, sizeof(fullNotify), "[Voice: \"%s\"]", partialBuf);
+                    updateNotification(s, fullNotify);
+                }
+            }
+        }
+        
+        char voiceBuf[256];
+        if (vapi->PollResult(voiceBuf, sizeof(voiceBuf))) {
+            Element *editor = NULL;
+            for (int j = 0; j < s->numElements; j++) {
+                if (s->elements[j].kind == ELEM_TEXT_EDITOR) {
+                    editor = &s->elements[j];
+                    break;
+                }
+            }
+            if (editor) {
+                int len = strlen(voiceBuf);
+                bool textChanged = false;
+                
+                if (editor->selectTextStart >= 0 && editor->selectTextEnd != editor->selectTextStart) {
+                    DeleteSelection(editor);
+                    textChanged = true;
+                }
+                
+                for (int k = 0; k < len; k++) {
+                    GapInsertChar(editor, voiceBuf[k]);
+                    textChanged = true;
+                }
+                
+                if (textChanged) {
+                    ReconstructText(editor);
+                    UpdateLogInDB(s, editor->text);
+                    editor->snapToCursor = 2;
+                }
+            }
+        }
+    } else {
+      updateNotification(s, "VOICE ERROR");
+    }
+
     Vector2 mPos = GetMousePosition();
     SetMouseCursor(MOUSE_CURSOR_DEFAULT);
     // UpdateCamera(&s->camera, CAMERA_ORBITAL);
@@ -853,24 +903,52 @@ void Update(State *s) {
                 }
                 break;
             case ELEM_BUTTON:
-                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *s->elements[i].width, .height = *s->elements[i].height})) {
-                    s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
-                    clickOrHoverNotification(s, i, "button element");
-                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                        if (e->text) {
-                            if (strstr(e->text, "(LC+d)ebug")) {
-                                s->debug = !s->debug;
-                            }
-                            if (strstr(e->text, "(LC+e)dit")) {
-                                s->is_editing = !s->is_editing;
-                            }
-                            if (strstr(e->text, "(LC+r)eset")) {
-                                Reload(s, true);
+                {
+                    VoiceRecApi *vapi = (VoiceRecApi*)s->voiceApi;
+                    bool isRecording = (vapi && vapi->IsRecording() && strstr(e->text, "RECORDING..."));
+                    if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *s->elements[i].width, .height = *s->elements[i].height})) {
+                        if (isRecording) {
+                            s->elements[i].color = (Color){255, 100, 100, 255};
+                        } else {
+                            s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
+                        }
+                        clickOrHoverNotification(s, i, "button element");
+                        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                            if (e->text) {
+                                if (strstr(e->text, "(LC+d)ebug")) {
+                                    s->debug = !s->debug;
+                                }
+                                if (strstr(e->text, "(LC+e)edit")) {
+                                    s->is_editing = !s->is_editing;
+                                }
+                                if (strstr(e->text, "(LC+r)eset")) {
+                                    Reload(s, true);
+                                }
+                                if (strstr(e->text, "Voice Input") || strstr(e->text, "RECORDING...")) {
+                                    if (vapi) {
+                                        if (isRecording) {
+                                            vapi->StopRecording();
+                                            e->text = "Voice Input";
+                                            e->color = e->originalColor;
+                                        } else {
+                                            if (vapi->StartRecording()) {
+                                                e->text = "RECORDING...";
+                                                e->color = RED;
+                                            } else {
+                                                updateNotification(s, "Voice Recording failed to start");
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
+                    } else {
+                        if (isRecording) {
+                            s->elements[i].color = RED;
+                        } else {
+                            s->elements[i].color = s->elements[i].originalColor;
+                        }
                     }
-                } else {
-                    s->elements[i].color = s->elements[i].originalColor;
                 }
                 break;
 
@@ -1588,6 +1666,38 @@ void UpdateDrawFrame(State *s) {
     if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_D)) {s->debug = !s->debug;}
     if (IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_R)) { Init(s, false); }
     if (IsKeyDown(KEY_LEFT_CONTROL) && (IsKeyPressed(KEY_H) || IsKeyPressed(KEY_E))) {s->is_editing = !s->is_editing;}
+    
+    // Toggle voice recognition via Ctrl+Space
+    if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_SPACE)) {
+        VoiceRecApi *vapi = (VoiceRecApi*)s->voiceApi;
+        if (vapi) {
+            // Find the Voice Input button to keep its state in sync
+            Element *voiceBtn = NULL;
+            for (int j = 0; j < s->numElements; j++) {
+                if (s->elements[j].kind == ELEM_BUTTON && s->elements[j].text && 
+                    (strstr(s->elements[j].text, "Voice Input") || strstr(s->elements[j].text, "RECORDING..."))) {
+                    voiceBtn = &s->elements[j];
+                    break;
+                }
+            }
+            if (vapi->IsRecording()) {
+                vapi->StopRecording();
+                if (voiceBtn) {
+                    voiceBtn->text = "Voice Input";
+                    voiceBtn->color = voiceBtn->originalColor;
+                }
+            } else {
+                if (vapi->StartRecording()) {
+                    if (voiceBtn) {
+                        voiceBtn->text = "RECORDING...";
+                        voiceBtn->color = RED;
+                    }
+                } else {
+                    updateNotification(s, "Voice Recording failed to start");
+                }
+            }
+        }
+    }
     // if (IsKeyDown(KEY_LEFT_CONTROL)) { 
     //     if (s->notificationOnElemIdx != -2) {
     //         snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Changing Perspective]");

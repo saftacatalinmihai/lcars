@@ -7,6 +7,8 @@
 #include <dlfcn.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "voice_rec.h"
+#include "resources_download.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
@@ -20,6 +22,21 @@ typedef void (*Fn_Reload)(State *s, bool reset);
 int main(void) {
 
     State *s = (State*)calloc(sizeof(State), 10); // Reserve some more space just in case we add more fields... hack
+    
+    CheckAndDownloadResources();
+
+    VoiceRec_Init("./resources/model");
+    static VoiceRecApi voiceApi = {
+        .Init = VoiceRec_Init,
+        .Shutdown = VoiceRec_Shutdown,
+        .StartRecording = VoiceRec_StartRecording,
+        .StopRecording = VoiceRec_StopRecording,
+        .IsRecording = VoiceRec_IsRecording,
+        .PollResult = VoiceRec_PollResult,
+        .PollPartial = VoiceRec_PollPartial
+    };
+    s->voiceApi = &voiceApi;
+
 
 #ifdef __EMSCRIPTEN__
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
@@ -81,6 +98,8 @@ int main(void) {
         Update(s);
     }
 #endif
+
+    VoiceRec_Shutdown();
 
     CloseWindow();
     return 0;
