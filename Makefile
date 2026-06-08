@@ -32,10 +32,10 @@ compile_commands.json: Makefile
 	bear -- make -B lcars
 
 lcars: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so
-	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -L. -lvosk -Wl,-rpath,.
+	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk -Wl,-rpath,resources/
 
 lcars-release: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so
-	cc -DNOTDEV=1 $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -L. -lvosk -Wl,-rpath,.
+	cc -DNOTDEV=1 $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk -Wl,-rpath,resources/
 
 lcars-lib.so: lcars_lib.h lcars_lib.c voice_rec.h
 	cc -DNOTDEV=1 $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -o lcars-lib.so lcars_lib.c

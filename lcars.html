@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<head>
+    <style>
+        body {
+            background-color: black;
+            color: black;
+            font-family: 'Arial', sans-serif;
+        }
+        #canvas {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid black;
+        }
+        #output {
+            text-align: center;
+            margin-top: 20px;
+        }  
+    </style>
+</head>
+<html>
+<body>
+  <!-- Elements the Emscripten code might need -->
+  <canvas id="canvas" ></canvas>
+  <div id="output"></div>
+
+  <script>
+    // Configuration for the Emscripten module
+    var Module = {
+        canvas: document.getElementById('canvas'),
+        print: function(text) {
+            console.log(text);
+            // document.getElementById('output').innerHTML += text + "<br>";
+        },
+        locateFile: function(path, prefix) {
+            // return 'https://public.mihai-safta.dev/lcars_texted/' + path;
+            return 'http://localhost:8080/' + path;
+        }
+    };
+    // window.onkeydown = function(e) {
+    //     if(e.keyCode == 32 && e.target == canvas) {
+    //         e.preventDefault();
+    //         return false;
+    //     }
+    // };
+  </script>
+  
+  <!-- Load the generated JS wrapper -->
+  <!-- <script src="/lcars.js"></script> -->
+  <script src="http://localhost:8080/lcars.js"></script>
+</body>
+</html>
