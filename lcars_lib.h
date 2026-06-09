@@ -24,6 +24,17 @@
 #define MAX_ELEMENTS 100
 #define MAX_INPUT_CHARS 1024
 
+#define TEXT_VOICE_INPUT "Voice Input"
+#define TEXT_RECORDING   "RECORDING..."
+
+typedef enum ButtonAction {
+    ACTION_NONE = 0,
+    ACTION_DEBUG,
+    ACTION_EDIT,
+    ACTION_RESET,
+    ACTION_VOICE_INPUT
+} ButtonAction;
+
 typedef struct iVec2 {
     int x, y;
 } iVec2;
@@ -41,6 +52,7 @@ typedef enum ElemKind {
 
 typedef struct Element {
     ElemKind kind;
+    ButtonAction action;
     iVec2 position;
     Vector3 position3;
     float *width, *height;
@@ -140,6 +152,40 @@ char* sprintf_static(State*s, int index, const char* fmt, ...) {
     return s->staticText[index];
 }
 
+static void ToggleVoiceRecording(State* s) {
+    VoiceRecApi *vapi = (VoiceRecApi*)s->voiceApi;
+    if (!vapi) {
+        updateNotification(s, "VOICE ERROR");
+        return;
+    }
+
+    // Find the Voice Input button
+    Element *voiceBtn = NULL;
+    for (int j = 0; j < s->numElements; j++) {
+        if (s->elements[j].kind == ELEM_BUTTON && s->elements[j].action == ACTION_VOICE_INPUT) {
+            voiceBtn = &s->elements[j];
+            break;
+        }
+    }
+
+    if (vapi->IsRecording()) {
+        vapi->StopRecording();
+        if (voiceBtn) {
+            voiceBtn->text = TEXT_VOICE_INPUT;
+            voiceBtn->color = voiceBtn->originalColor;
+        }
+    } else {
+        if (vapi->StartRecording()) {
+            if (voiceBtn) {
+                voiceBtn->text = TEXT_RECORDING;
+                voiceBtn->color = RED;
+            }
+        } else {
+            updateNotification(s, "Voice Recording failed to start");
+        }
+    }
+}
+
 static void ReLayout(State *s);
 
 // Shared layout static variables
@@ -165,93 +211,67 @@ static int sqlite_callback(void *NotUsed, int argc, char **argv, char **azColNam
    return 0;
 }
 
-static void InitDB(State* s, bool firstInit) {
+static int ExecSQL(State* s, const char* sql, const char* successMsg) {
     char *zErrMsg = 0;
-    /* Create SQL statement */
-    char * sql = "CREATE TABLE IF NOT EXISTS log ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "text TEXT)";
-
-    /* Execute SQL statement */
     int rc = sqlite3_exec(s->db, sql, sqlite_callback, 0, &zErrMsg);
-
-    if(rc != SQLITE_OK){
+    if (rc != SQLITE_OK) {
         fprintf(stderr, "SQL error: %s\n", zErrMsg);
         updateNotification(s, "SQL error");
-        // sqlite3_free(zErrMsg);
+        sqlite3_free(zErrMsg);
     } else {
-        fprintf(stdout, "Table created successfully\n");
-        updateNotification(s, "Table created successfully");
+        if (successMsg) {
+            fprintf(stdout, "%s\n", successMsg);
+            updateNotification(s, successMsg);
+        }
     }
+    return rc;
+}
+
+static void InitDB(State* s, bool firstInit) {
+    (void)firstInit;
+    ExecSQL(s, "CREATE TABLE IF NOT EXISTS log (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT);", "Table created successfully");
 
     char datename[32];
     struct tm* to;
-    time_t t;
-    t = time(NULL);
+    time_t t = time(NULL);
     to = localtime(&t);
     strftime(datename, sizeof(datename), "%Y-%m-%d", to);
 
-    // if (firstInit) {
-        char * sql_insert = "INSERT OR IGNORE INTO log (id, text) VALUES (0, '%s Captain log')";
-        char* sql_insert_full = malloc(strlen(sql_insert) + 11 + strlen(datename) + 1);
-        snprintf(sql_insert_full, strlen(sql_insert) + 11, "INSERT OR IGNORE INTO log (id, text) VALUES (0, '%s Captain log')", datename);
-        // printf("SQL to execute: %s\n", sql_insert_full);
-        rc = sqlite3_exec(s->db, sql_insert_full, sqlite_callback, 0, &zErrMsg);
-
-        if(rc != SQLITE_OK){
-            fprintf(stderr, "SQL error: %s\n", zErrMsg);
-            updateNotification(s, "SQL error");
-            // sqlite3_free(zErrMsg);
-        } else {
-            fprintf(stdout, "Data inserted successfully\n");
-            updateNotification(s, "Data inserted successfully");
-        }
-    // }
+    char* sql_insert_full = sqlite3_mprintf("INSERT OR IGNORE INTO log (id, text) VALUES (0, '%q Captain log');", datename);
+    if (sql_insert_full) {
+        ExecSQL(s, sql_insert_full, "Data inserted successfully");
+        sqlite3_free(sql_insert_full);
+    }
 }
 
 static char* GetLogFromDB(State* s) {
-    char* output = malloc(MAX_INPUT_CHARS);
+    char* output = NULL;
     sqlite3_stmt *stmt;
-    //create prepared statement
     int rc = sqlite3_prepare_v2(s->db, "SELECT text FROM log where id=?1", -1, &stmt, 0);
-    if (rc != SQLITE_OK)
+    if (rc != SQLITE_OK) {
         updateNotification(s, "failure fetching data");
-
-    //bind values to parameters
-    sqlite3_bind_text(stmt, 1, "0", -1, SQLITE_STATIC);
-
-    //run the SQL
-    rc = sqlite3_step(stmt);
-    if (rc == SQLITE_ROW) {
-        output = strdup((char*)sqlite3_column_text(stmt, 0));
+    } else {
+        sqlite3_bind_text(stmt, 1, "0", -1, SQLITE_STATIC);
+        rc = sqlite3_step(stmt);
+        if (rc == SQLITE_ROW) {
+            output = strdup((char*)sqlite3_column_text(stmt, 0));
+        }
+        sqlite3_finalize(stmt);
     }
-
-    //destroy the object to avoid resource leaks
-    sqlite3_finalize(stmt);
+    if (!output) {
+        output = strdup("");
+    }
     return output;
 }
 
 static void UpdateLogInDB(State* s, const char* newLog) {
-    char *zErrMsg = 0;
-    // char * sql_update = "UPDATE log SET text = '%s' WHERE id = 0";
     char* sql_update_full = sqlite3_mprintf("UPDATE log SET text = (%Q) WHERE id = 0;", newLog);
     if (!sql_update_full) {
-        fprintf(stderr, "SQL error: %s\n", zErrMsg);
         updateNotification(s, "SQL error");
+        return;
     }
-
-    // char* sql_update_full = malloc(strlen(sql_update) + strlen(newLog) + 1);
-    // snprintf(sql_update_full, strlen(sql_update) + strlen(newLog), "UPDATE log SET text = '%s' WHERE id = 0", newLog);
-    // printf("SQL to execute: %s\n", sql_update_full);
-    int rc = sqlite3_exec(s->db, sql_update_full, sqlite_callback, 0, &zErrMsg);
-
-    if(rc != SQLITE_OK){
-        fprintf(stderr, "SQL error: %s\n", zErrMsg);
-        updateNotification(s, "SQL error");
-    } else {
-        // fprintf(stdout, "Data updated successfully\n");
-        // updateNotification(s, "Data updated successfully");
-    }
+    ExecSQL(s, sql_update_full, NULL);
+    sqlite3_free(sql_update_full);
 }
 
 static bool IsWordChar(char c) {
@@ -334,6 +354,33 @@ static bool DeleteSelection(Element* e) {
     return false;
 }
 
+static void StartTextSelection(Element* e, bool shiftDown) {
+    if (shiftDown) {
+        if (e->selectTextStart == -1) {
+            e->selectTextStart = e->gapStart;
+        }
+    } else {
+        e->selectTextStart = -1;
+        e->selectTextEnd = -1;
+        e->selectTextLength = 0;
+    }
+}
+
+static void EndTextSelection(Element* e, bool shiftDown) {
+    if (shiftDown) {
+        e->selectTextEnd = e->gapStart;
+        e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+    }
+    e->snapToCursor = 2;
+}
+
+static void ClampScrollY(Element* e) {
+    if (e->scrollY < 0.0f) e->scrollY = 0.0f;
+    float maxScroll = e->textHeight - *e->height;
+    if (maxScroll < 0.0f) maxScroll = 0.0f;
+    if (e->scrollY > maxScroll) e->scrollY = maxScroll;
+}
+
 static int GetLines(const char* text, int* lineStarts, int maxLines) {
     int count = 0;
     lineStarts[count++] = 0;
@@ -397,8 +444,11 @@ void Init(State *s, bool firstInit) {
     }
     InitDB(s, firstInit);
 
-    char* text =  malloc(MAX_INPUT_CHARS + 1);
-    strcpy(text, (const char*)GetLogFromDB(s));  
+    char* dbLog = GetLogFromDB(s);
+    char* text = malloc(MAX_INPUT_CHARS + 1);
+    strncpy(text, dbLog, MAX_INPUT_CHARS);
+    text[MAX_INPUT_CHARS] = '\0';
+    free(dbLog);
     // strcpy(text, "Insert text here");  
 
     printf("Loaded text from DB: %s\n", text);
@@ -547,6 +597,18 @@ void Reload(State *s, bool reset) {
     }
 }
 
+static void AddBarSegment(State *s, int *x_cursor, int y, float *width, float *height, Color color, int gap) {
+    s->elements[s->numElements++] = (Element){
+        .kind = ELEM_RECTANGLE,
+        .position = { *x_cursor + gap, y },
+        .width = width,
+        .height = height,
+        .color = color,
+        .originalColor = color
+    };
+    *x_cursor += (int)*width + gap;
+}
+
 void ReLayout(State *s) {
     // Clone elements to preserve manually adjusted layouts and other elements
     Element temp[MAX_ELEMENTS];
@@ -570,10 +632,11 @@ void ReLayout(State *s) {
     s->elements[s->numElements++] = (Element){ .kind = ELEM_RECTANGLE, .position = {s->posX, yu - 100 - gap}, .width = &s->columnWidth, .height = &h100, .color = LCARS_PURPLE, .text=temp[1].text, .textSize = temp[1].textSize}; yu -= 100;
 
     int xu = s->posX + s->columnWidth + s->barWidth;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = &w[0], .height = &s->barHeight, .color = LCARS_ORANGE }; xu += 40 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = &w[1], .height = &s->barHeight, .color = LCARS_PURPLE }; xu += 140 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = &w[2], .height = &s->barHeight, .color = LCARS_PURPLE }; xu += 400 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {xu + gap, s->posY - s->barHeight - gap}, .width = &w[3], .height = &s->barHeight, .color = LCARS_RED_ORANGE }; xu += 40 + gap;
+    int yu_bar = s->posY - s->barHeight - gap;
+    AddBarSegment(s, &xu, yu_bar, &w[0], &s->barHeight, LCARS_ORANGE, gap);
+    AddBarSegment(s, &xu, yu_bar, &w[1], &s->barHeight, LCARS_PURPLE, gap);
+    AddBarSegment(s, &xu, yu_bar, &w[2], &s->barHeight, LCARS_PURPLE, gap);
+    AddBarSegment(s, &xu, yu_bar, &w[3], &s->barHeight, LCARS_RED_ORANGE, gap);
 
     // Lower elbo
     s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .position = {s->posX, s->posY}, .width = &s->columnWidth, .height = &s->columnHeight, .color = LCARS_RED_ORANGE, .text="03-975883" , .textSize=20 };
@@ -589,17 +652,30 @@ void ReLayout(State *s) {
 
     int x = s->posX + s->columnWidth + s->barWidth;
     halfBarHeight = s->barHeight / 2;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[0], .height = &s->barHeight, .color = LCARS_YELLOW, }; x = x + 40 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[1], .height = &halfBarHeight, .color = LCARS_YELLOW }; x = x + 140 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[2], .height = &s->barHeight, .color = LCARS_PURPLE }; x = x + 400 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {x + gap, s->posY}, .width = &w[3], .height = &s->barHeight, .color = LCARS_ORANGE }; x = x + 40 + gap;
+    AddBarSegment(s, &x, s->posY, &w[0], &s->barHeight, LCARS_YELLOW, gap);
+    AddBarSegment(s, &x, s->posY, &w[1], &halfBarHeight, LCARS_YELLOW, gap);
+    AddBarSegment(s, &x, s->posY, &w[2], &s->barHeight, LCARS_PURPLE, gap);
+    AddBarSegment(s, &x, s->posY, &w[3], &s->barHeight, LCARS_ORANGE, gap);
 
     buttonHeight = 50;
     w210 = 210;
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+e)edit 0129-86" ,.textSize=20};
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220      , s->posY - 20 - s->barHeight - buttonHeight  }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+r)eset 7232-83", .textSize=20 };
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight  }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="Voice Input", .textSize=20 };
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .action = ACTION_DEBUG, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .action = ACTION_EDIT, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+e)edit 0129-86" ,.textSize=20};
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .action = ACTION_RESET, .position = { x - 220      , s->posY - 20 - s->barHeight - buttonHeight  }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+r)eset 7232-83", .textSize=20 };
+
+    VoiceRecApi *vapi = (VoiceRecApi*)s->voiceApi;
+    bool isRecording = (vapi && vapi->IsRecording());
+    s->elements[s->numElements++] = (Element){ 
+        .kind=ELEM_BUTTON, 
+        .action = ACTION_VOICE_INPUT, 
+        .position = { x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight  }, 
+        .width = &w210, 
+        .height = &buttonHeight, 
+        .color = isRecording ? RED : LCARS_BLUE, 
+        .originalColor = LCARS_BLUE,
+        .text = isRecording ? TEXT_RECORDING : TEXT_VOICE_INPUT, 
+        .textSize = 20 
+    };
 
     s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { x - 220 - 220 - 20, yu }, .color = LCARS_YELLOW, .textSize = 48, .text="LCARS ACCESS 441" };
     // s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = { s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight - s->barHeight - 40 - 10 }, .color = LCARS_YELLOW, .textSize = 20, .text="LShift to move camera perspective with mouse\nLShift + W,A,S,D to move object\n" };
@@ -612,15 +688,11 @@ void ReLayout(State *s) {
 // }
 
 static void clickOrHoverNotification(State* s, int i, char* elem_pretty_name) {
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        // printf("Clicked %s %d\n", elem_pretty_name, i);
-        snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Clicked %s %d] %s", elem_pretty_name, i, s->elements[i].text ? s->elements[i].text : "");
-        s->notificationTimer = NOTIFICATION_DURATION;
-        s->notificationOnElemIdx = i;
-    } else if (s->notificationOnElemIdx != i) {
-        snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Hovering %s %d] %s", elem_pretty_name, i, s->elements[i].text ? s->elements[i].text : "");
-        // printf("Hovering\n");
-        s->notificationTimer = NOTIFICATION_DURATION;
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || s->notificationOnElemIdx != i) {
+        char buf[NOTIFICATION_MAX_LEN];
+        const char *action = IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ? "Clicked" : "Hovering";
+        snprintf(buf, sizeof(buf), "[%s %s %d] %s", action, elem_pretty_name, i, s->elements[i].text ? s->elements[i].text : "");
+        updateNotification(s, buf);
         s->notificationOnElemIdx = i;
     }
 }
@@ -789,8 +861,6 @@ void Update(State *s) {
     SetMouseCursor(MOUSE_CURSOR_DEFAULT);
     // UpdateCamera(&s->camera, CAMERA_ORBITAL);
 
-    // ReLayout(s);
-
     // Handle element dragging and resizing
     int draggingIdx = -1;
     int resizingIdx = -1;
@@ -865,7 +935,7 @@ void Update(State *s) {
         Element *e = &s->elements[i];
         switch (s->elements[i].kind) {
             case ELEM_RECTANGLE:
-                if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *(s->elements[i].width) ? *(s->elements[i].width) : 0, .height = *(s->elements[i].height)})) {
+                if (CheckCollisionPointRec(GetMousePosition(), GetElementBoundingBox(e))) {
                     s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
                     clickOrHoverNotification(s, i, "element");
                 } else {
@@ -905,8 +975,8 @@ void Update(State *s) {
             case ELEM_BUTTON:
                 {
                     VoiceRecApi *vapi = (VoiceRecApi*)s->voiceApi;
-                    bool isRecording = (vapi && vapi->IsRecording() && strstr(e->text, "RECORDING..."));
-                    if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *s->elements[i].width, .height = *s->elements[i].height})) {
+                    bool isRecording = (vapi && vapi->IsRecording() && e->action == ACTION_VOICE_INPUT);
+                    if (CheckCollisionPointRec(GetMousePosition(), GetElementBoundingBox(e))) {
                         if (isRecording) {
                             s->elements[i].color = (Color){255, 100, 100, 255};
                         } else {
@@ -914,32 +984,21 @@ void Update(State *s) {
                         }
                         clickOrHoverNotification(s, i, "button element");
                         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                            if (e->text) {
-                                if (strstr(e->text, "(LC+d)ebug")) {
+                            switch (e->action) {
+                                case ACTION_DEBUG:
                                     s->debug = !s->debug;
-                                }
-                                if (strstr(e->text, "(LC+e)edit")) {
+                                    break;
+                                case ACTION_EDIT:
                                     s->is_editing = !s->is_editing;
-                                }
-                                if (strstr(e->text, "(LC+r)eset")) {
+                                    break;
+                                case ACTION_RESET:
                                     Reload(s, true);
-                                }
-                                if (strstr(e->text, "Voice Input") || strstr(e->text, "RECORDING...")) {
-                                    if (vapi) {
-                                        if (isRecording) {
-                                            vapi->StopRecording();
-                                            e->text = "Voice Input";
-                                            e->color = e->originalColor;
-                                        } else {
-                                            if (vapi->StartRecording()) {
-                                                e->text = "RECORDING...";
-                                                e->color = RED;
-                                            } else {
-                                                updateNotification(s, "Voice Recording failed to start");
-                                            }
-                                        }
-                                    }
-                                }
+                                    break;
+                                case ACTION_VOICE_INPUT:
+                                    ToggleVoiceRecording(s);
+                                    break;
+                                default:
+                                    break;
                             }
                         }
                     } else {
@@ -969,10 +1028,7 @@ void Update(State *s) {
                     float wheelMove = GetMouseWheelMove();
                     if (wheelMove != 0.0f) {
                         e->scrollY -= wheelMove * 30.0f; // Scroll speed: 30 pixels per wheel tick
-                        if (e->scrollY < 0.0f) e->scrollY = 0.0f;
-                        float maxScroll = e->textHeight - *e->height;
-                        if (maxScroll < 0.0f) maxScroll = 0.0f;
-                        if (e->scrollY > maxScroll) e->scrollY = maxScroll;
+                        ClampScrollY(e);
                     }
 
                     // Click handling
@@ -984,12 +1040,10 @@ void Update(State *s) {
 
                         if (CheckCollisionPointRec(mPos, upButton)) {
                             e->scrollY -= 30.0f;
-                            if (e->scrollY < 0.0f) e->scrollY = 0.0f;
+                            ClampScrollY(e);
                         } else if (CheckCollisionPointRec(mPos, downButton)) {
                             e->scrollY += 30.0f;
-                            float maxScroll = e->textHeight - *e->height;
-                            if (maxScroll < 0.0f) maxScroll = 0.0f;
-                            if (e->scrollY > maxScroll) e->scrollY = maxScroll;
+                            ClampScrollY(e);
                         } else if (CheckCollisionPointRec(mPos, track)) {
                             float visibleRatio = *e->height / e->textHeight;
                             if (visibleRatio > 1.0f) visibleRatio = 1.0f;
@@ -1050,10 +1104,7 @@ void Update(State *s) {
                             e->scrollY = e->dragStartScrollY + deltaScrollY;
 
                             // Clamp
-                            if (e->scrollY < 0.0f) e->scrollY = 0.0f;
-                            float maxScroll = e->textHeight - *e->height;
-                            if (maxScroll < 0.0f) maxScroll = 0.0f;
-                            if (e->scrollY > maxScroll) e->scrollY = maxScroll;
+                            ClampScrollY(e);
                         }
                     } else {
                         e->draggingScrollbar = false;
@@ -1143,15 +1194,7 @@ void Update(State *s) {
                         if (!e->isMovingCursorLeft) e->moveCursorLeftStartTime = GetTime();
                         e->isMovingCursorLeft = true;
                         if (IsKeyPressed(KEY_LEFT) || (GetTime() - e->moveCursorLeftStartTime > 0.4f && e->textSelectedFramesCounter % 2 == 0)) {
-                            if (shiftDown) {
-                                if (e->selectTextStart == -1) {
-                                    e->selectTextStart = e->gapStart;
-                                }
-                            } else {
-                                e->selectTextStart = -1;
-                                e->selectTextEnd = -1;
-                                e->selectTextLength = 0;
-                            }
+                            StartTextSelection(e, shiftDown);
                             bool isWordJump = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
                                               IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
                             if (isWordJump) {
@@ -1172,11 +1215,7 @@ void Update(State *s) {
                             } else {
                                 MoveGap(e, e->gapStart - 1);
                             }
-                            if (shiftDown) {
-                                e->selectTextEnd = e->gapStart;
-                                e->selectTextLength = e->selectTextEnd - e->selectTextStart;
-                            }
-                            e->snapToCursor = 2;
+                            EndTextSelection(e, shiftDown);
                         }
                     } else {
                         e->isMovingCursorLeft = false;
@@ -1186,15 +1225,7 @@ void Update(State *s) {
                         if (!e->isMovingCursorRight) e->moveCursorRightStartTime = GetTime();
                         e->isMovingCursorRight = true;
                         if (IsKeyPressed(KEY_RIGHT) || (GetTime() - e->moveCursorRightStartTime > 0.4f && e->textSelectedFramesCounter % 2 == 0)) {
-                            if (shiftDown) {
-                                if (e->selectTextStart == -1) {
-                                    e->selectTextStart = e->gapStart;
-                                }
-                            } else {
-                                e->selectTextStart = -1;
-                                e->selectTextEnd = -1;
-                                e->selectTextLength = 0;
-                            }
+                            StartTextSelection(e, shiftDown);
                             bool isWordJump = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
                                               IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
                             if (isWordJump) {
@@ -1215,11 +1246,7 @@ void Update(State *s) {
                             } else {
                                 MoveGap(e, e->gapStart + 1);
                             }
-                            if (shiftDown) {
-                                e->selectTextEnd = e->gapStart;
-                                e->selectTextLength = e->selectTextEnd - e->selectTextStart;
-                            }
-                            e->snapToCursor = 2;
+                            EndTextSelection(e, shiftDown);
                         }
                     } else {
                         e->isMovingCursorRight = false;
@@ -1252,15 +1279,7 @@ void Update(State *s) {
                         int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
                         int col = e->gapStart - lineStarts[currLine];
                         
-                        if (shiftDown) {
-                            if (e->selectTextStart == -1) {
-                                e->selectTextStart = e->gapStart;
-                            }
-                        } else {
-                            e->selectTextStart = -1;
-                            e->selectTextEnd = -1;
-                            e->selectTextLength = 0;
-                        }
+                        StartTextSelection(e, shiftDown);
 
                         if (triggerMoveUp) {
                             if (currLine > 0) {
@@ -1281,52 +1300,24 @@ void Update(State *s) {
                             }
                         }
 
-                        if (shiftDown) {
-                            e->selectTextEnd = e->gapStart;
-                            e->selectTextLength = e->selectTextEnd - e->selectTextStart;
-                        }
-                        e->snapToCursor = 2;
+                        EndTextSelection(e, shiftDown);
                     }
                     if (IsKeyPressed(KEY_HOME)) {
-                        if (shiftDown) {
-                            if (e->selectTextStart == -1) {
-                                e->selectTextStart = e->gapStart;
-                            }
-                        } else {
-                            e->selectTextStart = -1;
-                            e->selectTextEnd = -1;
-                            e->selectTextLength = 0;
-                        }
+                        StartTextSelection(e, shiftDown);
                         int lineStarts[1024];
                         int numLines = GetLines(e->text, lineStarts, 1024);
                         int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
                         MoveGap(e, lineStarts[currLine]);
-                        if (shiftDown) {
-                            e->selectTextEnd = e->gapStart;
-                            e->selectTextLength = e->selectTextEnd - e->selectTextStart;
-                        }
-                        e->snapToCursor = 2;
+                        EndTextSelection(e, shiftDown);
                     }
                     if (IsKeyPressed(KEY_END)) {
-                        if (shiftDown) {
-                            if (e->selectTextStart == -1) {
-                                e->selectTextStart = e->gapStart;
-                            }
-                        } else {
-                            e->selectTextStart = -1;
-                            e->selectTextEnd = -1;
-                            e->selectTextLength = 0;
-                        }
+                        StartTextSelection(e, shiftDown);
                         int lineStarts[1024];
                         int numLines = GetLines(e->text, lineStarts, 1024);
                         int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
                         int targetIndex = (currLine < numLines - 1) ? lineStarts[currLine + 1] - 1 : e->textLen;
                         MoveGap(e, targetIndex);
-                        if (shiftDown) {
-                            e->selectTextEnd = e->gapStart;
-                            e->selectTextLength = e->selectTextEnd - e->selectTextStart;
-                        }
-                        e->snapToCursor = 2;
+                        EndTextSelection(e, shiftDown);
                     }
 
                     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(mPos, scrollbarRec)) {
@@ -1406,10 +1397,7 @@ void Update(State *s) {
                     }
                     
                     // Clamp scrollY to valid range
-                    if (e->scrollY < 0.0f) e->scrollY = 0.0f;
-                    float maxScroll = e->textHeight - *e->height;
-                    if (maxScroll < 0.0f) maxScroll = 0.0f;
-                    if (e->scrollY > maxScroll) e->scrollY = maxScroll;
+                    ClampScrollY(e);
                 } else {
                     e->textSelectedFramesCounter = 0;
                 }
@@ -1419,7 +1407,7 @@ void Update(State *s) {
                 // Element e = s->elements[i];
                 // s->ray = GetScreenToWorldRay(GetMousePosition(), e->camera);
                 // s->collision = GetRayCollisionSphere(s->ray, e->position3, 3);
-                bool isHovering = CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *s->elements[i].width, .height = *s->elements[i].height});
+                bool isHovering = CheckCollisionPointRec(GetMousePosition(), GetElementBoundingBox(e));
 
                 if (isHovering) {
                 // if (s->collision.hit) {
@@ -1669,34 +1657,7 @@ void UpdateDrawFrame(State *s) {
     
     // Toggle voice recognition via Ctrl+Space
     if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_SPACE)) {
-        VoiceRecApi *vapi = (VoiceRecApi*)s->voiceApi;
-        if (vapi) {
-            // Find the Voice Input button to keep its state in sync
-            Element *voiceBtn = NULL;
-            for (int j = 0; j < s->numElements; j++) {
-                if (s->elements[j].kind == ELEM_BUTTON && s->elements[j].text && 
-                    (strstr(s->elements[j].text, "Voice Input") || strstr(s->elements[j].text, "RECORDING..."))) {
-                    voiceBtn = &s->elements[j];
-                    break;
-                }
-            }
-            if (vapi->IsRecording()) {
-                vapi->StopRecording();
-                if (voiceBtn) {
-                    voiceBtn->text = "Voice Input";
-                    voiceBtn->color = voiceBtn->originalColor;
-                }
-            } else {
-                if (vapi->StartRecording()) {
-                    if (voiceBtn) {
-                        voiceBtn->text = "RECORDING...";
-                        voiceBtn->color = RED;
-                    }
-                } else {
-                    updateNotification(s, "Voice Recording failed to start");
-                }
-            }
-        }
+        ToggleVoiceRecording(s);
     }
     // if (IsKeyDown(KEY_LEFT_CONTROL)) { 
     //     if (s->notificationOnElemIdx != -2) {
