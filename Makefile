@@ -11,9 +11,13 @@ RAYLIB_LIBS   = $(shell pkg-config --libs raylib)
 
 # Architecture-specific linker flags
 ifeq ($(ARCH),mac)
-	LDFLAGS := $(RAYLIB_LIB) -framework Cocoa -framework IOKit -framework CoreVideo -lm
+	LDFLAGS := $(RAYLIB_LIB) -framework Cocoa -framework IOKit -framework CoreVideo -framework CoreAudio -framework AudioToolbox -lm
+	RPATH_FLAGS := -Wl,-rpath,resources/ -Wl,-rpath,@executable_path/resources/
+	SHARED_FLAGS := -undefined dynamic_lookup
 else ifeq ($(ARCH),linux)
 	LDFLAGS := $(RAYLIB_LIB) -lm
+	RPATH_FLAGS := -Wl,-rpath,resources/
+	SHARED_FLAGS :=
 else
 	$(error Unknown ARCH: $(ARCH). Use 'mac' or 'linux')
 endif
@@ -40,13 +44,13 @@ ensure-resources: $(RESOURCE_HELPER)
 	@$(RESOURCE_HELPER)
 
 lcars: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
-	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk -Wl,-rpath,resources/
+	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
 lcars-release: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
-	cc -DNOTDEV=1 $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk -Wl,-rpath,resources/
+	cc -DNOTDEV=1 $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
 lcars-lib.so: lcars_lib.h lcars_lib.c voice_rec.h
-	cc -DNOTDEV=1 $(CFLAGS) -fPIC -shared -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -o lcars-lib.so lcars_lib.c
+	cc -DNOTDEV=1 $(CFLAGS) -fPIC -shared $(SHARED_FLAGS) -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -o lcars-lib.so lcars_lib.c
 
 run: lcars-lib.so lcars
 	./lcars

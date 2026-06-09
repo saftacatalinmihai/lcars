@@ -13,9 +13,15 @@
 
 #define BASE_URL "https://public.mihai-safta.dev"
 
+#ifdef __APPLE__
+    #define VOSK_LIB_NAME "resources/libvosk.dylib"
+#else
+    #define VOSK_LIB_NAME "resources/libvosk.so"
+#endif
+
 static const char *required_files[] = {
     "resources/earth.png",
-    "resources/libvosk.so",
+    VOSK_LIB_NAME,
     "resources/earth.jpg",
     "resources/style_cyber.rgs",
     "resources/model/README",
@@ -51,15 +57,21 @@ static void create_parent_dirs(const char *path) {
     }
 }
 
-#ifdef __EMSCRIPTEN__
+#ifndef __EMSCRIPTEN__
+struct WriteData {
+    FILE *fp;
+    const char *path;
+};
 
-static bool download_file(const char *path) {
-    char url[2048];
-    int n = snprintf(url, sizeof(url), BASE_URL "/%s", path);
-    if (n < 0 || (size_t)n >= sizeof(url)) return false;
+static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *stream) {
+    return fwrite(ptr, size, nmemb, (FILE *)stream);
+}
+#endif
 
+static bool download_file_from_url(const char *url, const char *path) {
     create_parent_dirs(path);
 
+#ifdef __EMSCRIPTEN__
     emscripten_fetch_attr_t attr;
     emscripten_fetch_attr_init(&attr);
     strcpy(attr.requestMethod, "GET");
@@ -87,26 +99,7 @@ static bool download_file(const char *path) {
 
     emscripten_fetch_close(fetch);
     return ok;
-}
-
 #else
-
-struct WriteData {
-    FILE *fp;
-    const char *path;
-};
-
-static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *stream) {
-    return fwrite(ptr, size, nmemb, (FILE *)stream);
-}
-
-static bool download_file(const char *path) {
-    char url[2048];
-    int n = snprintf(url, sizeof(url), BASE_URL "/%s", path);
-    if (n < 0 || (size_t)n >= sizeof(url)) return false;
-
-    create_parent_dirs(path);
-
     CURL *curl = curl_easy_init();
     if (!curl) {
         printf("  [FAILED] curl_easy_init failed\n");
@@ -138,9 +131,63 @@ static bool download_file(const char *path) {
     }
 
     return true;
+#endif
 }
 
+#ifdef __APPLE__
+static bool extract_vosk_dylib_from_jar(void) {
+    printf("  [MACOS] Downloading Vosk Java JAR to extract libvosk.dylib...\n");
+    const char *jar_url = "https://repo1.maven.org/maven2/com/alphacephei/vosk/0.3.45/vosk-0.3.45.jar";
+    const char *jar_path = "resources/vosk-0.3.45.jar";
+
+    if (!download_file_from_url(jar_url, jar_path)) {
+        printf("  [FAILED] to download Vosk JAR from Maven Central\n");
+        return false;
+    }
+
+    printf("  [MACOS] Extracting darwin/libvosk.dylib from JAR...\n");
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "unzip -o %s darwin/libvosk.dylib -d resources/", jar_path);
+    int ret = system(cmd);
+    if (ret != 0) {
+        printf("  [FAILED] to unzip %s\n", jar_path);
+        unlink(jar_path);
+        return false;
+    }
+
+    // Move resources/darwin/libvosk.dylib to resources/libvosk.dylib
+    ret = system("mv resources/darwin/libvosk.dylib resources/libvosk.dylib && rmdir resources/darwin");
+    if (ret != 0) {
+        printf("  [FAILED] to move libvosk.dylib and cleanup\n");
+        unlink(jar_path);
+        return false;
+    }
+
+    // Run install_name_tool to set dynamic library ID for rpath support on macOS
+    printf("  [MACOS] Setting install name ID to @rpath/libvosk.dylib...\n");
+    ret = system("install_name_tool -id @rpath/libvosk.dylib resources/libvosk.dylib");
+    if (ret != 0) {
+        printf("  [WARNING] install_name_tool failed, loading might fail if rpath is not set correctly\n");
+    }
+
+    unlink(jar_path);
+    return true;
+}
 #endif
+
+static bool download_file(const char *path) {
+#ifdef __APPLE__
+    if (strcmp(path, "resources/libvosk.dylib") == 0) {
+        return extract_vosk_dylib_from_jar();
+    }
+#endif
+
+    char url[2048];
+    int n = snprintf(url, sizeof(url), BASE_URL "/%s", path);
+    if (n < 0 || (size_t)n >= sizeof(url)) return false;
+
+    return download_file_from_url(url, path);
+}
 
 bool CheckAndDownloadResources(void) {
     printf("Checking resources...\n");
