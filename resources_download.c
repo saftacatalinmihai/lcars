@@ -19,6 +19,13 @@
     #define VOSK_LIB_NAME "resources/libvosk.so"
 #endif
 
+#ifdef __EMSCRIPTEN__
+static const char *required_files[] = {
+    "resources/earth.png",
+    "resources/earth.jpg",
+    "resources/style_cyber.rgs",
+};
+#else
 static const char *required_files[] = {
     "resources/earth.png",
     VOSK_LIB_NAME,
@@ -39,6 +46,7 @@ static const char *required_files[] = {
     "resources/model/ivector/online_cmvn.conf",
     "resources/model/ivector/splice.conf",
 };
+#endif
 
 #define NUM_FILES (sizeof(required_files) / sizeof(required_files[0]))
 

@@ -30,7 +30,10 @@ CFLAGS_RELEASE = -std=c11 -O3 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAG
 RAYLIB_WEB = raylib-web/src
 WEB_CFLAGS = -Os -std=c11 -DPLATFORM_WEB -I$(RAYLIB_WEB)
 WEB_LDFLAGS = -s USE_GLFW=3 -s ASYNCIFY -s TOTAL_MEMORY=67108864 -s ALLOW_MEMORY_GROWTH=1 \
-              --preload-file resources
+              -s FETCH \
+              --preload-file resources/earth.png \
+              --preload-file resources/earth.jpg \
+              --preload-file resources/style_cyber.rgs
 
 compile_commands.json: Makefile
 	bear -- make -B lcars
