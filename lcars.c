@@ -21,10 +21,10 @@ typedef void (*Fn_Reload)(State *s, bool reset);
 
 int main(void) {
 
-    State *s = (State*)calloc(sizeof(State), 10); // Reserve some more space just in case we add more fields... hack
+    State *s = (State*)calloc(10, sizeof(State)); // Reserve some more space just in case we add more fields... hack
     
     CheckAndDownloadResources();
-
+    
     VoiceRec_Init("./resources/model");
     static VoiceRecApi voiceApi = {
         .Init = VoiceRec_Init,
@@ -37,7 +37,8 @@ int main(void) {
     };
     s->voiceApi = &voiceApi;
 
-
+    
+    
 #ifdef __EMSCRIPTEN__
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(800, 500, "LCARS Custom Elbow");
@@ -51,7 +52,16 @@ int main(void) {
     Fn_Init Init = NULL;
     Fn_Reload Reload = NULL;
 
-    void *handle = dlopen("./lcars-lib.so", RTLD_NOW);
+    int reload_counter = 0;
+    char lib_path[256];
+    sprintf(lib_path, "./lcars-lib_temp_%d.so", reload_counter++);
+    char cp_cmd[512];
+    sprintf(cp_cmd, "cp ./lcars-lib.so %s", lib_path);
+    system(cp_cmd);
+
+    void *handle = dlopen(lib_path, RTLD_NOW);
+    unlink(lib_path);
+
     if (handle) {
         Update = (Fn_Update)dlsym(handle, "UpdateDrawFrame");
         if (Update == NULL) {
@@ -84,15 +94,25 @@ int main(void) {
             printf("Reloading ...\n");
             system("make lcars-lib.so");
 
-            // Leaking memory - old dl still in mem.
-            /* dlclose(handle); */
-            handle = dlopen("./lcars-lib.so", RTLD_NOW);
-            Update = (Fn_Update)dlsym(handle, "UpdateDrawFrame");
-            Init = (Fn_Init)dlsym(handle, "Init");
-            Reload = (Fn_Reload)dlsym(handle, "Reload");
-            Reload(s, false);
-            printf("Reloaded successfully.\n");
-            updateNotification(s, "LCARS reloaded successfully!");
+            sprintf(lib_path, "./lcars-lib_temp_%d.so", reload_counter++);
+            sprintf(cp_cmd, "cp ./lcars-lib.so %s", lib_path);
+            system(cp_cmd);
+
+            handle = dlopen(lib_path, RTLD_NOW);
+            unlink(lib_path);
+
+            if (!handle) {
+                printf("dlopen failed: %s\n", dlerror());
+            } else {
+                Update = (Fn_Update)dlsym(handle, "UpdateDrawFrame");
+                Init = (Fn_Init)dlsym(handle, "Init");
+                Reload = (Fn_Reload)dlsym(handle, "Reload");
+                if (Reload) {
+                    Reload(s, false);
+                }
+                printf("Reloaded successfully.\n");
+                updateNotification(s, "LCARS reloaded successfully!");
+            }
 
         }
         Update(s);

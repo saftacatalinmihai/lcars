@@ -103,19 +103,34 @@ typedef struct Element {
     float dragOffsetY;
 } Element;
 
+#define NOTIFICATION_DURATION 3.0f
+#define NOTIFICATION_MAX_LEN 48
+
 typedef struct State {
     Element elements[MAX_ELEMENTS];
-    char staticText[64][32 * 1024];
     int numElements;
     Color lcarsColor;
     float posX, posY, columnWidth, columnHeight, barWidth, barHeight, innerRadius;
+
+    // Shared layout dimensions
+    float editorWidth;
+    float editorHeight;
+    float sphereWidth;
+    float sphereHeight;
+    float barSegmentWidths[4];
+    float h100;
+    float h200_60_250[3];
+    float halfBarHeight;
+    float buttonHeight;
+    float buttonWidth;
+
     bool debug;
     bool is_editing;
     int controllsX;
     int controllsY;
     bool textBoxEditMode;
     Font font;
-    char* notification;
+    char notification[NOTIFICATION_MAX_LEN];
     int notificationOnElemIdx;
     float notificationTimer;
     Ray ray;                    // Picking line ray
@@ -126,9 +141,6 @@ typedef struct State {
 
 void UpdateDrawFrame(State *s);
 void Init(State *s, bool firstInit);
-
-#define NOTIFICATION_DURATION 3.0f
-#define NOTIFICATION_MAX_LEN 48
 
 static inline void updateNotification(State* s, const char* notificationText) {
     snprintf(s->notification, NOTIFICATION_MAX_LEN, "%s", notificationText);
@@ -144,12 +156,33 @@ static inline void updateNotification(State* s, const char* notificationText) {
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 
-char* sprintf_static(State*s, int index, const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(s->staticText[index], sizeof(s->staticText[index]), fmt, args);
-    va_end(args);
-    return s->staticText[index];
+static Rectangle GetScrollbarHandleRect(const Element *e, Rectangle track, float scrollbarWidth) {
+    float visibleRatio = *e->height / e->textHeight;
+    if (visibleRatio > 1.0f) visibleRatio = 1.0f;
+    float handleHeight = visibleRatio * track.height;
+    if (handleHeight < 20.0f) handleHeight = 20.0f;
+
+    float scrollRange = e->textHeight - *e->height;
+    float handleY = track.y;
+    if (scrollRange > 0.0f) {
+        handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
+    }
+    return (Rectangle){ track.x, handleY, scrollbarWidth, handleHeight };
+}
+
+static bool CheckElbowCollision(const Element *e, Vector2 point, float barWidth, float barHeight, float innerRadius) {
+    float w = *e->width;
+    float h = *e->height;
+    if (e->elbowOrientation == 0) {
+        Rectangle r1 = { (float)e->position.x, (float)e->position.y, w, h + barHeight + innerRadius };
+        Rectangle r2 = { (float)e->position.x, (float)e->position.y, w + barWidth, barHeight };
+        return CheckCollisionPointRec(point, r1) || CheckCollisionPointRec(point, r2);
+    } else if (e->elbowOrientation == 3) {
+        Rectangle r1 = { (float)e->position.x, (float)e->position.y, w, h + barHeight + innerRadius };
+        Rectangle r2 = { (float)e->position.x, (float)e->position.y + h + innerRadius, w + barWidth, barHeight };
+        return CheckCollisionPointRec(point, r1) || CheckCollisionPointRec(point, r2);
+    }
+    return false;
 }
 
 static void ToggleVoiceRecording(State* s) {
@@ -188,19 +221,7 @@ static void ToggleVoiceRecording(State* s) {
 
 static void ReLayout(State *s);
 
-// Shared layout static variables
-static float w600 = 600;
-static float h400 = 400;
-static float w300 = 300;
-static float h300 = 300;
 
-static float w[4];
-static float h100;
-static float h200_60_250[3];
-static float halfBarHeight;
-static float buttonHeight;
-static float w210;
-// static void updateNotification(State* s, const char* notificationText);
 
 static int sqlite_callback(void *NotUsed, int argc, char **argv, char **azColName) {
    int i;
@@ -411,15 +432,33 @@ Vector2 V2fromiVec2(iVec2 v) {
 // 2
 
 void Init(State *s, bool firstInit) {
+    if (!firstInit) {
+        for (int i = 0; i < s->numElements; i++) {
+            Element *e = &s->elements[i];
+            if (e->kind == ELEM_TEXT_EDITOR) {
+                if (e->text) {
+                    free(e->text);
+                    e->text = NULL;
+                }
+                if (e->gapBuffer) {
+                    free(e->gapBuffer);
+                    e->gapBuffer = NULL;
+                }
+            } else if (e->kind == ELEM_SPHERE) {
+                UnloadRenderTexture(e->renderTexture);
+                UnloadTexture(e->model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture);
+                UnloadModel(e->model);
+            }
+        }
+    }
+
     s->debug = false;
     s->is_editing = false; 
     s->controllsX = 600;
     s->controllsY = 400;
     s->lcarsColor = (Color){ 204, 153, 204, 255 }; // Purple
-    // s->posX = 40;
     s->posX = 0;
     s->posY = 210;
-    // s->posY = 0;
     s->columnWidth = 200;
     s->columnHeight = 40;
     s->barWidth = 400;
@@ -427,13 +466,28 @@ void Init(State *s, bool firstInit) {
     s->innerRadius = 40;
     s->numElements = 0;
 
-    char* notificationText = (char*)malloc(NOTIFICATION_MAX_LEN);
-    notificationText[0] = '\0';
-    s->notification = notificationText;
+    // Initialize layout dimension variables
+    s->editorWidth = 600;
+    s->editorHeight = 400;
+    s->sphereWidth = 300;
+    s->sphereHeight = 300;
+    s->buttonHeight = 50;
+    s->buttonWidth = 210;
+    s->h100 = 100;
+    s->h200_60_250[0] = 200;
+    s->h200_60_250[1] = 60;
+    s->h200_60_250[2] = 250;
+    s->barSegmentWidths[0] = 40;
+    s->barSegmentWidths[1] = 140;
+    s->barSegmentWidths[2] = 400;
+    s->barSegmentWidths[3] = 40;
+    s->halfBarHeight = s->barHeight / 2;
+
+    s->notification[0] = '\0';
     ReLayout(s);
 
     if (firstInit) {
-        sqlite3 *db = malloc(sizeof(sqlite3*));
+        sqlite3 *db = NULL;
         int rc = sqlite3_open("lcars.db", &db);
         if(rc) {
             fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
@@ -449,7 +503,6 @@ void Init(State *s, bool firstInit) {
     strncpy(text, dbLog, MAX_INPUT_CHARS);
     text[MAX_INPUT_CHARS] = '\0';
     free(dbLog);
-    // strcpy(text, "Insert text here");  
 
     printf("Loaded text from DB: %s\n", text);
     int textLen = strlen(text);
@@ -462,12 +515,11 @@ void Init(State *s, bool firstInit) {
     int gapStart = textLen;
     int gapEnd = textCapacity;
 
-    
     s->elements[s->numElements++] = (Element) {
         .kind=ELEM_TEXT_EDITOR,
         .position = { s->posX + s->columnWidth + s->innerRadius + 60, s->posY + s->barHeight + 80 },
-        .width = &w600,
-        .height = &h400,
+        .width = &s->editorWidth,
+        .height = &s->editorHeight,
         .color = LCARS_PURPLE,
         .originalColor = LCARS_PURPLE,
         .textSize = 20,
@@ -500,14 +552,11 @@ void Init(State *s, bool firstInit) {
     };
 
     s->font = GetFontDefault();
-    // s->font = LoadFont("NotoColorEmoji-Regular.ttf");
 
     Image image;
     if (FileExists("resources/earth.png")) {
         image = LoadImage("resources/earth.png");
-        // ImageToPOT(&image, BLACK);
         ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8); // Convert RGB to RGBA
-        // PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
         TraceLog(LOG_WARNING, "Texture ready!");
         s->elements[1].text = NULL;
         s->elements[1].textSize = 0;
@@ -517,42 +566,35 @@ void Init(State *s, bool firstInit) {
         s->elements[1].textSize=20;
     } 
     if (image.data == NULL) {
-        s->notification = "Failed to load image";
-        // s->elements[1].text = "Failed to load image";
+        updateNotification(s, "Failed to load image");
     }
     ImageRotateCW(&image);
     ImageFlipVertical(&image); 
     ImageFlipHorizontal(&image); 
     Texture2D texture = LoadTextureFromImage(image);
-    // GenTextureMipmaps(&texture);
-    // SetTextureFilter(texture, TEXTURE_FILTER_BILINEAR);
+    UnloadImage(image);
     if (!IsTextureValid(texture)) {
         TraceLog(LOG_ERROR, "Texture is invalid!");
         s->elements[1].text = "Texture is invalid!";
     }
 
-    // Texture2D texture = LoadTexture("resources/earth.jpg");
-    // UnloadImage(image);
     Model earthModel = LoadModelFromMesh(GenMeshSphere(3.0f, 32, 32));
     earthModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture;
     earthModel.transform = MatrixRotateX(DEG2RAD * 90.0f);
-    // earthModel.transform = MatrixRotateY(DEG2RAD * 40.0f);
-    // earthModel.transform = MatrixRotateZ(DEG2RAD * 90.0f);
-    
     
     s->elements[s->numElements++] = (Element){
         .kind=ELEM_SPHERE,
         .position3 = {0,0,0},
         .position = {950, 310}, // Used to create the render texture area where the 3d element is inside.
-        .width = &w300,
-        .height = &h300,
+        .width = &s->sphereWidth,
+        .height = &s->sphereHeight,
         .color = WHITE,
         .originalColor = WHITE,
         .model = earthModel,
         .rotation = 0
     };
 
-        GuiLoadStyle("resources/style_cyber.rgs");
+    GuiLoadStyle("resources/style_cyber.rgs");
 
     for (int i=0; i<MAX_ELEMENTS; i++) {
         Element e = s->elements[i];
@@ -562,7 +604,6 @@ void Init(State *s, bool firstInit) {
 
         switch (s->elements[i].kind) {
             case ELEM_SPHERE: {
-                // Element e = s->elements[i];
                 Element *e = &s->elements[i];
 
                 Camera camera = { 0 };
@@ -593,7 +634,7 @@ void Reload(State *s, bool reset) {
     if (reset){
         Init(s, false);
     } else {
-    GuiLoadStyle("resources/style_cyber.rgs");
+        GuiLoadStyle("resources/style_cyber.rgs");
     }
 }
 
@@ -619,58 +660,58 @@ void ReLayout(State *s) {
     s->numElements = 0; // Clear existing elements before re-adding them with new layout
     int gap = 6;
 
-    w[0] = 40;
-    w[1] = 140;
-    w[2] = 400;
-    w[3] = 40;
+    s->barSegmentWidths[0] = 40;
+    s->barSegmentWidths[1] = 140;
+    s->barSegmentWidths[2] = 400;
+    s->barSegmentWidths[3] = 40;
 
     // Upper elbow
     int yu = s->posY - s->columnHeight - s->innerRadius - s->barHeight;
     
-    h100 = 100;
+    s->h100 = 100;
     s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .elbowOrientation = 3, .position = {s->posX, yu - gap}, .width = &s->columnWidth, .height = &s->columnHeight, .color = LCARS_BLUE }; yu -= gap;
-    s->elements[s->numElements++] = (Element){ .kind = ELEM_RECTANGLE, .position = {s->posX, yu - 100 - gap}, .width = &s->columnWidth, .height = &h100, .color = LCARS_PURPLE, .text=temp[1].text, .textSize = temp[1].textSize}; yu -= 100;
+    s->elements[s->numElements++] = (Element){ .kind = ELEM_RECTANGLE, .position = {s->posX, yu - 100 - gap}, .width = &s->columnWidth, .height = &s->h100, .color = LCARS_PURPLE, .text=temp[1].text, .textSize = temp[1].textSize}; yu -= 100;
 
     int xu = s->posX + s->columnWidth + s->barWidth;
     int yu_bar = s->posY - s->barHeight - gap;
-    AddBarSegment(s, &xu, yu_bar, &w[0], &s->barHeight, LCARS_ORANGE, gap);
-    AddBarSegment(s, &xu, yu_bar, &w[1], &s->barHeight, LCARS_PURPLE, gap);
-    AddBarSegment(s, &xu, yu_bar, &w[2], &s->barHeight, LCARS_PURPLE, gap);
-    AddBarSegment(s, &xu, yu_bar, &w[3], &s->barHeight, LCARS_RED_ORANGE, gap);
+    AddBarSegment(s, &xu, yu_bar, &s->barSegmentWidths[0], &s->barHeight, LCARS_ORANGE, gap);
+    AddBarSegment(s, &xu, yu_bar, &s->barSegmentWidths[1], &s->barHeight, LCARS_PURPLE, gap);
+    AddBarSegment(s, &xu, yu_bar, &s->barSegmentWidths[2], &s->barHeight, LCARS_PURPLE, gap);
+    AddBarSegment(s, &xu, yu_bar, &s->barSegmentWidths[3], &s->barHeight, LCARS_RED_ORANGE, gap);
 
     // Lower elbo
     s->elements[s->numElements++] = (Element){ .kind = ELEM_ELBOW, .position = {s->posX, s->posY}, .width = &s->columnWidth, .height = &s->columnHeight, .color = LCARS_RED_ORANGE, .text="03-975883" , .textSize=20 };
     int y = s->posY + s->columnHeight + s->barHeight + s->innerRadius;
 
-    h200_60_250[0] = 200;
-    h200_60_250[1] = 60;
-    h200_60_250[2] = 250;
+    s->h200_60_250[0] = 200;
+    s->h200_60_250[1] = 60;
+    s->h200_60_250[2] = 250;
 
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &h200_60_250[0], .color = LCARS_RED_ORANGE, .text="04-785466", .textSize=20 }; y = y + 200 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &h200_60_250[1], .color = LCARS_ORANGE, .text="05-423512", .textSize=20 }; y = y + 60 + gap;
-    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &h200_60_250[2], .color = LCARS_ORANGE, .text="06-572983", .textSize=20 }; y = y + 250 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &s->h200_60_250[0], .color = LCARS_RED_ORANGE, .text="04-785466", .textSize=20 }; y = y + 200 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &s->h200_60_250[1], .color = LCARS_ORANGE, .text="05-423512", .textSize=20 }; y = y + 60 + gap;
+    s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE, .position = {s->posX, y + gap}, .width = &s->columnWidth, .height = &s->h200_60_250[2], .color = LCARS_ORANGE, .text="06-572983", .textSize=20 }; y = y + 250 + gap;
 
     int x = s->posX + s->columnWidth + s->barWidth;
-    halfBarHeight = s->barHeight / 2;
-    AddBarSegment(s, &x, s->posY, &w[0], &s->barHeight, LCARS_YELLOW, gap);
-    AddBarSegment(s, &x, s->posY, &w[1], &halfBarHeight, LCARS_YELLOW, gap);
-    AddBarSegment(s, &x, s->posY, &w[2], &s->barHeight, LCARS_PURPLE, gap);
-    AddBarSegment(s, &x, s->posY, &w[3], &s->barHeight, LCARS_ORANGE, gap);
+    s->halfBarHeight = s->barHeight / 2;
+    AddBarSegment(s, &x, s->posY, &s->barSegmentWidths[0], &s->barHeight, LCARS_YELLOW, gap);
+    AddBarSegment(s, &x, s->posY, &s->barSegmentWidths[1], &s->halfBarHeight, LCARS_YELLOW, gap);
+    AddBarSegment(s, &x, s->posY, &s->barSegmentWidths[2], &s->barHeight, LCARS_PURPLE, gap);
+    AddBarSegment(s, &x, s->posY, &s->barSegmentWidths[3], &s->barHeight, LCARS_ORANGE, gap);
 
-    buttonHeight = 50;
-    w210 = 210;
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .action = ACTION_DEBUG, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .action = ACTION_EDIT, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10 }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+e)edit 0129-86" ,.textSize=20};
-    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .action = ACTION_RESET, .position = { x - 220      , s->posY - 20 - s->barHeight - buttonHeight  }, .width = &w210, .height = &buttonHeight, .color = LCARS_BLUE, .text="(LC+r)eset 7232-83", .textSize=20 };
+    s->buttonHeight = 50;
+    s->buttonWidth = 210;
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .action = ACTION_DEBUG, .position = { x - 220      , s->posY - 20 - s->barHeight - 2 * s->buttonHeight - 10 }, .width = &s->buttonWidth, .height = &s->buttonHeight, .color = LCARS_ORANGE, .text="(LC+d)ebug 9888-24", .textSize=20 };
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .action = ACTION_EDIT, .position = { x - 220 - 220, s->posY - 20 - s->barHeight - 2 * s->buttonHeight - 10 }, .width = &s->buttonWidth, .height = &s->buttonHeight, .color = LCARS_BLUE, .text="(LC+e)edit 0129-86" ,.textSize=20};
+    s->elements[s->numElements++] = (Element){ .kind=ELEM_BUTTON, .action = ACTION_RESET, .position = { x - 220      , s->posY - 20 - s->barHeight - s->buttonHeight  }, .width = &s->buttonWidth, .height = &s->buttonHeight, .color = LCARS_BLUE, .text="(LC+r)eset 7232-83", .textSize=20 };
 
     VoiceRecApi *vapi = (VoiceRecApi*)s->voiceApi;
     bool isRecording = (vapi && vapi->IsRecording());
     s->elements[s->numElements++] = (Element){ 
         .kind=ELEM_BUTTON, 
         .action = ACTION_VOICE_INPUT, 
-        .position = { x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight  }, 
-        .width = &w210, 
-        .height = &buttonHeight, 
+        .position = { x - 220 - 220, s->posY - 20 - s->barHeight - s->buttonHeight  }, 
+        .width = &s->buttonWidth, 
+        .height = &s->buttonHeight, 
         .color = isRecording ? RED : LCARS_BLUE, 
         .originalColor = LCARS_BLUE,
         .text = isRecording ? TEXT_RECORDING : TEXT_VOICE_INPUT, 
@@ -943,33 +984,11 @@ void Update(State *s) {
                 }
                 break;
             case ELEM_ELBOW:
-                switch (s->elements[i].elbowOrientation) {
-                    case 0: 
-                        if (
-                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *(s->elements[i].width), .height = *(s->elements[i].height) + s->barHeight + s->innerRadius}) ||
-                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = s->columnWidth + s->barWidth, .height = s->barHeight})
-                        ) {
-                            s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
-                            clickOrHoverNotification(s, i, "elbow element");
-                        } else {
-                            s->elements[i].color = s->elements[i].originalColor;
-                        }
-                        break;
-                    case 1: 
-                        TODO;
-                        break;
-                    case 2: break;
-                    case 3: 
-                        if (
-                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y, .width = *(s->elements[i].width), .height = *(s->elements[i].height) + s->barHeight + s->innerRadius}) ||
-                            CheckCollisionPointRec(GetMousePosition(), (Rectangle){.x=s->elements[i].position.x, .y=s->elements[i].position.y + s->columnHeight + s->innerRadius, .width = s->columnWidth + s->barWidth, .height = s->barHeight})
-                        ) {
-                            s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
-                            clickOrHoverNotification(s, i, "elbow element");
-                        } else {
-                            s->elements[i].color = s->elements[i].originalColor;
-                        }
-                        break;
+                if (CheckElbowCollision(e, GetMousePosition(), s->barWidth, s->barHeight, s->innerRadius)) {
+                    s->elements[i].color = ColorBrightness(s->elements[i].originalColor, 0.2f);
+                    clickOrHoverNotification(s, i, "elbow element");
+                } else {
+                    s->elements[i].color = s->elements[i].originalColor;
                 }
                 break;
             case ELEM_BUTTON:
@@ -1045,17 +1064,8 @@ void Update(State *s) {
                             e->scrollY += 30.0f;
                             ClampScrollY(e);
                         } else if (CheckCollisionPointRec(mPos, track)) {
-                            float visibleRatio = *e->height / e->textHeight;
-                            if (visibleRatio > 1.0f) visibleRatio = 1.0f;
-                            float handleHeight = visibleRatio * track.height;
-                            if (handleHeight < 20.0f) handleHeight = 20.0f;
-
+                            Rectangle handle = GetScrollbarHandleRect(e, track, scrollbarWidth);
                             float scrollRange = e->textHeight - *e->height;
-                            float handleY = track.y;
-                            if (scrollRange > 0.0f) {
-                                handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
-                            }
-                            Rectangle handle = (Rectangle){ scrollbarX, handleY, scrollbarWidth, handleHeight };
 
                             if (CheckCollisionPointRec(mPos, handle)) {
                                 e->draggingScrollbar = true;
@@ -1064,8 +1074,8 @@ void Update(State *s) {
                             } else {
                                 // Jump scroll handle to clicked position
                                 float clickY = mPos.y;
-                                float relativeY = clickY - track.y - handleHeight / 2.0f;
-                                float pct = relativeY / (track.height - handleHeight);
+                                float relativeY = clickY - track.y - handle.height / 2.0f;
+                                float pct = relativeY / (track.height - handle.height);
                                 if (pct < 0.0f) pct = 0.0f;
                                 if (pct > 1.0f) pct = 1.0f;
                                 if (scrollRange > 0.0f) {
@@ -1091,12 +1101,9 @@ void Update(State *s) {
                 if (e->draggingScrollbar) {
                     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
                         float trackHeight = *e->height - 2 * scrollbarWidth - 10;
-                        float visibleRatio = *e->height / e->textHeight;
-                        if (visibleRatio > 1.0f) visibleRatio = 1.0f;
-                        float handleHeight = visibleRatio * trackHeight;
-                        if (handleHeight < 20.0f) handleHeight = 20.0f;
-
-                        float dragRange = trackHeight - handleHeight;
+                        Rectangle track = { scrollbarX, scrollbarY + scrollbarWidth + 5, scrollbarWidth, trackHeight };
+                        Rectangle handle = GetScrollbarHandleRect(e, track, scrollbarWidth);
+                        float dragRange = trackHeight - handle.height;
                         if (dragRange > 0.0f) {
                             float deltaY = GetMousePosition().y - e->dragStartY;
                             float scrollRange = e->textHeight - *e->height;
@@ -1761,17 +1768,7 @@ void UpdateDrawFrame(State *s) {
                     DrawRectangleRounded(track, 0.5f, 4, (Color){ 30, 30, 30, 255 });
 
                     // Calculate and draw handle
-                    float visibleRatio = *e->height / e->textHeight;
-                    if (visibleRatio > 1.0f) visibleRatio = 1.0f;
-                    float handleHeight = visibleRatio * track.height;
-                    if (handleHeight < 20.0f) handleHeight = 20.0f;
-
-                    float scrollRange = e->textHeight - *e->height;
-                    float handleY = track.y;
-                    if (scrollRange > 0.0f) {
-                        handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
-                    }
-                    Rectangle handle = (Rectangle){ scrollbarX, handleY, scrollbarWidth, handleHeight };
+                    Rectangle handle = GetScrollbarHandleRect(e, track, scrollbarWidth);
 
                     bool hoverHandle = CheckCollisionPointRec(GetMousePosition(), handle);
                     Color handleColor = (hoverHandle || e->draggingScrollbar) ? LCARS_YELLOW : LCARS_ORANGE;
@@ -1818,34 +1815,14 @@ void UpdateDrawFrame(State *s) {
 
         }
 
-        if (s->notification && s->notificationTimer > 0.0f) {
+        if (s->notificationTimer > 0.0f) {
             s->notificationTimer -= GetFrameTime();
             DrawText(s->notification,  s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight - s->barHeight , 20, YELLOW);
         } else {
             s->notificationOnElemIdx = -1;
         }
 
-        // if (!s->is_editing) {
-        //     int i = 0;
-        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col W ", sprintf_static(s, i, "%.0f", s->columnWidth) ,         &s->columnWidth , 0, 300); i++;
-        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar H ", sprintf_static(s, i, "%.0f", s->barHeight)   , &s->barHeight   , 0, 300); i++;
-        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Radius", sprintf_static(s, i, "%.0f", s->innerRadius) , &s->innerRadius , 0, 50 ); i++;
-        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Col H ", sprintf_static(s, i, "%.0f", s->columnHeight), &s->columnHeight, 0, 600); i++;
-        //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Bar W ", sprintf_static(s, i, "%.0f", s->barWidth)    , &s->barWidth    , 0, 600); i++;
-        //     GuiToggle(   (Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30, .width=120, .height=20}, "Debug (d)", &s->debug); i++;
-        //     GuiToggle(   (Rectangle){.x=s->controllsX + 130, .y=s->controllsY + (i - 1) * 30, .width=120, .height=20}, "Hide controlls (h)",&s->is_editing);
-        //
-        //     char* code = sprintf_static(s, 
-        //         i, "DrawElbow(%.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, lcarsColor, %s);", 
-        //         s->posX, s->posY, s->columnWidth, s->columnHeight, s->barWidth, s->barHeight, s->innerRadius, s->debug ? "true" : "false"
-        //     );
-        //
-        //     if (GuiTextBox((Rectangle){.x=s->controllsX, .y=s->controllsY + i * 30, .width=500, .height=50},
-        //                 code,
-        //                 22,
-        //                 0)) {s->textBoxEditMode = !s->textBoxEditMode;} 
-        //     i+=2;
-        // }
+
 
         if (s->debug) {
             DrawFPS(10, 10);
