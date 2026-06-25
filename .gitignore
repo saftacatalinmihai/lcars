@@ -3,6 +3,7 @@ emsdk
 raylib-web
 lcars
 lcars-lib.so
+*.so
 lcars.data
 lcars.js
 lcars.wasm
