@@ -1,7 +1,7 @@
 #include <stdio.h>
 #ifdef __EMSCRIPTEN__
 #endif
-#include "lcars_lib.h"
+#include "liblcars.h"
 #include "raylib.h"
 #include "rlgl.h"
 #include <dlfcn.h>

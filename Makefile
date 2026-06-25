@@ -47,20 +47,20 @@ ensure-resources: $(RESOURCE_HELPER)
 	@$(RESOURCE_HELPER)
 
 lcars: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
-	cc -DNOTDEV=1 $(CFLAGS) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
+	cc $(CFLAGS) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
 lcars-release: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
-	cc -DNOTDEV=1 $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
+	cc $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
-lcars-lib.so: lcars_lib.h lcars_lib.c voice_rec.h
-	cc -DNOTDEV=1 $(CFLAGS) -fPIC -shared $(SHARED_FLAGS) -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -o lcars-lib.so lcars_lib.c
+lcars-lib.so: liblcars.h liblcars.c voice_rec.h
+	cc $(CFLAGS) -fPIC -shared $(SHARED_FLAGS) -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -o lcars-lib.so liblcars.c
 
 run: lcars-lib.so lcars
 	./lcars
 
 # Web build targets
 lcars-web: lcars.c voice_rec.c resources_download.c $(RAYLIB_WEB)/libraylib.web.a
-	emcc -DNOTDEV=1 lcars_lib.c lcars.c voice_rec.c resources_download.c sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
+	emcc liblcars.c lcars.c voice_rec.c resources_download.c sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
 
 serve: lcars-web
 	@echo "Starting server at http://localhost:8080/lcars.html"
