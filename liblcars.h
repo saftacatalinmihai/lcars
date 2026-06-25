@@ -1,5 +1,4 @@
 #define _POSIX_C_SOURCE 200809L
-// #include <_locale_posix2008.h>
 #include "raygui.h"
 #include "raylib.h"
 #include "raymath.h"
@@ -11,6 +10,12 @@
 #include <string.h>
 #include <time.h>
 
+static inline double GetTimeSeconds(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
 #define _ISOC99_SOURCE
 #include <math.h>
 
@@ -21,7 +26,7 @@
 #define LCARS_BLUE (Color){155, 155, 255, 255}
 #define TODO exit(1)
 
-#define MAX_ELEMENTS 100
+#define MAX_ELEMENTS 10000
 #define MAX_INPUT_CHARS 1024
 
 #define TEXT_VOICE_INPUT "Voice Input"
@@ -53,7 +58,7 @@ typedef enum ElemKind {
 
 typedef struct Element {
   ElemKind kind;
-  ButtonAction action;
+  ButtonAction on_click;
   iVec2 position;
   Vector3 position3;
   float *width, *height;
@@ -106,7 +111,6 @@ typedef struct Element {
 
 typedef struct State {
   Element elements[MAX_ELEMENTS];
-  char staticText[64][32 * 1024];
   int numElements;
   Color lcarsColor;
   float posX, posY, columnWidth, columnHeight, barWidth, barHeight, innerRadius;
@@ -123,14 +127,79 @@ typedef struct State {
   RayCollision collision; // Ray collision hit info
   sqlite3 *db;
   void *voiceApi;
+  double time_resource_download;
+  double time_voice_init;
+  double time_window_init;
 } State;
-
-void UpdateDrawFrame(State *s);
-void Init(State *s, bool firstInit);
 
 #define NOTIFICATION_DURATION 3.0f
 #define NOTIFICATION_MAX_LEN 48
 
+// -----------------------------------------------------------------------------
+// Public API Function Declarations
+// -----------------------------------------------------------------------------
+void Init(State *s, bool firstInit);
+void Reload(State *s, bool reset);
+void Update(State *s);
+void UpdateDrawFrame(State *s);
+
+// -----------------------------------------------------------------------------
+// Inline Utility Function Declarations
+// -----------------------------------------------------------------------------
+static inline void updateNotification(State *s, const char *notificationText);
+
+#ifdef LCARS_IMPLEMENTATION
+
+// -----------------------------------------------------------------------------
+// Internal Helper Declarations
+// -----------------------------------------------------------------------------
+static void ToggleVoiceRecording(State *s);
+static void ReLayout(State *s);
+static int sqlite_callback(void *state, int argc, char **argv,
+                           char **azColName);
+static int ExecSQL(State *s, const char *sql, const char *successMsg);
+static void InitDB(State *s, bool firstInit);
+static char *GetLogFromDB(State *s);
+static void UpdateLogInDB(State *s, const char *newLog);
+static bool IsWordChar(char c);
+static void MoveGap(Element *e, int index);
+static void GapInsertChar(Element *e, char c);
+static void GapDeleteBack(Element *e);
+static void GapDeleteForward(Element *e);
+static void ReconstructText(Element *e);
+static bool DeleteSelection(Element *e);
+static void StartTextSelection(Element *e, bool shiftDown);
+static void EndTextSelection(Element *e, bool shiftDown);
+static void ClampScrollY(Element *e);
+static int GetLines(const char *text, int *lineStarts, int maxLines);
+static int GetLineForIndex(int index, const int *lineStarts, int numLines);
+static void AddBarSegment(State *s, int *x_cursor, int y, float *width,
+                          float *height, Color color, int gap);
+static void clickOrHoverNotification(State *s, int i, char *elem_pretty_name);
+static Rectangle GetElementBoundingBox(const Element *e);
+static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
+                                    const char *text, Rectangle rec,
+                                    float fontSize, float spacing,
+                                    bool wordWrap, Color tint, int selectStart,
+                                    int selectLength, Color selectTint,
+                                    Color selectBackTint, float *outTextHeight,
+                                    float *outCursorY, int cursorIndex);
+static void DrawTextBoxed(State *s, Element *e, Font font, const char *text,
+                          Rectangle rec, float fontSize, float spacing,
+                          bool wordWrap, Color tint, float *outTextHeight,
+                          float *outCursorY, int cursorIndex);
+static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
+                      int barWidth, int barHeight, int innerRadius, Color color,
+                      int orientation, bool debug);
+static int GetCharIndexAtMouse(const State *s, Font font, const char *text,
+                               Vector2 textPos, float fontSize, float spacing,
+                               Vector2 mousePos, float recWidth);
+
+#endif // LCARS_IMPLEMENTATION
+
+// -----------------------------------------------------------------------------
+// Inline Utility Function Implementations
+// -----------------------------------------------------------------------------
 static inline void updateNotification(State *s, const char *notificationText) {
   snprintf(s->notification, NOTIFICATION_MAX_LEN, "%s", notificationText);
   s->notificationTimer = NOTIFICATION_DURATION;
@@ -140,14 +209,6 @@ static inline void updateNotification(State *s, const char *notificationText) {
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
-
-char *sprintf_static(State *s, int index, const char *fmt, ...) {
-  va_list args;
-  va_start(args, fmt);
-  vsnprintf(s->staticText[index], sizeof(s->staticText[index]), fmt, args);
-  va_end(args);
-  return s->staticText[index];
-}
 
 static void ToggleVoiceRecording(State *s) {
   VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
@@ -160,7 +221,7 @@ static void ToggleVoiceRecording(State *s) {
   Element *voiceBtn = NULL;
   for (int j = 0; j < s->numElements; j++) {
     if (s->elements[j].kind == ELEM_BUTTON &&
-        s->elements[j].action == ACTION_VOICE_INPUT) {
+        s->elements[j].on_click == ACTION_VOICE_INPUT) {
       voiceBtn = &s->elements[j];
       break;
     }
@@ -184,8 +245,6 @@ static void ToggleVoiceRecording(State *s) {
   }
 }
 
-static void ReLayout(State *s);
-
 // Shared layout static variables
 static float w600 = 600;
 static float h400 = 400;
@@ -198,11 +257,10 @@ static float h200_60_250[3];
 static float halfBarHeight;
 static float buttonHeight;
 static float w210;
-// static void updateNotification(State* s, const char* notificationText);
 
 static int sqlite_callback(void *state, int argc, char **argv,
                            char **azColName) {
-  State* s = (State*)state;
+  State *s = (State *)state;
   int i;
   for (i = 0; i < argc; i++) {
     printf("%s = %s\n", azColName[i], argv[i] ? argv[i] : "NULL");
@@ -245,7 +303,8 @@ static void InitDB(State *s, bool firstInit) {
       "value_float REAL,"
       "value_blob BLOB,"
       "done_bool INTEGER DEFAULT 0,"
-      "created_at_utc TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'utc')),"
+      "created_at_utc TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', "
+      "'utc')),"
       "last_modified_at_utc TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', "
       "'utc'))"
       ");";
@@ -438,20 +497,17 @@ static int GetLineForIndex(int index, const int *lineStarts, int numLines) {
   return numLines - 1;
 }
 
-Vector2 V2fromiVec2(iVec2 v) { return (Vector2){v.x, v.y}; }
-
-// 2
-
 void Init(State *s, bool firstInit) {
+  double t_init_start = GetTimeSeconds();
+
+  double t_layout_start = GetTimeSeconds();
   s->debug = false;
   s->is_editing = false;
   s->controllsX = 600;
   s->controllsY = 400;
   s->lcarsColor = (Color){204, 153, 204, 255}; // Purple
-  // s->posX = 40;
   s->posX = 0;
   s->posY = 210;
-  // s->posY = 0;
   s->columnWidth = 200;
   s->columnHeight = 40;
   s->barWidth = 400;
@@ -463,7 +519,9 @@ void Init(State *s, bool firstInit) {
   notificationText[0] = '\0';
   s->notification = notificationText;
   ReLayout(s);
+  double t_layout_end = GetTimeSeconds();
 
+  double t_db_start = GetTimeSeconds();
   if (firstInit) {
     sqlite3 *db = malloc(sizeof(sqlite3 *));
     int rc = sqlite3_open("lcars.db", &db);
@@ -481,7 +539,6 @@ void Init(State *s, bool firstInit) {
   strncpy(text, dbLog, MAX_INPUT_CHARS);
   text[MAX_INPUT_CHARS] = '\0';
   free(dbLog);
-  // strcpy(text, "Insert text here");
 
   printf("Loaded text from DB: %s\n", text);
   int textLen = strlen(text);
@@ -493,7 +550,9 @@ void Init(State *s, bool firstInit) {
   memcpy(gapBuffer, text, textLen);
   int gapStart = textLen;
   int gapEnd = textCapacity;
+  double t_db_end = GetTimeSeconds();
 
+  double t_editor_start = GetTimeSeconds();
   s->elements[s->numElements++] =
       (Element){.kind = ELEM_TEXT_EDITOR,
                 .position = {s->posX + s->columnWidth + s->innerRadius + 60,
@@ -529,17 +588,16 @@ void Init(State *s, bool firstInit) {
                 .draggingScrollbar = false,
                 .dragStartY = 0.0f,
                 .dragStartScrollY = 0.0f};
+  double t_editor_end = GetTimeSeconds();
 
+  double t_media_start = GetTimeSeconds();
   s->font = GetFontDefault();
-  // s->font = LoadFont("NotoColorEmoji-Regular.ttf");
 
   Image image;
   if (FileExists("resources/earth.png")) {
     image = LoadImage("resources/earth.png");
-    // ImageToPOT(&image, BLACK);
     ImageFormat(&image,
                 PIXELFORMAT_UNCOMPRESSED_R8G8B8A8); // Convert RGB to RGBA
-    // PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
     TraceLog(LOG_WARNING, "Texture ready!");
     s->elements[1].text = NULL;
     s->elements[1].textSize = 0;
@@ -556,20 +614,16 @@ void Init(State *s, bool firstInit) {
   ImageFlipVertical(&image);
   ImageFlipHorizontal(&image);
   Texture2D texture = LoadTextureFromImage(image);
-  // GenTextureMipmaps(&texture);
-  // SetTextureFilter(texture, TEXTURE_FILTER_BILINEAR);
   if (!IsTextureValid(texture)) {
     TraceLog(LOG_ERROR, "Texture is invalid!");
     s->elements[1].text = "Texture is invalid!";
   }
+  double t_media_end = GetTimeSeconds();
 
-  // Texture2D texture = LoadTexture("resources/earth.jpg");
-  // UnloadImage(image);
+  double t_model_start = GetTimeSeconds();
   Model earthModel = LoadModelFromMesh(GenMeshSphere(3.0f, 32, 32));
   earthModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture;
   earthModel.transform = MatrixRotateX(DEG2RAD * 90.0f);
-  // earthModel.transform = MatrixRotateY(DEG2RAD * 40.0f);
-  // earthModel.transform = MatrixRotateZ(DEG2RAD * 90.0f);
 
   s->elements[s->numElements++] =
       (Element){.kind = ELEM_SPHERE,
@@ -582,9 +636,13 @@ void Init(State *s, bool firstInit) {
                 .originalColor = WHITE,
                 .model = earthModel,
                 .rotation = 0};
+  double t_model_end = GetTimeSeconds();
 
+  double t_style_start = GetTimeSeconds();
   GuiLoadStyle("resources/style_cyber.rgs");
+  double t_style_end = GetTimeSeconds();
 
+  double t_render_texture_start = GetTimeSeconds();
   for (int i = 0; i < MAX_ELEMENTS; i++) {
     Element e = s->elements[i];
     if (ColorIsEqual(e.originalColor, (Color){0, 0, 0, 0})) {
@@ -593,7 +651,6 @@ void Init(State *s, bool firstInit) {
 
     switch (s->elements[i].kind) {
     case ELEM_SPHERE: {
-      // Element e = s->elements[i];
       Element *e = &s->elements[i];
 
       Camera camera = {0};
@@ -618,6 +675,44 @@ void Init(State *s, bool firstInit) {
       break;
     }
   }
+  double t_render_texture_end = GetTimeSeconds();
+  double t_init_end = GetTimeSeconds();
+
+  printf(
+      "\n=================== STARTUP PERFORMANCE TIMING ===================\n");
+  if (firstInit) {
+    printf("1. Resource Download:     %8.2f ms\n",
+           s->time_resource_download * 1000.0);
+    printf("2. Voice Rec Init (Lazy):  %8.2f ms\n",
+           s->time_voice_init * 1000.0);
+    printf("3. Window Initialization:  %8.2f ms\n",
+           s->time_window_init * 1000.0);
+  }
+  printf("4. Basic Layout Setup:     %8.2f ms\n",
+         (t_layout_end - t_layout_start) * 1000.0);
+  printf("5. DB Open & Init:         %8.2f ms\n",
+         (t_db_end - t_db_start) * 1000.0);
+  printf("6. Text Editor Setup:      %8.2f ms\n",
+         (t_editor_end - t_editor_start) * 1000.0);
+  printf("7. Font & Image Loading:   %8.2f ms\n",
+         (t_media_end - t_media_start) * 1000.0);
+  printf("8. 3D Model Generation:    %8.2f ms\n",
+         (t_model_end - t_model_start) * 1000.0);
+  printf("9. GUI Style Loading:      %8.2f ms\n",
+         (t_style_end - t_style_start) * 1000.0);
+  printf("10. RenderTexture Setup:   %8.2f ms\n",
+         (t_render_texture_end - t_render_texture_start) * 1000.0);
+  printf("-----------------------------------------------------------------\n");
+  double total_init_time = (t_init_end - t_init_start);
+  printf("Total Init() Time:         %8.2f ms\n", total_init_time * 1000.0);
+  if (firstInit) {
+    double total_startup_time = s->time_resource_download + s->time_voice_init +
+                                s->time_window_init + total_init_time;
+    printf("Total App Startup Time:    %8.2f ms\n",
+           total_startup_time * 1000.0);
+  }
+  printf(
+      "==================================================================\n\n");
 }
 
 void Reload(State *s, bool reset) {
@@ -639,7 +734,7 @@ static void AddBarSegment(State *s, int *x_cursor, int y, float *width,
   *x_cursor += (int)*width + gap;
 }
 
-void ReLayout(State *s) {
+static void ReLayout(State *s) {
   // Clone elements to preserve manually adjusted layouts and other elements
   Element temp[MAX_ELEMENTS];
   for (int i = 0; i < MAX_ELEMENTS; i++) {
@@ -703,7 +798,7 @@ void ReLayout(State *s) {
                                             .height = &h200_60_250[0],
                                             .color = LCARS_RED_ORANGE,
                                             .text = "04-785466",
-                                            .action = ACTION_PRINT_DB,
+                                            .on_click = ACTION_PRINT_DB,
                                             .textSize = 20};
   y = y + 200 + gap;
   s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE,
@@ -734,7 +829,7 @@ void ReLayout(State *s) {
   w210 = 210;
   s->elements[s->numElements++] =
       (Element){.kind = ELEM_BUTTON,
-                .action = ACTION_DEBUG,
+                .on_click = ACTION_DEBUG,
                 .position = {x - 220, s->posY - 20 - s->barHeight -
                                           2 * buttonHeight - 10},
                 .width = &w210,
@@ -744,7 +839,7 @@ void ReLayout(State *s) {
                 .textSize = 20};
   s->elements[s->numElements++] =
       (Element){.kind = ELEM_BUTTON,
-                .action = ACTION_EDIT,
+                .on_click = ACTION_EDIT,
                 .position = {x - 220 - 220, s->posY - 20 - s->barHeight -
                                                 2 * buttonHeight - 10},
                 .width = &w210,
@@ -754,7 +849,7 @@ void ReLayout(State *s) {
                 .textSize = 20};
   s->elements[s->numElements++] = (Element){
       .kind = ELEM_BUTTON,
-      .action = ACTION_RESET,
+      .on_click = ACTION_RESET,
       .position = {x - 220, s->posY - 20 - s->barHeight - buttonHeight},
       .width = &w210,
       .height = &buttonHeight,
@@ -766,7 +861,7 @@ void ReLayout(State *s) {
   bool isRecording = (vapi && vapi->IsRecording());
   s->elements[s->numElements++] = (Element){
       .kind = ELEM_BUTTON,
-      .action = ACTION_VOICE_INPUT,
+      .on_click = ACTION_VOICE_INPUT,
       .position = {x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight},
       .width = &w210,
       .height = &buttonHeight,
@@ -781,17 +876,7 @@ void ReLayout(State *s) {
                 .color = LCARS_YELLOW,
                 .textSize = 48,
                 .text = "LCARS ACCESS 441"};
-  // s->elements[s->numElements++] = (Element){ .kind=ELEM_TEXT, .position = {
-  // s->posX + s->columnWidth + s->innerRadius, s->posY - 2 * s->columnHeight -
-  // s->barHeight - 40 - 10 }, .color = LCARS_YELLOW, .textSize = 20,
-  // .text="LShift to move camera perspective with mouse\nLShift + W,A,S,D to
-  // move object\n" };
 }
-
-//  void updateNotification(State* s, const char* notificationText) {
-//     snprintf(s->notification, NOTIFICATION_MAX_LEN, "%s...",
-//     notificationText); s->notificationTimer = NOTIFICATION_DURATION;
-// }
 
 static void clickOrHoverNotification(State *s, int i, char *elem_pretty_name) {
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ||
@@ -807,9 +892,9 @@ static void clickOrHoverNotification(State *s, int i, char *elem_pretty_name) {
 }
 
 // Helper function to find the character index under the mouse
-int GetCharIndexAtMouse(const State *s, Font font, const char *text,
-                        Vector2 textPos, float fontSize, float spacing,
-                        Vector2 mousePos, float recWidth) {
+static int GetCharIndexAtMouse(const State *s, Font font, const char *text,
+                               Vector2 textPos, float fontSize, float spacing,
+                               Vector2 mousePos, float recWidth) {
   (void)s;
   if (text == NULL)
     return 0;
@@ -910,8 +995,6 @@ int GetCharIndexAtMouse(const State *s, Font font, const char *text,
 }
 
 static Rectangle GetElementBoundingBox(const Element *e) {
-  // printf("Getting bounding box for element at position (%d, %d)\n",
-  // e->position.x, e->position.y); printf("Element kind: %d\n", e->kind);
   float w = 0;
   float h = 0;
   if (e->kind == ELEM_TEXT) {
@@ -921,7 +1004,7 @@ static Rectangle GetElementBoundingBox(const Element *e) {
       h = e->textSize;
   } else {
 
-    w = e->width != NULL? *e->width : 0;
+    w = e->width != NULL ? *e->width : 0;
     h = e->height != NULL ? *e->height : 0;
   }
   return (Rectangle){(float)e->position.x, (float)e->position.y, w, h};
@@ -980,7 +1063,6 @@ void Update(State *s) {
 
   Vector2 mPos = GetMousePosition();
   SetMouseCursor(MOUSE_CURSOR_DEFAULT);
-  // UpdateCamera(&s->camera, CAMERA_ORBITAL);
 
   // Handle element dragging and resizing
   int draggingIdx = -1;
@@ -1029,65 +1111,66 @@ void Update(State *s) {
   } else {
     // Find which element to interact with (reverse order for top-most)
     if (s->is_editing) {
-        for (int i = MAX_ELEMENTS - 1; i >= 0; i--) {
-            Element *e = &s->elements[i];
-            if (e->kind == ELEM_NOTHING)
-                continue;
+      for (int i = MAX_ELEMENTS - 1; i >= 0; i--) {
+        Element *e = &s->elements[i];
+        if (e->kind == ELEM_NOTHING)
+          continue;
 
-            Rectangle r = GetElementBoundingBox(e);
+        Rectangle r = GetElementBoundingBox(e);
 
-            // Drag handle at top-left
-            Rectangle dragHandle = {r.x - 8, r.y - 8, 16, 16};
-            // Resize handle at bottom-right
-            Rectangle resizeHandle = {r.x + r.width - 8, r.y + r.height - 8, 16, 16};
+        // Drag handle at top-left
+        Rectangle dragHandle = {r.x - 8, r.y - 8, 16, 16};
+        // Resize handle at bottom-right
+        Rectangle resizeHandle = {r.x + r.width - 8, r.y + r.height - 8, 16,
+                                  16};
 
-            if (CheckCollisionPointRec(mPos, resizeHandle)) {
-                SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
-                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    e->isResizing = true;
-                    e->dragOffsetX = mPos.x - (e->position.x + *e->width);
-                    e->dragOffsetY = mPos.y - (e->position.y + *e->height);
-                    break;
-                }
-            } else if (CheckCollisionPointRec(mPos, dragHandle)) {
-                SetMouseCursor(MOUSE_CURSOR_RESIZE_ALL);
-                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    e->isDragging = true;
-                    e->dragOffsetX = mPos.x - e->position.x;
-                    e->dragOffsetY = mPos.y - e->position.y;
-                    break;
-                }
-            }
+        if (CheckCollisionPointRec(mPos, resizeHandle)) {
+          SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
+          if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            e->isResizing = true;
+            e->dragOffsetX = mPos.x - (e->position.x + *e->width);
+            e->dragOffsetY = mPos.y - (e->position.y + *e->height);
+            break;
+          }
+        } else if (CheckCollisionPointRec(mPos, dragHandle)) {
+          SetMouseCursor(MOUSE_CURSOR_RESIZE_ALL);
+          if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            e->isDragging = true;
+            e->dragOffsetX = mPos.x - e->position.x;
+            e->dragOffsetY = mPos.y - e->position.y;
+            break;
+          }
         }
+      }
     }
   }
   for (int i = 0; i < MAX_ELEMENTS; i++) {
     Element *e = &s->elements[i];
-    bool isHovering = CheckCollisionPointRec(GetMousePosition(),
-                                      GetElementBoundingBox(e));
+    bool isHovering =
+        CheckCollisionPointRec(GetMousePosition(), GetElementBoundingBox(e));
     if (isHovering) {
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            switch (e->action) {
-                case ACTION_DEBUG:
-                    s->debug = !s->debug;
-                    break;
-                case ACTION_EDIT:
-                    s->is_editing = !s->is_editing;
-                    break;
-                case ACTION_RESET:
-                    Reload(s, true);
-                    break;
-                case ACTION_VOICE_INPUT:
-                    ToggleVoiceRecording(s);
-                    break;
-                case ACTION_PRINT_DB:
-                    printf("Executing SQL query to print database entries...\n");
-                    ExecSQL(s, "SELECT * FROM entries;", "Done");
-                    break;
-                default:
-                    break;
-            }
+      if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        switch (e->on_click) {
+        case ACTION_DEBUG:
+          s->debug = !s->debug;
+          break;
+        case ACTION_EDIT:
+          s->is_editing = !s->is_editing;
+          break;
+        case ACTION_RESET:
+          Reload(s, true);
+          break;
+        case ACTION_VOICE_INPUT:
+          ToggleVoiceRecording(s);
+          break;
+        case ACTION_PRINT_DB:
+          printf("Executing SQL query to print database entries...\n");
+          ExecSQL(s, "SELECT * FROM entries;", "Done");
+          break;
+        default:
+          break;
         }
+      }
     }
 
     switch (s->elements[i].kind) {
@@ -1155,7 +1238,7 @@ void Update(State *s) {
     case ELEM_BUTTON: {
       VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
       bool isRecording =
-          (vapi && vapi->IsRecording() && e->action == ACTION_VOICE_INPUT);
+          (vapi && vapi->IsRecording() && e->on_click == ACTION_VOICE_INPUT);
       if (isHovering) {
         if (isRecording) {
           s->elements[i].color = (Color){255, 100, 100, 255};
@@ -1164,24 +1247,6 @@ void Update(State *s) {
               ColorBrightness(s->elements[i].originalColor, 0.2f);
         }
         clickOrHoverNotification(s, i, "button element");
-        // if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        //   switch (e->action) {
-        //   case ACTION_DEBUG:
-        //     s->debug = !s->debug;
-        //     break;
-        //   case ACTION_EDIT:
-        //     s->is_editing = !s->is_editing;
-        //     break;
-        //   case ACTION_RESET:
-        //     Reload(s, true);
-        //     break;
-        //   case ACTION_VOICE_INPUT:
-        //     ToggleVoiceRecording(s);
-        //     break;
-        //   default:
-        //     break;
-        //   }
-        // }
       } else {
         if (isRecording) {
           s->elements[i].color = RED;
@@ -1643,16 +1708,8 @@ void Update(State *s) {
       break;
     }
     case ELEM_SPHERE: {
-      // Element e = s->elements[i];
-      // s->ray = GetScreenToWorldRay(GetMousePosition(), e->camera);
-      // s->collision = GetRayCollisionSphere(s->ray, e->position3, 3);
-
       if (isHovering) {
-        // if (s->collision.hit) {
-        // printf("Hit sphere element %d\n", i);
         e->color = ColorBrightness(GREEN, 0.8f);
-        // if (!(memcmp(&e->color, &e->originalColor, sizeof(Color)) == 0))
-        // e->color = BLUE;
         clickOrHoverNotification(s, i, "sphere element");
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
           UpdateCamera(&e->camera, CAMERA_THIRD_PERSON);
@@ -1664,12 +1721,6 @@ void Update(State *s) {
         e->rotation += 0.1f;
       }
       e->rotation = fmodf(e->rotation, 360.0f);
-      // UpdateCamera(&e->camera, CAMERA_ORBITAL);
-      // e->model.transform = MatrixMultiply(
-      //     MatrixRotateY(DEG2RAD * e->rotation), // Spin around poles
-      //     MatrixRotateX(DEG2RAD * 90.0f)        // Initial tilt to fix JPG
-      //     orientation
-      // );
     }
     case ELEM_NOTHING:
     case ELEM_TOTAL_KINDS:
@@ -1680,9 +1731,9 @@ void Update(State *s) {
 
 // Orientation: 0 - corner at top-left, 1 - corner at top-right, 2 - corner at
 // bottom-right, 3 - corner at bottom-left
-void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
-               int barWidth, int barHeight, int innerRadius, Color color,
-               int orientation, bool debug) {
+static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
+                      int barWidth, int barHeight, int innerRadius, Color color,
+                      int orientation, bool debug) {
   switch (orientation) {
   case 0:
     if (columnWidth >= barHeight + innerRadius) {
@@ -1747,22 +1798,6 @@ void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
                innerRadius, innerRadius + barHeight, 90, 180, 0,
                debug ? MAGENTA : color); // Decorative ring around the elbow
     }
-    // if (barHeight >= columnWidth + innerRadius) {
-    //     DrawRectangle(posX, posY,columnWidth,columnHeight, color); //
-    //     Vertical bar DrawRectangle(posX + columnWidth - innerRadius -
-    //     barHeight, posY + columnHeight, barWidth, barHeight, debug ? GREEN :
-    //     color); // Horizontal bar Vector2 center = { posX + columnWidth -
-    //     innerRadius - barHeight, posY + columnHeight - innerRadius -
-    //     barHeight }; DrawCircleSector(center, innerRadius + columnWidth, 90,
-    //     180, 0, debug ? BLUE : color); // Elbow curve DrawRectangle(posX +
-    //     columnWidth - innerRadius - barHeight, posY + columnHeight -
-    //     innerRadius - columnWidth, columnWidth + innerRadius - barHeight,
-    //     barHeight - columnWidth - innerRadius, debug ? ORANGE : color); //
-    //     Fill the gap between the curve and the bars DrawRing((Vector2){ posX
-    //     + columnWidth - innerRadius - barHeight, posY + columnHeight -
-    //     innerRadius }, innerRadius, innerRadius + columnWidth, 90, 180, 0,
-    //     debug ? MAGENTA : color); // Decorative ring around the elbow
-    // }
     break;
   }
 }
@@ -1994,17 +2029,6 @@ void UpdateDrawFrame(State *s) {
   if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_SPACE)) {
     ToggleVoiceRecording(s);
   }
-  // if (IsKeyDown(KEY_LEFT_CONTROL)) {
-  //     if (s->notificationOnElemIdx != -2) {
-  //         snprintf(s->notification, NOTIFICATION_MAX_LEN, "[Changing
-  //         Perspective]"); s->notificationTimer = NOTIFICATION_DURATION;
-  //         s->notificationOnElemIdx = -2;
-  //     } else {
-  //         s->notificationTimer = NOTIFICATION_DURATION; // Reset timer while
-  //         holding shift
-  //     }
-  //     // HideCursor();
-  // }
 
   Update(s);
   Vector2 mPos = GetMousePosition();
@@ -2019,13 +2043,8 @@ void UpdateDrawFrame(State *s) {
       BeginTextureMode(e->renderTexture);
       ClearBackground(BLACK);
       BeginMode3D(e->camera);
-      // DrawSphere(e->position3, 2.0f, e->color);
-      // DrawModelWiresEx(e->model,
-
       DrawModelEx(e->model, e->position3, (Vector3){0.0f, 1.0f, 0.0f},
                   e->rotation, (Vector3){2.0f, 2.0f, 2.0f}, e->color);
-
-      // DrawModel(e->model, e->position3, 1.0f, e->color);
 
       if (s->debug) {
         DrawGrid(10, 2.0f);
@@ -2137,15 +2156,11 @@ void UpdateDrawFrame(State *s) {
       break;
     }
     case ELEM_SPHERE: {
-      // if (s->is_editing) {
       DrawTextureRec(e->renderTexture.texture,
                      (Rectangle){0, 0, *e->width, *e->height},
                      (Vector2){e->position.x, e->position.y}, WHITE);
 
       if (s->debug) {
-        // DrawRectangle(e->position.x- 5, e->position.y + 5, e->width + 10,
-        // e->height + 10, RED); Vector2 screenPos =
-        // GetWorldToScreen(e->position3, e->camera);
         Vector2 screenPos = {e->position.x, e->position.y};
 
         // Draw Text - position, rotation
@@ -2175,7 +2190,6 @@ void UpdateDrawFrame(State *s) {
                                 : "Orthographic"),
                  screenPos.x, screenPos.y + 120, 10, WHITE);
       }
-      // }
       break;
     }
     case ELEM_NOTHING:
@@ -2206,50 +2220,11 @@ void UpdateDrawFrame(State *s) {
     s->notificationOnElemIdx = -1;
   }
 
-  // if (!s->is_editing) {
-  //     int i = 0;
-  //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i *
-  //     30, .width=120, .height=20}, "Col W ", sprintf_static(s, i, "%.0f",
-  //     s->columnWidth) ,         &s->columnWidth , 0, 300); i++;
-  //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i *
-  //     30, .width=120, .height=20}, "Bar H ", sprintf_static(s, i, "%.0f",
-  //     s->barHeight)   , &s->barHeight   , 0, 300); i++;
-  //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i *
-  //     30, .width=120, .height=20}, "Radius", sprintf_static(s, i, "%.0f",
-  //     s->innerRadius) , &s->innerRadius , 0, 50 ); i++;
-  //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i *
-  //     30, .width=120, .height=20}, "Col H ", sprintf_static(s, i, "%.0f",
-  //     s->columnHeight), &s->columnHeight, 0, 600); i++;
-  //     GuiSliderBar((Rectangle){.x=s->controllsX,       .y=s->controllsY + i *
-  //     30, .width=120, .height=20}, "Bar W ", sprintf_static(s, i, "%.0f",
-  //     s->barWidth)    , &s->barWidth    , 0, 600); i++; GuiToggle(
-  //     (Rectangle){.x=s->controllsX,       .y=s->controllsY + i * 30,
-  //     .width=120, .height=20}, "Debug (d)", &s->debug); i++; GuiToggle(
-  //     (Rectangle){.x=s->controllsX + 130, .y=s->controllsY + (i - 1) * 30,
-  //     .width=120, .height=20}, "Hide controlls (h)",&s->is_editing);
-  //
-  //     char* code = sprintf_static(s,
-  //         i, "DrawElbow(%.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, lcarsColor,
-  //         %s);", s->posX, s->posY, s->columnWidth, s->columnHeight,
-  //         s->barWidth, s->barHeight, s->innerRadius, s->debug ? "true" :
-  //         "false"
-  //     );
-  //
-  //     if (GuiTextBox((Rectangle){.x=s->controllsX, .y=s->controllsY + i * 30,
-  //     .width=500, .height=50},
-  //                 code,
-  //                 22,
-  //                 0)) {s->textBoxEditMode = !s->textBoxEditMode;}
-  //     i+=2;
-  // }
-
   if (s->debug) {
     DrawFPS(10, 10);
     DrawText(TextFormat("x:%.2f, y:%.2f", mPos.x, mPos.y), mPos.x + 20, mPos.y,
              10, GREEN);
   }
-  // DrawText(TextFormat("Rotation: %.2f", s->elements[21].rotation), 10, 30,
-  // 10, WHITE);
 
   // Draw interactive handles on top of all elements
   if (s->is_editing) {

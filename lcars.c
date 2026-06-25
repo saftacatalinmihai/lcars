@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #ifdef __EMSCRIPTEN__
 #endif
@@ -23,9 +24,16 @@ int main(void) {
 
     State *s = (State*)calloc(10, sizeof(State)); // Reserve some more space just in case we add more fields... hack
     
+    double t_res_start = GetTimeSeconds();
     CheckAndDownloadResources();
+    double t_res_end = GetTimeSeconds();
+    s->time_resource_download = t_res_end - t_res_start;
     
+    double t_voice_start = GetTimeSeconds();
     VoiceRec_Init("./resources/model");
+    double t_voice_end = GetTimeSeconds();
+    s->time_voice_init = t_voice_end - t_voice_start;
+    
     static VoiceRecApi voiceApi = {
         .Init = VoiceRec_Init,
         .Shutdown = VoiceRec_Shutdown,
@@ -41,13 +49,19 @@ int main(void) {
     
 #ifdef __EMSCRIPTEN__
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    double t_win_start = GetTimeSeconds();
     InitWindow(800, 500, "LCARS Custom Elbow");
+    double t_win_end = GetTimeSeconds();
+    s->time_window_init = t_win_end - t_win_start;
     Init(s, true);
     // Let browser control frame rate
     emscripten_set_main_loop_arg((em_arg_callback_func)UpdateDrawFrame, s, 0, 1);
 #else
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    double t_win_start = GetTimeSeconds();
     InitWindow(1600, 900, "LCARS ");
+    double t_win_end = GetTimeSeconds();
+    s->time_window_init = t_win_end - t_win_start;
     Fn_Update Update = NULL;
     Fn_Init Init = NULL;
     Fn_Reload Reload = NULL;

@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "voice_rec.h"
 
 #ifndef __EMSCRIPTEN__
@@ -11,6 +12,13 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h>
+
+static inline double GetTimeSeconds(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
 
 #define AUDIO_BUFFER_SIZE (64 * 1024)
 #define RESULT_QUEUE_SIZE 32
@@ -36,6 +44,11 @@ static volatile bool g_partialChanged = false;
 // Vosk instances
 static VoskModel *g_model = NULL;
 static VoskRecognizer *g_recognizer = NULL;
+
+// Lazy initialization variables
+static char g_modelPath[512] = {0};
+static volatile bool g_lazyInitialized = false;
+static pthread_mutex_t g_initMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Threading & Recording State
 static ma_device g_device;
@@ -201,7 +214,7 @@ static void *VoiceWorkerThread(void *arg) {
 }
 
 // Public API
-bool VoiceRec_Init(const char *modelPath) {
+static bool Real_VoiceRec_Init(const char *modelPath) {
     g_model = vosk_model_new(modelPath);
     if (!g_model) {
         fprintf(stderr, "VoiceRec: Failed to load Vosk model from '%s'\n", modelPath);
@@ -215,6 +228,15 @@ bool VoiceRec_Init(const char *modelPath) {
         return false;
     }
     printf("VoiceRec: Initialized successfully with model '%s'\n", modelPath);
+    return true;
+}
+
+bool VoiceRec_Init(const char *modelPath) {
+    if (modelPath) {
+        strncpy(g_modelPath, modelPath, sizeof(g_modelPath) - 1);
+        g_modelPath[sizeof(g_modelPath) - 1] = '\0';
+    }
+    g_lazyInitialized = false;
     return true;
 }
 
@@ -243,6 +265,20 @@ void VoiceRec_Shutdown(void) {
 }
 
 bool VoiceRec_StartRecording(void) {
+    pthread_mutex_lock(&g_initMutex);
+    if (!g_lazyInitialized) {
+        double t0 = GetTimeSeconds();
+        bool success = Real_VoiceRec_Init(g_modelPath);
+        double t1 = GetTimeSeconds();
+        if (!success) {
+            pthread_mutex_unlock(&g_initMutex);
+            return false;
+        }
+        printf("[VoiceRec] Lazy initialization took %.2f ms\n", (t1 - t0) * 1000.0);
+        g_lazyInitialized = true;
+    }
+    pthread_mutex_unlock(&g_initMutex);
+
     if (g_isRecording) return true;
     if (!g_recognizer) return false;
     

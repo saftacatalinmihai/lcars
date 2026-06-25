@@ -47,7 +47,7 @@ ensure-resources: $(RESOURCE_HELPER)
 	@$(RESOURCE_HELPER)
 
 lcars: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
-	cc $(CFLAGS) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
+	cc $(CFLAGS)         -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
 lcars-release: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
 	cc $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)

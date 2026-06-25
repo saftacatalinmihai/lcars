@@ -66,10 +66,7 @@ static void create_parent_dirs(const char *path) {
 }
 
 #ifndef __EMSCRIPTEN__
-struct WriteData {
-    FILE *fp;
-    const char *path;
-};
+
 
 static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *stream) {
     return fwrite(ptr, size, nmemb, (FILE *)stream);
