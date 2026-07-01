@@ -2012,6 +2012,131 @@ static void DrawTextBoxed(State *s, Element *e, Font font, const char *text,
                           outTextHeight, outCursorY, cursorIndex);
 }
 
+// --- Scripted demo driver (only runs when the LCARS_DEMO env var is set). ---
+// Drives the three headline features for a screen recording: voice dictation,
+// dragging an element, and resizing the editor. Called AFTER Update() so the
+// drag/resize flags it sets survive the real input pass (which clears them).
+static void DemoTick(State *s) {
+  Element *editor = NULL, *voiceBtn = NULL, *earth = NULL;
+  for (int i = 0; i < s->numElements; i++) {
+    Element *e = &s->elements[i];
+    if (!editor && e->kind == ELEM_TEXT_EDITOR) editor = e;
+    if (!voiceBtn && e->kind == ELEM_BUTTON && e->on_click == ACTION_VOICE_INPUT)
+      voiceBtn = e;
+    if (!earth && e->kind == ELEM_SPHERE) earth = e;
+  }
+
+  static bool cleared = false;
+  if (!cleared && editor) {
+    editor->gapStart = 0;
+    editor->gapEnd = editor->textCapacity;
+    editor->selectTextStart = -1;
+    editor->selectTextEnd = -1;
+    editor->selectTextLength = 0;
+    ReconstructText(editor);
+    cleared = true;
+  }
+
+  // Idle (showing the clean initial frame) until the capture script drops the
+  // "go" sentinel, so the recording starts exactly when the action does.
+  static double t0 = -1.0;
+  if (t0 < 0.0) {
+    FILE *gof = fopen("/tmp/lcars_go", "r");
+    if (!gof)
+      return;
+    fclose(gof);
+    t0 = GetTime();
+  }
+  double t = GetTime() - t0;
+
+  static const char *logLine =
+      "CAPTAIN'S LOG, STARDATE 79341.2. WE HAVE ENTERED THE NEUTRAL ZONE. ";
+  int L = (int)strlen(logLine);
+  static int typed = 0;
+  static iVec2 earthHome;
+  static bool earthHomeSet = false;
+  static float edW0 = 0, edH0 = 0, demoEdW = 0, demoEdH = 0;
+  static bool edSized = false;
+
+  const double TYPE_START = 0.6, CPS = 24.0;
+  double typeDone = TYPE_START + (double)L / CPS;
+  double tEdit = typeDone + 0.6;
+  double tDrag = tEdit + 0.2, dragDur = 1.8;
+  double tResize = tDrag + dragDur + 0.3, resizeDur = 1.6;
+
+  // Phase 1: voice dictation - button lights up red, text streams in.
+  if (t > 0.4 && t < typeDone + 0.3 && voiceBtn) {
+    voiceBtn->text = TEXT_RECORDING;
+    voiceBtn->color = RED;
+  }
+  if (t > TYPE_START && editor) {
+    int target = (int)((t - TYPE_START) * CPS);
+    if (target > L) target = L;
+    bool changed = false;
+    while (typed < target) {
+      GapInsertChar(editor, logLine[typed]);
+      typed++;
+      changed = true;
+    }
+    if (changed) {
+      ReconstructText(editor);
+      editor->snapToCursor = 2;
+      int s0 = typed > 22 ? typed - 22 : 0;
+      char note[80];
+      snprintf(note, sizeof(note), "[Voice: \"...%.*s\"]", typed - s0,
+               logLine + s0);
+      updateNotification(s, note);
+    }
+  }
+  if (t > typeDone + 0.3 && voiceBtn) {
+    voiceBtn->text = TEXT_VOICE_INPUT;
+    voiceBtn->color = voiceBtn->originalColor;
+  }
+
+  // Phase 2: enter edit mode, then drag the Earth to a new spot.
+  if (t > tEdit) {
+    s->is_editing = true;
+    updateNotification(s, "EDIT MODE: drag + resize");
+  }
+  if (earth) {
+    if (!earthHomeSet) {
+      earthHome = earth->position;
+      earthHomeSet = true;
+    }
+    if (t > tDrag && t < tDrag + dragDur) {
+      double p = (t - tDrag) / dragDur;
+      double e = p * p * (3.0 - 2.0 * p); // smoothstep ease
+      earth->isDragging = true;
+      earth->position.x = (int)(earthHome.x - 330.0 * e);
+      earth->position.y = (int)(earthHome.y + 30.0 * e);
+    } else if (t >= tDrag + dragDur) {
+      earth->isDragging = false;
+    }
+  }
+
+  // Phase 3: resize the editor panel via its bottom-right handle.
+  if (editor && t > tResize) {
+    if (!edSized) {
+      edW0 = *editor->width;
+      edH0 = *editor->height;
+      demoEdW = edW0;
+      demoEdH = edH0;
+      editor->width = &demoEdW;
+      editor->height = &demoEdH;
+      edSized = true;
+    }
+    if (t < tResize + resizeDur) {
+      double p = (t - tResize) / resizeDur;
+      double e = p * p * (3.0 - 2.0 * p);
+      editor->isResizing = true;
+      demoEdW = edW0 + 140.0f * (float)e;
+      demoEdH = edH0 + 80.0f * (float)e;
+    } else {
+      editor->isResizing = false;
+    }
+  }
+}
+
 void UpdateDrawFrame(State *s) {
   if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_D)) {
     s->debug = !s->debug;
@@ -2031,6 +2156,8 @@ void UpdateDrawFrame(State *s) {
   }
 
   Update(s);
+  if (getenv("LCARS_DEMO"))
+    DemoTick(s);
   Vector2 mPos = GetMousePosition();
 
   // Pre render on texture areas or any other requirements for first pass:

@@ -20,7 +20,7 @@ jobs:
         sudo apt-get install -y --no-install-recommends \
           libasound2-dev mesa-common-dev libx11-dev libxrandr-dev \
           libxi-dev xorg-dev libgl1-mesa-dev libglu1-mesa-dev \
-          libxcursor-dev libxinerama-dev xvfb
+          libxcursor-dev libxinerama-dev xvfb xdotool
     - name: Install Raylib via PPA
       run: |
         sudo add-apt-repository ppa:texus/raylib
@@ -34,4 +34,18 @@ jobs:
       run: make
     - name: Run application and verify startup
       run: |
-        xvfb-run -s "-screen 0 1600x900x24" -a timeout 5s ./lcars || { exit_code=$?; echo "Process exited with code $exit_code"; [ $exit_code -eq 124 ]; }
+        xvfb-run -s "-screen 0 1600x900x24" -a bash -c '
+          ./lcars &
+          APP_PID=$!
+          sleep 3
+          echo "Simulating clicks..."
+          xdotool mousemove 800 450 click 1
+          sleep 1
+          xdotool mousemove 100 100 click 1
+          sleep 2
+          kill $APP_PID
+          wait $APP_PID
+          exit_code=$?
+          echo "Process exited with code $exit_code"
+          [ $exit_code -eq 143 ]
+        '
