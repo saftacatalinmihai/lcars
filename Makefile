@@ -53,7 +53,7 @@ lcars-release: lcars.c voice_rec.c voice_rec.h resources_download.c resources_do
 	cc $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
 lcars-lib.so: liblcars.h liblcars.c voice_rec.h
-	cc $(CFLAGS) -fPIC -shared $(SHARED_FLAGS) -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -o lcars-lib.so liblcars.c
+	cc $(CFLAGS) -fPIC -shared $(SHARED_FLAGS) -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -lcurl -o lcars-lib.so liblcars.c
 
 run: lcars-lib.so lcars
 	./lcars

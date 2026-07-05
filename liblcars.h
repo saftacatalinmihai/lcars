@@ -5,10 +5,162 @@
 #include "rlgl.h"
 #include "sqlite3.h"
 #include "voice_rec.h"
+#include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+typedef struct String {
+  char *data;     // Null-terminated buffer
+  int len;        // Length of the string (excluding null terminator)
+  bool is_static; // True if it points to static memory and should not be freed
+} String;
+
+static inline String StringInit(const char *c_str) {
+  String s;
+  if (c_str == NULL) {
+    s.data = malloc(1);
+    if (s.data)
+      s.data[0] = '\0';
+    s.len = 0;
+    s.is_static = false;
+  } else {
+    s.len = (int)strlen(c_str);
+    s.data = malloc(s.len + 1);
+    if (s.data) {
+      memcpy(s.data, c_str, s.len + 1);
+    }
+    s.is_static = false;
+  }
+  return s;
+}
+
+static inline String StringInitLen(const char *c_str, int len) {
+  String s;
+  if (c_str == NULL || len <= 0) {
+    s.data = malloc(1);
+    if (s.data)
+      s.data[0] = '\0';
+    s.len = 0;
+    s.is_static = false;
+  } else {
+    s.len = len;
+    s.data = malloc(s.len + 1);
+    if (s.data) {
+      memcpy(s.data, c_str, len);
+      s.data[len] = '\0';
+    }
+    s.is_static = false;
+  }
+  return s;
+}
+
+static inline String StringStatic(const char *c_str) {
+  String s;
+  s.data = (char *)(c_str ? c_str : "");
+  s.len = (int)strlen(s.data);
+  s.is_static = true;
+  return s;
+}
+
+static inline void StringFree(String *s) {
+  if (s) {
+    if (!s->is_static && s->data) {
+      free(s->data);
+    }
+    s->data = NULL;
+    s->len = 0;
+    s->is_static = true;
+  }
+}
+
+static inline String StringDup(String src) {
+  if (src.is_static) {
+    return src;
+  }
+  return StringInit(src.data);
+}
+
+static inline void StringAssign(String *dest, String src) {
+  if (dest == &src)
+    return;
+  StringFree(dest);
+  *dest = StringDup(src);
+}
+
+static inline void StringAssignC(String *dest, const char *c_str) {
+  StringFree(dest);
+  *dest = StringInit(c_str);
+}
+
+static inline void StringAssignStatic(String *dest, const char *c_str) {
+  StringFree(dest);
+  *dest = StringStatic(c_str);
+}
+
+static inline void StringConcat(String *dest, String src) {
+  if (!src.data || src.len == 0)
+    return;
+  int newLen = dest->len + src.len;
+  char *newData = malloc(newLen + 1);
+  if (newData) {
+    if (dest->data && dest->len > 0) {
+      memcpy(newData, dest->data, dest->len);
+    }
+    memcpy(newData + dest->len, src.data, src.len);
+    newData[newLen] = '\0';
+  }
+  StringFree(dest);
+  dest->data = newData;
+  dest->len = newLen;
+  dest->is_static = false;
+}
+
+static inline void StringConcatC(String *dest, const char *c_str) {
+  if (!c_str)
+    return;
+  String s = StringStatic(c_str);
+  StringConcat(dest, s);
+}
+
+static inline bool StringEq(String s1, String s2) {
+  if (s1.len != s2.len)
+    return false;
+  if (s1.data == s2.data)
+    return true;
+  if (!s1.data || !s2.data)
+    return false;
+  return strcmp(s1.data, s2.data) == 0;
+}
+
+static inline bool StringEqC(String s, const char *c_str) {
+  if (!c_str)
+    return s.data == NULL || s.len == 0;
+  if (!s.data)
+    return false;
+  return strcmp(s.data, c_str) == 0;
+}
+
+static inline void StringFormat(String *dest, const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  va_list args_copy;
+  va_copy(args_copy, args);
+  int needed = vsnprintf(NULL, 0, fmt, args_copy);
+  va_end(args_copy);
+
+  char *buf = malloc(needed + 1);
+  if (buf) {
+    vsnprintf(buf, needed + 1, fmt, args);
+    StringFree(dest);
+    dest->data = buf;
+    dest->len = needed;
+    dest->is_static = false;
+  }
+  va_end(args);
+}
 
 static inline double GetTimeSeconds(void) {
   struct timespec ts;
@@ -39,6 +191,7 @@ typedef enum ButtonAction {
   ACTION_RESET,
   ACTION_VOICE_INPUT,
   ACTION_PRINT_DB,
+  ACTION_LOAD_HYPERMEDIA,
 } ButtonAction;
 
 typedef struct iVec2 {
@@ -65,7 +218,7 @@ typedef struct Element {
   Color color;
   Color originalColor;
   int elbowOrientation; // Only used if kind == ELBOW
-  char *text;           // Text on button or just text elem
+  String text;          // Text on button or just text elem
   int textLen;          // text lenght of chars.
   int textLineLen;      // crt line len
   int textLines;
@@ -120,7 +273,7 @@ typedef struct State {
   int controllsY;
   bool textBoxEditMode;
   Font font;
-  char *notification;
+  String notification;
   int notificationOnElemIdx;
   float notificationTimer;
   Ray ray;                // Picking line ray
@@ -142,11 +295,12 @@ void Init(State *s, bool firstInit);
 void Reload(State *s, bool reset);
 void Update(State *s);
 void UpdateDrawFrame(State *s);
+void LoadHypermediaDocument(State *s, String filename);
 
 // -----------------------------------------------------------------------------
 // Inline Utility Function Declarations
 // -----------------------------------------------------------------------------
-static inline void updateNotification(State *s, const char *notificationText);
+static inline void updateNotification(State *s, String notificationText);
 
 #ifdef LCARS_IMPLEMENTATION
 
@@ -157,10 +311,10 @@ static void ToggleVoiceRecording(State *s);
 static void ReLayout(State *s);
 static int sqlite_callback(void *state, int argc, char **argv,
                            char **azColName);
-static int ExecSQL(State *s, const char *sql, const char *successMsg);
+static int ExecSQL(State *s, String sql, String successMsg);
 static void InitDB(State *s, bool firstInit);
-static char *GetLogFromDB(State *s);
-static void UpdateLogInDB(State *s, const char *newLog);
+static String GetLogFromDB(State *s);
+static void UpdateLogInDB(State *s, String newLog);
 static bool IsWordChar(char c);
 static void MoveGap(Element *e, int index);
 static void GapInsertChar(Element *e, char c);
@@ -171,27 +325,27 @@ static bool DeleteSelection(Element *e);
 static void StartTextSelection(Element *e, bool shiftDown);
 static void EndTextSelection(Element *e, bool shiftDown);
 static void ClampScrollY(Element *e);
-static int GetLines(const char *text, int *lineStarts, int maxLines);
+static int GetLines(String text, int *lineStarts, int maxLines);
 static int GetLineForIndex(int index, const int *lineStarts, int numLines);
 static void AddBarSegment(State *s, int *x_cursor, int y, float *width,
                           float *height, Color color, int gap);
-static void clickOrHoverNotification(State *s, int i, char *elem_pretty_name);
+static void clickOrHoverNotification(State *s, int i, String elem_pretty_name);
 static Rectangle GetElementBoundingBox(const Element *e);
 static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
-                                    const char *text, Rectangle rec,
-                                    float fontSize, float spacing,
-                                    bool wordWrap, Color tint, int selectStart,
-                                    int selectLength, Color selectTint,
-                                    Color selectBackTint, float *outTextHeight,
-                                    float *outCursorY, int cursorIndex);
-static void DrawTextBoxed(State *s, Element *e, Font font, const char *text,
+                                    String text, Rectangle rec, float fontSize,
+                                    float spacing, bool wordWrap, Color tint,
+                                    int selectStart, int selectLength,
+                                    Color selectTint, Color selectBackTint,
+                                    float *outTextHeight, float *outCursorY,
+                                    int cursorIndex);
+static void DrawTextBoxed(State *s, Element *e, Font font, String text,
                           Rectangle rec, float fontSize, float spacing,
                           bool wordWrap, Color tint, float *outTextHeight,
                           float *outCursorY, int cursorIndex);
 static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
                       int barWidth, int barHeight, int innerRadius, Color color,
                       int orientation, bool debug);
-static int GetCharIndexAtMouse(const State *s, Font font, const char *text,
+static int GetCharIndexAtMouse(const State *s, Font font, String text,
                                Vector2 textPos, float fontSize, float spacing,
                                Vector2 mousePos, float recWidth);
 
@@ -200,12 +354,14 @@ static int GetCharIndexAtMouse(const State *s, Font font, const char *text,
 // -----------------------------------------------------------------------------
 // Inline Utility Function Implementations
 // -----------------------------------------------------------------------------
-static inline void updateNotification(State *s, const char *notificationText) {
-  snprintf(s->notification, NOTIFICATION_MAX_LEN, "%s", notificationText);
+static inline void updateNotification(State *s, String notificationText) {
+  StringAssign(&s->notification, notificationText);
   s->notificationTimer = NOTIFICATION_DURATION;
 }
 
 #ifdef LCARS_IMPLEMENTATION
+
+#include <curl/curl.h>
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -213,7 +369,7 @@ static inline void updateNotification(State *s, const char *notificationText) {
 static void ToggleVoiceRecording(State *s) {
   VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
   if (!vapi) {
-    updateNotification(s, "VOICE ERROR");
+    updateNotification(s, StringStatic("VOICE ERROR"));
     return;
   }
 
@@ -230,17 +386,17 @@ static void ToggleVoiceRecording(State *s) {
   if (vapi->IsRecording()) {
     vapi->StopRecording();
     if (voiceBtn) {
-      voiceBtn->text = TEXT_VOICE_INPUT;
+      StringAssignStatic(&voiceBtn->text, TEXT_VOICE_INPUT);
       voiceBtn->color = voiceBtn->originalColor;
     }
   } else {
     if (vapi->StartRecording()) {
       if (voiceBtn) {
-        voiceBtn->text = TEXT_RECORDING;
+        StringAssignStatic(&voiceBtn->text, TEXT_RECORDING);
         voiceBtn->color = RED;
       }
     } else {
-      updateNotification(s, "Voice Recording failed to start");
+      updateNotification(s, StringStatic("Voice Recording failed to start"));
     }
   }
 }
@@ -261,6 +417,7 @@ static float w210;
 static int sqlite_callback(void *state, int argc, char **argv,
                            char **azColName) {
   State *s = (State *)state;
+  (void)s;
   int i;
   for (i = 0; i < argc; i++) {
     printf("%s = %s\n", azColName[i], argv[i] ? argv[i] : "NULL");
@@ -269,16 +426,16 @@ static int sqlite_callback(void *state, int argc, char **argv,
   return 0;
 }
 
-static int ExecSQL(State *s, const char *sql, const char *successMsg) {
+static int ExecSQL(State *s, String sql, String successMsg) {
   char *zErrMsg = 0;
-  int rc = sqlite3_exec(s->db, sql, sqlite_callback, s, &zErrMsg);
+  int rc = sqlite3_exec(s->db, sql.data, sqlite_callback, s, &zErrMsg);
   if (rc != SQLITE_OK) {
     fprintf(stderr, "SQL error: %s\n", zErrMsg);
-    updateNotification(s, "SQL error");
+    updateNotification(s, StringStatic("SQL error"));
     sqlite3_free(zErrMsg);
   } else {
-    if (successMsg) {
-      fprintf(stdout, "%s\n", successMsg);
+    if (successMsg.data && successMsg.len > 0) {
+      fprintf(stdout, "%s\n", successMsg.data);
       updateNotification(s, successMsg);
     }
   }
@@ -288,10 +445,10 @@ static int ExecSQL(State *s, const char *sql, const char *successMsg) {
 static void InitDB(State *s, bool firstInit) {
   (void)firstInit;
   ExecSQL(s,
-          "CREATE TABLE IF NOT EXISTS log (id INTEGER PRIMARY KEY "
-          "AUTOINCREMENT, text TEXT);",
-          "Table created successfully");
-  char *sql_entry_create =
+          StringStatic("CREATE TABLE IF NOT EXISTS log (id INTEGER PRIMARY KEY "
+                       "AUTOINCREMENT, text TEXT);"),
+          StringStatic("Table created successfully"));
+  const char *sql_entry_create =
       "CREATE TABLE IF NOT EXISTS entries ("
       "id INTEGER PRIMARY KEY AUTOINCREMENT," // type of thing, 0=log, 1=task,
                                               // 2=event, etc. these are just
@@ -308,7 +465,8 @@ static void InitDB(State *s, bool firstInit) {
       "last_modified_at_utc TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', "
       "'utc'))"
       ");";
-  ExecSQL(s, sql_entry_create, "Table Entry created successfully");
+  ExecSQL(s, StringStatic(sql_entry_create),
+          StringStatic("Table Entry created successfully"));
 
   char datename[32];
   struct tm *to;
@@ -320,40 +478,42 @@ static void InitDB(State *s, bool firstInit) {
       "INSERT OR IGNORE INTO log (id, text) VALUES (0, '%q Captain log');",
       datename);
   if (sql_insert_full) {
-    ExecSQL(s, sql_insert_full, "Data inserted successfully");
+    ExecSQL(s, StringStatic(sql_insert_full),
+            StringStatic("Data inserted successfully"));
     sqlite3_free(sql_insert_full);
   }
 }
 
-static char *GetLogFromDB(State *s) {
-  char *output = NULL;
+static String GetLogFromDB(State *s) {
+  String output;
   sqlite3_stmt *stmt;
   int rc = sqlite3_prepare_v2(s->db, "SELECT text FROM log where id=?1", -1,
                               &stmt, 0);
   if (rc != SQLITE_OK) {
-    updateNotification(s, "failure fetching data");
+    updateNotification(s, StringStatic("failure fetching data"));
+    output = StringInit("");
   } else {
     sqlite3_bind_text(stmt, 1, "0", -1, SQLITE_STATIC);
     rc = sqlite3_step(stmt);
     if (rc == SQLITE_ROW) {
-      output = strdup((char *)sqlite3_column_text(stmt, 0));
+      const char *col_text = (const char *)sqlite3_column_text(stmt, 0);
+      output = StringInit(col_text);
+    } else {
+      output = StringInit("");
     }
     sqlite3_finalize(stmt);
-  }
-  if (!output) {
-    output = strdup("");
   }
   return output;
 }
 
-static void UpdateLogInDB(State *s, const char *newLog) {
+static void UpdateLogInDB(State *s, String newLog) {
   char *sql_update_full =
-      sqlite3_mprintf("UPDATE log SET text = (%Q) WHERE id = 0;", newLog);
+      sqlite3_mprintf("UPDATE log SET text = (%Q) WHERE id = 0;", newLog.data);
   if (!sql_update_full) {
-    updateNotification(s, "SQL error");
+    updateNotification(s, StringStatic("SQL error"));
     return;
   }
-  ExecSQL(s, sql_update_full, NULL);
+  ExecSQL(s, StringStatic(sql_update_full), StringStatic(""));
   sqlite3_free(sql_update_full);
 }
 
@@ -420,10 +580,21 @@ static void ReconstructText(Element *e) {
   int afterLen = e->textCapacity - e->gapEnd;
   int totalLen = beforeLen + afterLen;
 
-  e->text = realloc(e->text, totalLen + 1);
-  memcpy(e->text, e->gapBuffer, beforeLen);
-  memcpy(e->text + beforeLen, e->gapBuffer + e->gapEnd, afterLen);
-  e->text[totalLen] = '\0';
+  char *newData;
+  if (e->text.is_static || e->text.data == NULL) {
+    newData = malloc(totalLen + 1);
+  } else {
+    newData = realloc(e->text.data, totalLen + 1);
+  }
+
+  if (newData) {
+    memcpy(newData, e->gapBuffer, beforeLen);
+    memcpy(newData + beforeLen, e->gapBuffer + e->gapEnd, afterLen);
+    newData[totalLen] = '\0';
+    e->text.data = newData;
+    e->text.len = totalLen;
+    e->text.is_static = false;
+  }
   e->textLen = totalLen;
 }
 
@@ -474,12 +645,12 @@ static void ClampScrollY(Element *e) {
     e->scrollY = maxScroll;
 }
 
-static int GetLines(const char *text, int *lineStarts, int maxLines) {
+static int GetLines(String text, int *lineStarts, int maxLines) {
   int count = 0;
   lineStarts[count++] = 0;
-  int len = strlen(text);
+  int len = text.len;
   for (int i = 0; i < len; i++) {
-    if (text[i] == '\n') {
+    if (text.data && text.data[i] == '\n') {
       if (count < maxLines) {
         lineStarts[count++] = i + 1;
       }
@@ -515,9 +686,7 @@ void Init(State *s, bool firstInit) {
   s->innerRadius = 40;
   s->numElements = 0;
 
-  char *notificationText = (char *)malloc(NOTIFICATION_MAX_LEN);
-  notificationText[0] = '\0';
-  s->notification = notificationText;
+  s->notification = StringInit("");
   ReLayout(s);
   double t_layout_end = GetTimeSeconds();
 
@@ -532,13 +701,17 @@ void Init(State *s, bool firstInit) {
     }
     s->db = db;
   }
+
   InitDB(s, firstInit);
 
-  char *dbLog = GetLogFromDB(s);
+// Gap buffer init for text input element
+#ifdef HYPERMEDIA
+
+  String dbLog = GetLogFromDB(s);
   char *text = malloc(MAX_INPUT_CHARS + 1);
-  strncpy(text, dbLog, MAX_INPUT_CHARS);
+  strncpy(text, dbLog.data ? dbLog.data : "", MAX_INPUT_CHARS);
   text[MAX_INPUT_CHARS] = '\0';
-  free(dbLog);
+  StringFree(&dbLog);
 
   printf("Loaded text from DB: %s\n", text);
   int textLen = strlen(text);
@@ -562,7 +735,7 @@ void Init(State *s, bool firstInit) {
                 .color = LCARS_PURPLE,
                 .originalColor = LCARS_PURPLE,
                 .textSize = 20,
-                .text = text,
+                .text = StringInit(text),
                 .textLen = textLen,
                 .textLineLen = textLen,
                 .gapBuffer = gapBuffer,
@@ -588,6 +761,7 @@ void Init(State *s, bool firstInit) {
                 .draggingScrollbar = false,
                 .dragStartY = 0.0f,
                 .dragStartScrollY = 0.0f};
+  free(text);
   double t_editor_end = GetTimeSeconds();
 
   double t_media_start = GetTimeSeconds();
@@ -599,15 +773,15 @@ void Init(State *s, bool firstInit) {
     ImageFormat(&image,
                 PIXELFORMAT_UNCOMPRESSED_R8G8B8A8); // Convert RGB to RGBA
     TraceLog(LOG_WARNING, "Texture ready!");
-    s->elements[1].text = NULL;
+    s->elements[1].text = StringStatic(NULL);
     s->elements[1].textSize = 0;
   } else {
     TraceLog(LOG_WARNING, "Texture not ready yet!");
-    s->elements[1].text = "Texture not ready!";
+    s->elements[1].text = StringStatic("Texture not ready!");
     s->elements[1].textSize = 20;
   }
   if (image.data == NULL) {
-    s->notification = "Failed to load image";
+    s->notification = StringStatic("Failed to load image");
     // s->elements[1].text = "Failed to load image";
   }
   ImageRotateCW(&image);
@@ -616,7 +790,7 @@ void Init(State *s, bool firstInit) {
   Texture2D texture = LoadTextureFromImage(image);
   if (!IsTextureValid(texture)) {
     TraceLog(LOG_ERROR, "Texture is invalid!");
-    s->elements[1].text = "Texture is invalid!";
+    s->elements[1].text = StringStatic("Texture is invalid!");
   }
   double t_media_end = GetTimeSeconds();
 
@@ -675,6 +849,7 @@ void Init(State *s, bool firstInit) {
       break;
     }
   }
+#endif // HYPERMEDIA
   double t_render_texture_end = GetTimeSeconds();
   double t_init_end = GetTimeSeconds();
 
@@ -784,7 +959,7 @@ static void ReLayout(State *s) {
                                             .width = &s->columnWidth,
                                             .height = &s->columnHeight,
                                             .color = LCARS_RED_ORANGE,
-                                            .text = "03-975883",
+                                            .text = StringStatic("03-975883"),
                                             .textSize = 20};
   int y = s->posY + s->columnHeight + s->barHeight + s->innerRadius;
 
@@ -797,7 +972,7 @@ static void ReLayout(State *s) {
                                             .width = &s->columnWidth,
                                             .height = &h200_60_250[0],
                                             .color = LCARS_RED_ORANGE,
-                                            .text = "04-785466",
+                                            .text = StringStatic("04-785466"),
                                             .on_click = ACTION_PRINT_DB,
                                             .textSize = 20};
   y = y + 200 + gap;
@@ -806,7 +981,7 @@ static void ReLayout(State *s) {
                                             .width = &s->columnWidth,
                                             .height = &h200_60_250[1],
                                             .color = LCARS_ORANGE,
-                                            .text = "05-423512",
+                                            .text = StringStatic("05-423512"),
                                             .textSize = 20};
   y = y + 60 + gap;
   s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE,
@@ -814,7 +989,7 @@ static void ReLayout(State *s) {
                                             .width = &s->columnWidth,
                                             .height = &h200_60_250[2],
                                             .color = LCARS_ORANGE,
-                                            .text = "06-572983",
+                                            .text = StringStatic("06-572983"),
                                             .textSize = 20};
   y = y + 250 + gap;
 
@@ -835,7 +1010,7 @@ static void ReLayout(State *s) {
                 .width = &w210,
                 .height = &buttonHeight,
                 .color = LCARS_ORANGE,
-                .text = "(LC+d)ebug 9888-24",
+                .text = StringStatic("(LC+d)ebug 9888-24"),
                 .textSize = 20};
   s->elements[s->numElements++] =
       (Element){.kind = ELEM_BUTTON,
@@ -845,7 +1020,7 @@ static void ReLayout(State *s) {
                 .width = &w210,
                 .height = &buttonHeight,
                 .color = LCARS_BLUE,
-                .text = "(LC+e)edit 0129-86",
+                .text = StringStatic("(LC+e)edit 0129-86"),
                 .textSize = 20};
   s->elements[s->numElements++] = (Element){
       .kind = ELEM_BUTTON,
@@ -854,7 +1029,7 @@ static void ReLayout(State *s) {
       .width = &w210,
       .height = &buttonHeight,
       .color = LCARS_BLUE,
-      .text = "(LC+r)eset 7232-83",
+      .text = StringStatic("(LC+r)eset 7232-83"),
       .textSize = 20};
 
   VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
@@ -867,38 +1042,52 @@ static void ReLayout(State *s) {
       .height = &buttonHeight,
       .color = isRecording ? RED : LCARS_BLUE,
       .originalColor = LCARS_BLUE,
-      .text = isRecording ? TEXT_RECORDING : TEXT_VOICE_INPUT,
+      .text = StringStatic(isRecording ? TEXT_RECORDING : TEXT_VOICE_INPUT),
       .textSize = 20};
+
+  s->elements[s->numElements++] =
+      (Element){.kind = ELEM_BUTTON,
+                .on_click = ACTION_LOAD_HYPERMEDIA,
+                .position = {x - 220 - 220 - 220,
+                             s->posY - 20 - s->barHeight - buttonHeight},
+                .width = &w210,
+                .height = &buttonHeight,
+                .color = LCARS_YELLOW,
+                .originalColor = LCARS_YELLOW,
+                .text = StringStatic("http://localhost:8000/main.html"),
+                .textSize = 20};
 
   s->elements[s->numElements++] =
       (Element){.kind = ELEM_TEXT,
                 .position = {x - 220 - 220 - 20, yu},
                 .color = LCARS_YELLOW,
                 .textSize = 48,
-                .text = "LCARS ACCESS 441"};
+                .text = StringStatic("LCARS ACCESS 441")};
 }
 
-static void clickOrHoverNotification(State *s, int i, char *elem_pretty_name) {
+static void clickOrHoverNotification(State *s, int i, String elem_pretty_name) {
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ||
       s->notificationOnElemIdx != i) {
-    char buf[NOTIFICATION_MAX_LEN];
+    String buf = {0};
     const char *action =
         IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ? "Clicked" : "Hovering";
-    snprintf(buf, sizeof(buf), "[%s %s %d] %s", action, elem_pretty_name, i,
-             s->elements[i].text ? s->elements[i].text : "");
+    StringFormat(&buf, "[%s %s %d] %s", action,
+                 elem_pretty_name.data ? elem_pretty_name.data : "", i,
+                 s->elements[i].text.data ? s->elements[i].text.data : "");
     updateNotification(s, buf);
+    StringFree(&buf);
     s->notificationOnElemIdx = i;
   }
 }
 
 // Helper function to find the character index under the mouse
-static int GetCharIndexAtMouse(const State *s, Font font, const char *text,
+static int GetCharIndexAtMouse(const State *s, Font font, String text,
                                Vector2 textPos, float fontSize, float spacing,
                                Vector2 mousePos, float recWidth) {
   (void)s;
-  if (text == NULL)
+  if (text.data == NULL)
     return 0;
-  int length = strlen(text);
+  int length = text.len;
 
   float textOffsetY = 0.0f;
   float textOffsetX = 0.0f;
@@ -932,7 +1121,7 @@ static int GetCharIndexAtMouse(const State *s, Font font, const char *text,
 
   for (int i = 0; i < length;) {
     int codepointByteCount = 0;
-    int codepoint = GetCodepoint(&text[i], &codepointByteCount);
+    int codepoint = GetCodepoint(&text.data[i], &codepointByteCount);
     int index = GetGlyphIndex(font, codepoint);
 
     if (codepoint == 0x3f)
@@ -999,7 +1188,7 @@ static Rectangle GetElementBoundingBox(const Element *e) {
   float h = 0;
   if (e->kind == ELEM_TEXT) {
     if (e->width == NULL)
-      w = MeasureText(e->text ? e->text : "", e->textSize);
+      w = MeasureText(e->text.data ? e->text.data : "", e->textSize);
     if (e->height == NULL)
       h = e->textSize;
   } else {
@@ -1021,7 +1210,7 @@ void Update(State *s) {
           char fullNotify[300];
           snprintf(fullNotify, sizeof(fullNotify), "[Voice: \"%s\"]",
                    partialBuf);
-          updateNotification(s, fullNotify);
+          updateNotification(s, StringStatic(fullNotify));
         }
       }
     }
@@ -1035,17 +1224,11 @@ void Update(State *s) {
           break;
         }
       }
+
       if (editor) {
-        int len = strlen(voiceBuf);
         bool textChanged = false;
-
-        if (editor->selectTextStart >= 0 &&
-            editor->selectTextEnd != editor->selectTextStart) {
-          DeleteSelection(editor);
-          textChanged = true;
-        }
-
-        for (int k = 0; k < len; k++) {
+        int voiceBufLen = strlen(voiceBuf);
+        for (int k = 0; k < voiceBufLen; k++) {
           GapInsertChar(editor, voiceBuf[k]);
           textChanged = true;
         }
@@ -1058,7 +1241,7 @@ void Update(State *s) {
       }
     }
   } else {
-    updateNotification(s, "VOICE ERROR");
+    updateNotification(s, StringStatic("VOICE ERROR"));
   }
 
   Vector2 mPos = GetMousePosition();
@@ -1165,7 +1348,18 @@ void Update(State *s) {
           break;
         case ACTION_PRINT_DB:
           printf("Executing SQL query to print database entries...\n");
-          ExecSQL(s, "SELECT * FROM entries;", "Done");
+          ExecSQL(s, StringStatic("SELECT * FROM entries;"),
+                  StringStatic("Done"));
+          break;
+        case ACTION_LOAD_HYPERMEDIA:
+          if (e->text.data && (strncmp(e->text.data, "http://", 7) == 0 ||
+                               strncmp(e->text.data, "https://", 8) == 0 ||
+                               strncmp(e->text.data, "file://", 7) == 0 ||
+                               strstr(e->text.data, ".html") != NULL)) {
+            LoadHypermediaDocument(s, e->text);
+          } else {
+            LoadHypermediaDocument(s, StringStatic("file://document.html"));
+          }
           break;
         default:
           break;
@@ -1178,7 +1372,7 @@ void Update(State *s) {
       if (isHovering) {
         s->elements[i].color =
             ColorBrightness(s->elements[i].originalColor, 0.2f);
-        clickOrHoverNotification(s, i, "element");
+        clickOrHoverNotification(s, i, StringStatic("element"));
       } else {
         s->elements[i].color = s->elements[i].originalColor;
       }
@@ -1201,7 +1395,7 @@ void Update(State *s) {
                             .height = s->barHeight})) {
           s->elements[i].color =
               ColorBrightness(s->elements[i].originalColor, 0.2f);
-          clickOrHoverNotification(s, i, "elbow element");
+          clickOrHoverNotification(s, i, StringStatic("elbow element"));
         } else {
           s->elements[i].color = s->elements[i].originalColor;
         }
@@ -1228,7 +1422,7 @@ void Update(State *s) {
                             .height = s->barHeight})) {
           s->elements[i].color =
               ColorBrightness(s->elements[i].originalColor, 0.2f);
-          clickOrHoverNotification(s, i, "elbow element");
+          clickOrHoverNotification(s, i, StringStatic("elbow element"));
         } else {
           s->elements[i].color = s->elements[i].originalColor;
         }
@@ -1246,7 +1440,7 @@ void Update(State *s) {
           s->elements[i].color =
               ColorBrightness(s->elements[i].originalColor, 0.2f);
         }
-        clickOrHoverNotification(s, i, "button element");
+        clickOrHoverNotification(s, i, StringStatic("button element"));
       } else {
         if (isRecording) {
           s->elements[i].color = RED;
@@ -1269,7 +1463,7 @@ void Update(State *s) {
                                         .height = *e->height};
 
       if (CheckCollisionPointRec(GetMousePosition(), activeRec)) {
-        clickOrHoverNotification(s, i, "text box element");
+        clickOrHoverNotification(s, i, StringStatic("text box element"));
         if (!e->isFocused)
           e->color = ColorBrightness(e->originalColor, 0.2f);
         e->isFocused = true;
@@ -1412,9 +1606,10 @@ void Update(State *s) {
         if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) &&
             IsKeyPressed(KEY_C)) {
           if (e->selectTextLength <= 0) {
-            SetClipboardText(e->text);
-            updateNotification(s, "All text copied to clipboard");
-            printf("Copied all text to clipboard: |%s|\n", e->text);
+            SetClipboardText(e->text.data ? e->text.data : "");
+            updateNotification(s, StringStatic("All text copied to clipboard"));
+            printf("Copied all text to clipboard: |%s|\n",
+                   e->text.data ? e->text.data : "");
           } else {
             int selStart = e->selectTextLength > 0
                                ? e->selectTextStart
@@ -1422,11 +1617,12 @@ void Update(State *s) {
             int selLength = e->selectTextLength > 0 ? e->selectTextLength
                                                     : -e->selectTextLength;
             char *selectedText = (char *)malloc(selLength + 1);
-            memcpy(selectedText, e->text + selStart, selLength);
+            memcpy(selectedText, e->text.data + selStart, selLength);
             selectedText[selLength] = '\0';
             SetClipboardText(selectedText);
             printf("Copied to clipboard: |%s|\n", selectedText);
-            updateNotification(s, "Selected text copied to clipboard");
+            updateNotification(
+                s, StringStatic("Selected text copied to clipboard"));
             free(selectedText);
           }
         }
@@ -1445,7 +1641,7 @@ void Update(State *s) {
             textChanged = true;
             e->snapToCursor = 2;
             printf("Pasted from clipboard: |%s|\n", clipboardText);
-            updateNotification(s, "Clipboard text pasted");
+            updateNotification(s, StringStatic("Clipboard text pasted"));
           }
         }
 
@@ -1473,14 +1669,14 @@ void Update(State *s) {
             if (isWordJump) {
               int target = e->gapStart;
               if (target > 0) {
-                if (e->text[target - 1] == '\n') {
+                if (e->text.data[target - 1] == '\n') {
                   target--;
                 } else {
-                  while (target > 0 && !IsWordChar(e->text[target - 1]) &&
-                         e->text[target - 1] != '\n') {
+                  while (target > 0 && !IsWordChar(e->text.data[target - 1]) &&
+                         e->text.data[target - 1] != '\n') {
                     target--;
                   }
-                  while (target > 0 && IsWordChar(e->text[target - 1])) {
+                  while (target > 0 && IsWordChar(e->text.data[target - 1])) {
                     target--;
                   }
                 }
@@ -1509,14 +1705,16 @@ void Update(State *s) {
             if (isWordJump) {
               int target = e->gapStart;
               if (target < e->textLen) {
-                if (e->text[target] == '\n') {
+                if (e->text.data[target] == '\n') {
                   target++;
                 } else {
-                  while (target < e->textLen && !IsWordChar(e->text[target]) &&
-                         e->text[target] != '\n') {
+                  while (target < e->textLen &&
+                         !IsWordChar(e->text.data[target]) &&
+                         e->text.data[target] != '\n') {
                     target++;
                   }
-                  while (target < e->textLen && IsWordChar(e->text[target])) {
+                  while (target < e->textLen &&
+                         IsWordChar(e->text.data[target])) {
                     target++;
                   }
                 }
@@ -1710,7 +1908,7 @@ void Update(State *s) {
     case ELEM_SPHERE: {
       if (isHovering) {
         e->color = ColorBrightness(GREEN, 0.8f);
-        clickOrHoverNotification(s, i, "sphere element");
+        clickOrHoverNotification(s, i, StringStatic("sphere element"));
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
           UpdateCamera(&e->camera, CAMERA_THIRD_PERSON);
         } else {
@@ -1804,14 +2002,14 @@ static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
 
 // Draw text using font inside rectangle limits with support for text selection
 static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
-                                    const char *text, Rectangle rec,
-                                    float fontSize, float spacing,
-                                    bool wordWrap, Color tint, int selectStart,
-                                    int selectLength, Color selectTint,
-                                    Color selectBackTint, float *outTextHeight,
-                                    float *outCursorY, int cursorIndex) {
-  int length = TextLength(
-      text); // Total length in bytes of the text, scanned by codepoints in loop
+                                    String text, Rectangle rec, float fontSize,
+                                    float spacing, bool wordWrap, Color tint,
+                                    int selectStart, int selectLength,
+                                    Color selectTint, Color selectBackTint,
+                                    float *outTextHeight, float *outCursorY,
+                                    int cursorIndex) {
+  int length = text.len;
+  (void)s;
 
   float textOffsetY = 0;    // Offset between lines (on line break '\n')
   float textOffsetX = 0.0f; // Offset X to next character to draw
@@ -1847,7 +2045,8 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
 
     // Get next codepoint from byte string and glyph index in font
     int codepointByteCount = 0;
-    int codepoint = GetCodepoint(&text[i], &codepointByteCount);
+    int codepoint =
+        text.data ? GetCodepoint(&text.data[i], &codepointByteCount) : 0;
     int index = GetGlyphIndex(font, codepoint);
 
     // NOTE: Normally we exit the decoding sequence as soon as a bad byte is
@@ -1992,7 +2191,7 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
 }
 
 // Draw text using font inside rectangle limits
-static void DrawTextBoxed(State *s, Element *e, Font font, const char *text,
+static void DrawTextBoxed(State *s, Element *e, Font font, String text,
                           Rectangle rec, float fontSize, float spacing,
                           bool wordWrap, Color tint, float *outTextHeight,
                           float *outCursorY, int cursorIndex) {
@@ -2020,10 +2219,13 @@ static void DemoTick(State *s) {
   Element *editor = NULL, *voiceBtn = NULL, *earth = NULL;
   for (int i = 0; i < s->numElements; i++) {
     Element *e = &s->elements[i];
-    if (!editor && e->kind == ELEM_TEXT_EDITOR) editor = e;
-    if (!voiceBtn && e->kind == ELEM_BUTTON && e->on_click == ACTION_VOICE_INPUT)
+    if (!editor && e->kind == ELEM_TEXT_EDITOR)
+      editor = e;
+    if (!voiceBtn && e->kind == ELEM_BUTTON &&
+        e->on_click == ACTION_VOICE_INPUT)
       voiceBtn = e;
-    if (!earth && e->kind == ELEM_SPHERE) earth = e;
+    if (!earth && e->kind == ELEM_SPHERE)
+      earth = e;
   }
 
   static bool cleared = false;
@@ -2066,12 +2268,13 @@ static void DemoTick(State *s) {
 
   // Phase 1: voice dictation - button lights up red, text streams in.
   if (t > 0.4 && t < typeDone + 0.3 && voiceBtn) {
-    voiceBtn->text = TEXT_RECORDING;
+    StringAssignStatic(&voiceBtn->text, TEXT_RECORDING);
     voiceBtn->color = RED;
   }
   if (t > TYPE_START && editor) {
     int target = (int)((t - TYPE_START) * CPS);
-    if (target > L) target = L;
+    if (target > L)
+      target = L;
     bool changed = false;
     while (typed < target) {
       GapInsertChar(editor, logLine[typed]);
@@ -2085,18 +2288,18 @@ static void DemoTick(State *s) {
       char note[80];
       snprintf(note, sizeof(note), "[Voice: \"...%.*s\"]", typed - s0,
                logLine + s0);
-      updateNotification(s, note);
+      updateNotification(s, StringStatic(note));
     }
   }
   if (t > typeDone + 0.3 && voiceBtn) {
-    voiceBtn->text = TEXT_VOICE_INPUT;
+    StringAssignStatic(&voiceBtn->text, TEXT_VOICE_INPUT);
     voiceBtn->color = voiceBtn->originalColor;
   }
 
   // Phase 2: enter edit mode, then drag the Earth to a new spot.
   if (t > tEdit) {
     s->is_editing = true;
-    updateNotification(s, "EDIT MODE: drag + resize");
+    updateNotification(s, StringStatic("EDIT MODE: drag + resize"));
   }
   if (earth) {
     if (!earthHomeSet) {
@@ -2218,7 +2421,8 @@ void UpdateDrawFrame(State *s) {
                            0.9f, 4, e->color);
       break;
     case ELEM_TEXT:
-      DrawText(e->text, e->position.x, e->position.y, e->textSize, e->color);
+      DrawText(e->text.data ? e->text.data : "", e->position.x, e->position.y,
+               e->textSize, e->color);
       break;
     case ELEM_TEXT_EDITOR: {
       DrawRectangleLines(e->position.x, e->position.y, *e->width + 10,
@@ -2324,24 +2528,24 @@ void UpdateDrawFrame(State *s) {
       break;
     }
 
-    if (e->text && e->kind != ELEM_TEXT && e->kind != ELEM_TEXT_EDITOR) {
-      int textWidth = MeasureText(e->text, e->textSize);
+    if (e->text.data && e->kind != ELEM_TEXT && e->kind != ELEM_TEXT_EDITOR) {
+      int textWidth = MeasureText(e->text.data, e->textSize);
       if (e->kind == ELEM_ELBOW) {
-        DrawText(e->text, e->position.x + 3 * (*e->width - textWidth) / 4,
+        DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
                  e->position.y + s->barHeight + s->innerRadius +
                      (*e->height - e->textSize) / 2,
                  e->textSize, BLACK);
       } else {
-        DrawText(e->text, e->position.x + 3 * (*e->width - textWidth) / 4,
+        DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
                  e->position.y + (*e->height - e->textSize) / 2 + 10,
                  e->textSize, BLACK);
       }
     }
   }
 
-  if (s->notification && s->notificationTimer > 0.0f) {
+  if (s->notification.data && s->notificationTimer > 0.0f) {
     s->notificationTimer -= GetFrameTime();
-    DrawText(s->notification, s->posX + s->columnWidth + s->innerRadius,
+    DrawText(s->notification.data, s->posX + s->columnWidth + s->innerRadius,
              s->posY - 2 * s->columnHeight - s->barHeight, 20, YELLOW);
   } else {
     s->notificationOnElemIdx = -1;
@@ -2399,6 +2603,307 @@ void UpdateDrawFrame(State *s) {
   }
 
   EndDrawing();
+}
+
+static const char *GetAttributeValue(const char *tag, const char *attr,
+                                     char *dest, int max_len) {
+  char pattern[128];
+  snprintf(pattern, sizeof(pattern), "%s=", attr);
+  const char *p = strstr(tag, pattern);
+  if (!p)
+    return NULL;
+  p += strlen(pattern);
+  char quote = *p;
+  if (quote == '"' || quote == '\'') {
+    p++;
+    int len = 0;
+    while (*p && *p != quote && len < max_len - 1) {
+      dest[len++] = *p++;
+    }
+    dest[len] = '\0';
+    return p;
+  }
+  return NULL;
+}
+
+static Color ParseColor(String colorStr) {
+  if (colorStr.data == NULL)
+    return LCARS_ORANGE;
+  if (strcmp(colorStr.data, "purple") == 0)
+    return LCARS_PURPLE;
+  if (strcmp(colorStr.data, "red") == 0)
+    return LCARS_RED_ORANGE;
+  if (strcmp(colorStr.data, "orange") == 0)
+    return LCARS_ORANGE;
+  if (strcmp(colorStr.data, "yellow") == 0)
+    return LCARS_YELLOW;
+  if (strcmp(colorStr.data, "blue") == 0)
+    return LCARS_BLUE;
+  if (strcmp(colorStr.data, "white") == 0)
+    return WHITE;
+  if (strcmp(colorStr.data, "black") == 0)
+    return BLACK;
+  if (colorStr.len == 7 && colorStr.data[0] == '#') {
+    unsigned int r, g, b;
+    if (sscanf(colorStr.data + 1, "%02x%02x%02x", &r, &g, &b) == 3) {
+      return (Color){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+    }
+  }
+  return LCARS_ORANGE;
+}
+
+static ButtonAction ParseAction(String actionStr) {
+  if (actionStr.data == NULL)
+    return ACTION_NONE;
+  if (strcmp(actionStr.data, "debug") == 0)
+    return ACTION_DEBUG;
+  if (strcmp(actionStr.data, "edit") == 0)
+    return ACTION_EDIT;
+  if (strcmp(actionStr.data, "reset") == 0)
+    return ACTION_RESET;
+  if (strcmp(actionStr.data, "voice_input") == 0)
+    return ACTION_VOICE_INPUT;
+  if (strcmp(actionStr.data, "print_db") == 0)
+    return ACTION_PRINT_DB;
+  if (strcmp(actionStr.data, "load_hypermedia") == 0)
+    return ACTION_LOAD_HYPERMEDIA;
+  return ACTION_NONE;
+}
+
+static float dynamic_widths[MAX_ELEMENTS];
+static float dynamic_heights[MAX_ELEMENTS];
+static char dynamic_texts[MAX_ELEMENTS][256];
+
+struct CurlMemoryBuffer {
+  char *data;
+  size_t size;
+};
+
+static size_t CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb,
+                                      void *userp) {
+  size_t realsize = size * nmemb;
+  struct CurlMemoryBuffer *mem = (struct CurlMemoryBuffer *)userp;
+
+  char *ptr = realloc(mem->data, mem->size + realsize + 1);
+  if (!ptr) {
+    return 0;
+  }
+
+  mem->data = ptr;
+  memcpy(&(mem->data[mem->size]), contents, realsize);
+  mem->size += realsize;
+  mem->data[mem->size] = 0;
+
+  return realsize;
+}
+
+static String LoadDocumentContent(String source, State *s) {
+  if (source.data == NULL) {
+    return StringInit(NULL);
+  }
+  if (strncmp(source.data, "http://", 7) == 0 ||
+      strncmp(source.data, "https://", 8) == 0) {
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+      updateNotification(s, StringStatic("CURL INIT FAILED"));
+      return StringInit(NULL);
+    }
+
+    struct CurlMemoryBuffer chunk;
+    chunk.data = malloc(1);
+    if (!chunk.data) {
+      curl_easy_cleanup(curl);
+      return StringInit(NULL);
+    }
+    chunk.size = 0;
+    chunk.data[0] = '\0';
+
+    curl_easy_setopt(curl, CURLOPT_URL, source.data);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWriteMemoryCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+      printf("CURL download failed: %s\n", curl_easy_strerror(res));
+      updateNotification(s, StringStatic("DOWNLOAD FAILED"));
+      free(chunk.data);
+      return StringInit(NULL);
+    }
+
+    String ret;
+    ret.data = chunk.data;
+    ret.len = (int)chunk.size;
+    ret.is_static = false;
+    return ret;
+  } else {
+    const char *local_path = source.data;
+    if (strncmp(source.data, "file://", 7) == 0) {
+      local_path = source.data + 7;
+    }
+
+    FILE *f = fopen(local_path, "r");
+    if (!f) {
+      printf("Failed to open file: %s\n", local_path);
+      updateNotification(s, StringStatic("FILE NOT FOUND"));
+      return StringInit(NULL);
+    }
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char *buf = malloc(size + 1);
+    if (!buf) {
+      fclose(f);
+      return StringInit(NULL);
+    }
+    size_t read_bytes = fread(buf, 1, size, f);
+    buf[read_bytes] = '\0';
+    fclose(f);
+
+    String ret;
+    ret.data = buf;
+    ret.len = (int)read_bytes;
+    ret.is_static = false;
+    return ret;
+  }
+}
+
+void LoadHypermediaDocument(State *s, String source) {
+  String buf = LoadDocumentContent(source, s);
+  if (!buf.data) {
+    return;
+  }
+
+  const char *p = buf.data;
+  while (*p) {
+    p = strchr(p, '<');
+    if (!p)
+      break;
+
+    if (strncmp(p, "<!--", 4) == 0) {
+      p = strstr(p, "-->");
+      if (p)
+        p += 3;
+      else
+        break;
+      continue;
+    }
+
+    const char *tag_end = strchr(p, '>');
+    if (!tag_end)
+      break;
+
+    int tag_len = tag_end - p + 1;
+    char *tag = malloc(tag_len + 1);
+    strncpy(tag, p, tag_len);
+    tag[tag_len] = '\0';
+
+    char tag_name[64] = {0};
+    int i = 1;
+    while (p[i] && p[i] != ' ' && p[i] != '>' && p[i] != '/' && i < 63) {
+      tag_name[i - 1] = p[i];
+      i++;
+    }
+    tag_name[i - 1] = '\0';
+
+    ElemKind kind = ELEM_NOTHING;
+    if (strcmp(tag_name, "lcars-button") == 0)
+      kind = ELEM_BUTTON;
+    else if (strcmp(tag_name, "lcars-rect") == 0 ||
+             strcmp(tag_name, "lcars-rectangle") == 0)
+      kind = ELEM_RECTANGLE;
+    else if (strcmp(tag_name, "lcars-text") == 0)
+      kind = ELEM_TEXT;
+    else if (strcmp(tag_name, "lcars-elbow") == 0)
+      kind = ELEM_ELBOW;
+
+    if (kind != ELEM_NOTHING && s->numElements < MAX_ELEMENTS) {
+      char val[256];
+      int x = 0, y = 0;
+      float w_val = 100.0f;
+      float h_val = 50.0f;
+      Color color = LCARS_ORANGE;
+      ButtonAction action = ACTION_NONE;
+      int orientation = 0;
+      int textSize = 20;
+
+      if (GetAttributeValue(tag, "x", val, sizeof(val)))
+        x = atoi(val);
+      if (GetAttributeValue(tag, "y", val, sizeof(val)))
+        y = atoi(val);
+      if (GetAttributeValue(tag, "w", val, sizeof(val)))
+        w_val = atof(val);
+      if (GetAttributeValue(tag, "h", val, sizeof(val)))
+        h_val = atof(val);
+      if (GetAttributeValue(tag, "color", val, sizeof(val)))
+        color = ParseColor(StringStatic(val));
+      if (GetAttributeValue(tag, "action", val, sizeof(val)))
+        action = ParseAction(StringStatic(val));
+      if (GetAttributeValue(tag, "orientation", val, sizeof(val)))
+        orientation = atoi(val);
+      if (GetAttributeValue(tag, "size", val, sizeof(val)))
+        textSize = atoi(val);
+
+      char *innerText = NULL;
+      bool self_closing = false;
+      if (tag_end > p && *(tag_end - 1) == '/') {
+        self_closing = true;
+      }
+
+      if (!self_closing) {
+        char closing_tag[128];
+        snprintf(closing_tag, sizeof(closing_tag), "</%s>", tag_name);
+        const char *close_tag_p = strstr(tag_end + 1, closing_tag);
+        if (close_tag_p) {
+          int text_len = close_tag_p - (tag_end + 1);
+          if (text_len > 0) {
+            innerText = malloc(text_len + 1);
+            strncpy(innerText, tag_end + 1, text_len);
+            innerText[text_len] = '\0';
+          }
+        }
+      }
+
+      int idx = s->numElements;
+      dynamic_widths[idx] = w_val;
+      dynamic_heights[idx] = h_val;
+
+      Element e = {0};
+      e.kind = kind;
+      e.position = (iVec2){x, y};
+      e.width = &dynamic_widths[idx];
+      e.height = &dynamic_heights[idx];
+      e.color = color;
+      e.originalColor = color;
+      e.on_click = action;
+      e.elbowOrientation = orientation;
+      e.textSize = textSize;
+      if (innerText) {
+        strncpy(dynamic_texts[idx], innerText, 255);
+        dynamic_texts[idx][255] = '\0';
+        e.text = StringStatic(dynamic_texts[idx]);
+        e.textLen = e.text.len;
+        free(innerText);
+      } else {
+        e.text = StringStatic(NULL);
+        e.textLen = 0;
+      }
+
+      s->elements[s->numElements++] = e;
+    }
+
+    free(tag);
+    p = tag_end + 1;
+  }
+
+  StringFree(&buf);
+  updateNotification(s, StringStatic("HYPERMEDIA LOADED"));
 }
 
 #endif // LCARS_IMPLEMENTATION

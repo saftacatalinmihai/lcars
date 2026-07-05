@@ -125,7 +125,7 @@ int main(void) {
                     Reload(s, false);
                 }
                 printf("Reloaded successfully.\n");
-                updateNotification(s, "LCARS reloaded successfully!");
+                updateNotification(s, StringStatic("LCARS reloaded successfully!"));
             }
 
         }
