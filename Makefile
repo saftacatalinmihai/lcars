@@ -22,13 +22,13 @@ else
 	$(error Unknown ARCH: $(ARCH). Use 'mac' or 'linux')
 endif
 
-CFLAGS = -std=c11 -ggdb -g -Wall -Wextra -pedantic -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
-CFLAGS_RELEASE = -std=c11 -O3 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
+CFLAGS = -std=c11 -ggdb -g -Wall -Wextra -pedantic -fsanitize=address -DHYPERMEDIA $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
+CFLAGS_RELEASE = -std=c11 -O3 -DHYPERMEDIA $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
 # CFLAGS = -std=c11 -ggdb -g -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
 
 # Web build settings (Emscripten)
-RAYLIB_WEB = raylib-web/src
-WEB_CFLAGS = -Os -std=c11 -DPLATFORM_WEB -I$(RAYLIB_WEB)
+RAYLIB_WEB = vendor/raylib-web/src
+WEB_CFLAGS = -Os -std=c11 -DPLATFORM_WEB -DHYPERMEDIA -I$(RAYLIB_WEB)
 WEB_LDFLAGS = -s USE_GLFW=3 -s ASYNCIFY -s TOTAL_MEMORY=67108864 -s ALLOW_MEMORY_GROWTH=1 \
               -s FETCH \
               --preload-file resources/earth.png \
@@ -60,7 +60,7 @@ run: lcars-lib.so lcars
 
 # Web build targets
 lcars-web: lcars.c voice_rec.c resources_download.c $(RAYLIB_WEB)/libraylib.web.a
-	emcc liblcars.c lcars.c voice_rec.c resources_download.c sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
+	emcc liblcars.c lcars.c voice_rec.c resources_download.c vendor/sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
 
 serve: lcars-web
 	@echo "Starting server at http://localhost:8080/lcars.html"
@@ -76,10 +76,10 @@ setup-emsdk:
 	fi
 
 setup-raylib-web: setup-emsdk
-	@if [ ! -d "raylib-web" ]; then \
-		git clone https://github.com/raysan5/raylib.git raylib-web && \
-		cd raylib-web/src && \
-		. ../../emsdk/emsdk_env.sh && \
+	@if [ ! -d "vendor/raylib-web" ]; then \
+		git clone https://github.com/raysan5/raylib.git vendor/raylib-web && \
+		cd vendor/raylib-web/src && \
+		. ../../../emsdk/emsdk_env.sh && \
 		make PLATFORM=PLATFORM_WEB -B; \
 	else \
 		echo "raylib-web already exists"; \

@@ -2,3 +2,4 @@
 CompileFlags:
   Add: 
     - -DLCARS_IMPLEMENTATION
+    - -DHYPERMEDIA

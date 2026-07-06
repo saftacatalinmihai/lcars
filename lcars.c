@@ -24,6 +24,18 @@ int main(void) {
 
     State *s = (State*)calloc(10, sizeof(State)); // Reserve some more space just in case we add more fields... hack
     
+    // Preallocate backing buffers for the memory arenas
+    size_t doc_arena_size = 32 * 1024 * 1024;     // 32 MB
+    size_t scratch_arena_size = 16 * 1024 * 1024; // 16 MB
+    void *doc_backing = malloc(doc_arena_size);
+    void *scratch_backing = malloc(scratch_arena_size);
+    if (!doc_backing || !scratch_backing) {
+        fprintf(stderr, "Fatal error: Failed to preallocate memory arenas\n");
+        return 1;
+    }
+    arena_init(&s->doc_arena, doc_backing, doc_arena_size);
+    arena_init(&s->scratch_arena, scratch_backing, scratch_arena_size);
+    
     double t_res_start = GetTimeSeconds();
     CheckAndDownloadResources();
     double t_res_end = GetTimeSeconds();

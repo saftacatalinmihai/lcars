@@ -1,6 +1,6 @@
 compile_commands.json
 emsdk
-raylib-web
+vendor/raylib-web
 lcars
 lcars-lib.so
 *.so

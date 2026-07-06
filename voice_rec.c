@@ -2,10 +2,10 @@
 #include "voice_rec.h"
 
 #ifndef __EMSCRIPTEN__
-#include "vosk_api.h"
+#include "vendor/vosk_api.h"
 
 #define MINIAUDIO_IMPLEMENTATION
-#include "miniaudio.h"
+#include "vendor/miniaudio.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,7 +31,7 @@ static pthread_mutex_t g_audioMutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_audioCond = PTHREAD_COND_INITIALIZER;
 
 // Result queue (finalized transcript chunks)
-static char *g_resultQueue[RESULT_QUEUE_SIZE];
+static char g_resultQueue[RESULT_QUEUE_SIZE][512];
 static volatile int g_resultHead = 0;
 static volatile int g_resultTail = 0;
 static pthread_mutex_t g_resultMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -56,15 +56,15 @@ static pthread_t g_thread;
 static volatile bool g_isRecording = false;
 
 // Helper: queue a text result
-static void QueueResultText(char *text) {
+static void QueueResultText(const char *text) {
     pthread_mutex_lock(&g_resultMutex);
     int nextHead = (g_resultHead + 1) % RESULT_QUEUE_SIZE;
     if (nextHead == g_resultTail) {
-        // Queue full, free the oldest element to make room
-        free(g_resultQueue[g_resultTail]);
+        // Queue full, discard oldest element to make room
         g_resultTail = (g_resultTail + 1) % RESULT_QUEUE_SIZE;
     }
-    g_resultQueue[g_resultHead] = text;
+    strncpy(g_resultQueue[g_resultHead], text, sizeof(g_resultQueue[g_resultHead]) - 1);
+    g_resultQueue[g_resultHead][sizeof(g_resultQueue[g_resultHead]) - 1] = '\0';
     g_resultHead = nextHead;
     pthread_mutex_unlock(&g_resultMutex);
 }
@@ -94,14 +94,12 @@ static void ParseAndQueueResult(const char *jsonStr) {
     }
     
     int len = end - start;
-    if (len > 0) {
-        char *text = malloc(len + 2);
-        if (text) {
-            memcpy(text, start, len);
-            text[len] = ' '; // Add a trailing space for easy continuation
-            text[len + 1] = '\0';
-            QueueResultText(text);
-        }
+    if (len > 0 && len < 510) {
+        char text[512];
+        memcpy(text, start, len);
+        text[len] = ' '; // Add a trailing space for easy continuation
+        text[len + 1] = '\0';
+        QueueResultText(text);
     }
 }
 
@@ -253,12 +251,10 @@ void VoiceRec_Shutdown(void) {
         g_model = NULL;
     }
     
-    // Free any leftover results in queue
+    // Clear results queue indices
     pthread_mutex_lock(&g_resultMutex);
-    while (g_resultHead != g_resultTail) {
-        free(g_resultQueue[g_resultTail]);
-        g_resultTail = (g_resultTail + 1) % RESULT_QUEUE_SIZE;
-    }
+    g_resultHead = 0;
+    g_resultTail = 0;
     pthread_mutex_unlock(&g_resultMutex);
     
     printf("VoiceRec: Shutdown complete\n");
@@ -290,10 +286,6 @@ bool VoiceRec_StartRecording(void) {
     
     // Clear results queue
     pthread_mutex_lock(&g_resultMutex);
-    while (g_resultHead != g_resultTail) {
-        free(g_resultQueue[g_resultTail]);
-        g_resultTail = (g_resultTail + 1) % RESULT_QUEUE_SIZE;
-    }
     g_resultHead = 0;
     g_resultTail = 0;
     pthread_mutex_unlock(&g_resultMutex);
@@ -367,11 +359,10 @@ bool VoiceRec_PollResult(char *outBuffer, size_t maxLen) {
         return false;
     }
     
-    char *text = g_resultQueue[g_resultTail];
+    const char *text = g_resultQueue[g_resultTail];
     strncpy(outBuffer, text, maxLen);
     outBuffer[maxLen - 1] = '\0';
     
-    free(text);
     g_resultTail = (g_resultTail + 1) % RESULT_QUEUE_SIZE;
     pthread_mutex_unlock(&g_resultMutex);
     return true;
