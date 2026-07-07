@@ -1,8 +1,83 @@
 #define _POSIX_C_SOURCE 200809L
-#include "voice_rec.h"
+#include "lcars_voice_rec.h"
 
 #ifndef __EMSCRIPTEN__
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dlfcn.h>
 #include "vendor/vosk_api.h"
+
+typedef VoskModel *(*Fn_vosk_model_new)(const char *model_path);
+typedef void (*Fn_vosk_model_free)(VoskModel *model);
+typedef VoskRecognizer *(*Fn_vosk_recognizer_new)(VoskModel *model, float sample_rate);
+typedef void (*Fn_vosk_recognizer_free)(VoskRecognizer *recognizer);
+typedef int (*Fn_vosk_recognizer_accept_waveform)(VoskRecognizer *recognizer, const char *data, int length);
+typedef const char *(*Fn_vosk_recognizer_result)(VoskRecognizer *recognizer);
+typedef const char *(*Fn_vosk_recognizer_partial_result)(VoskRecognizer *recognizer);
+typedef const char *(*Fn_vosk_recognizer_final_result)(VoskRecognizer *recognizer);
+
+static Fn_vosk_model_new p_vosk_model_new = NULL;
+static Fn_vosk_model_free p_vosk_model_free = NULL;
+static Fn_vosk_recognizer_new p_vosk_recognizer_new = NULL;
+static Fn_vosk_recognizer_free p_vosk_recognizer_free = NULL;
+static Fn_vosk_recognizer_accept_waveform p_vosk_recognizer_accept_waveform = NULL;
+static Fn_vosk_recognizer_result p_vosk_recognizer_result = NULL;
+static Fn_vosk_recognizer_partial_result p_vosk_recognizer_partial_result = NULL;
+static Fn_vosk_recognizer_final_result p_vosk_recognizer_final_result = NULL;
+
+#define vosk_model_new p_vosk_model_new
+#define vosk_model_free p_vosk_model_free
+#define vosk_recognizer_new p_vosk_recognizer_new
+#define vosk_recognizer_free p_vosk_recognizer_free
+#define vosk_recognizer_accept_waveform p_vosk_recognizer_accept_waveform
+#define vosk_recognizer_result p_vosk_recognizer_result
+#define vosk_recognizer_partial_result p_vosk_recognizer_partial_result
+#define vosk_recognizer_final_result p_vosk_recognizer_final_result
+
+static void *g_vosk_handle = NULL;
+
+static bool LoadVoskLibrary(void) {
+    if (g_vosk_handle) return true;
+
+    const char *paths[] = {
+        "./resources/libvosk.so",
+        "./libvosk.so",
+        "libvosk.so"
+    };
+    for (size_t i = 0; i < sizeof(paths)/sizeof(paths[0]); i++) {
+        g_vosk_handle = dlopen(paths[i], RTLD_LAZY);
+        if (g_vosk_handle) {
+            printf("VoiceRec: Loaded Vosk library from %s\n", paths[i]);
+            break;
+        }
+    }
+
+    if (!g_vosk_handle) {
+        fprintf(stderr, "VoiceRec: Failed to load libvosk.so: %s\n", dlerror());
+        return false;
+    }
+
+    *(void **)(&p_vosk_model_new) = dlsym(g_vosk_handle, "vosk_model_new");
+    *(void **)(&p_vosk_model_free) = dlsym(g_vosk_handle, "vosk_model_free");
+    *(void **)(&p_vosk_recognizer_new) = dlsym(g_vosk_handle, "vosk_recognizer_new");
+    *(void **)(&p_vosk_recognizer_free) = dlsym(g_vosk_handle, "vosk_recognizer_free");
+    *(void **)(&p_vosk_recognizer_accept_waveform) = dlsym(g_vosk_handle, "vosk_recognizer_accept_waveform");
+    *(void **)(&p_vosk_recognizer_result) = dlsym(g_vosk_handle, "vosk_recognizer_result");
+    *(void **)(&p_vosk_recognizer_partial_result) = dlsym(g_vosk_handle, "vosk_recognizer_partial_result");
+    *(void **)(&p_vosk_recognizer_final_result) = dlsym(g_vosk_handle, "vosk_recognizer_final_result");
+
+    if (!p_vosk_model_new || !p_vosk_model_free || !p_vosk_recognizer_new || !p_vosk_recognizer_free ||
+        !p_vosk_recognizer_accept_waveform || !p_vosk_recognizer_result || !p_vosk_recognizer_partial_result ||
+        !p_vosk_recognizer_final_result) {
+        fprintf(stderr, "VoiceRec: Failed to find all Vosk symbols in libvosk.so\n");
+        dlclose(g_vosk_handle);
+        g_vosk_handle = NULL;
+        return false;
+    }
+
+    return true;
+}
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "vendor/miniaudio.h"
@@ -213,6 +288,9 @@ static void *VoiceWorkerThread(void *arg) {
 
 // Public API
 static bool Real_VoiceRec_Init(const char *modelPath) {
+    if (!LoadVoskLibrary()) {
+        return false;
+    }
     g_model = vosk_model_new(modelPath);
     if (!g_model) {
         fprintf(stderr, "VoiceRec: Failed to load Vosk model from '%s'\n", modelPath);
@@ -249,6 +327,18 @@ void VoiceRec_Shutdown(void) {
     if (g_model) {
         vosk_model_free(g_model);
         g_model = NULL;
+    }
+    if (g_vosk_handle) {
+        dlclose(g_vosk_handle);
+        g_vosk_handle = NULL;
+        p_vosk_model_new = NULL;
+        p_vosk_model_free = NULL;
+        p_vosk_recognizer_new = NULL;
+        p_vosk_recognizer_free = NULL;
+        p_vosk_recognizer_accept_waveform = NULL;
+        p_vosk_recognizer_result = NULL;
+        p_vosk_recognizer_partial_result = NULL;
+        p_vosk_recognizer_final_result = NULL;
     }
     
     // Clear results queue indices

@@ -1,4 +1,4 @@
-#include "resources_download.h"
+#include "lcars_resources_download.h"
 
 int main(void) {
     CheckAndDownloadResources();

@@ -29,7 +29,7 @@ static int ExecSQL(State *s, String sql, String successMsg) {
   return rc;
 }
 
-static void InitDB(State *s, bool firstInit) {
+void InitDB(State *s, bool firstInit) {
   (void)firstInit;
   ExecSQL(s,
           StringStatic("CREATE TABLE IF NOT EXISTS log (id INTEGER PRIMARY KEY "
@@ -38,9 +38,9 @@ static void InitDB(State *s, bool firstInit) {
   const char *sql_entry_create =
       "CREATE TABLE IF NOT EXISTS entries ("
       "id INTEGER PRIMARY KEY AUTOINCREMENT," // type of thing, 0=log, 1=task,
-                                               // 2=event, etc. these are just
-                                               // examples.
-      "kind INTEGER DEFAULT 0,"
+                                              // 2=event, etc. these are just
+                                              // examples.
+      "kind TEXT DEFAULT '',"
       "title TEXT,"
       "content TEXT,"
       "value_int INTEGER,"

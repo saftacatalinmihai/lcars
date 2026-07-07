@@ -9,22 +9,28 @@ endif
 RAYLIB_CFLAGS = $(shell pkg-config --cflags raylib)
 RAYLIB_LIBS   = $(shell pkg-config --libs raylib)
 
-# Architecture-specific linker flags
+# Architecture-specific linker flags for dynamic/hot-reload build
 ifeq ($(ARCH),mac)
-	LDFLAGS := $(RAYLIB_LIB) -framework Cocoa -framework IOKit -framework CoreVideo -framework CoreAudio -framework AudioToolbox -lm
+	LDFLAGS_DYN := $(RAYLIB_LIB) -framework Cocoa -framework IOKit -framework CoreVideo -framework CoreAudio -framework AudioToolbox -lm
 	RPATH_FLAGS := -Wl,-rpath,resources/ -Wl,-rpath,@executable_path/resources/
 	SHARED_FLAGS := -undefined dynamic_lookup
+	STATIC_LIBS_DESKTOP := -framework Cocoa -framework IOKit -framework CoreVideo -framework CoreAudio -framework AudioToolbox -lcurl -lsqlite3 -lm -lpthread -ldl
 else ifeq ($(ARCH),linux)
-	LDFLAGS := $(RAYLIB_LIB) -lm
+	LDFLAGS_DYN := $(RAYLIB_LIB) -lm
 	RPATH_FLAGS := -Wl,-rpath,resources/
 	SHARED_FLAGS :=
+	STATIC_LIBS_DESKTOP := -lcurl -lsqlite3 -lX11 -lGL -lrt -lm -lpthread -ldl
 else
 	$(error Unknown ARCH: $(ARCH). Use 'mac' or 'linux')
 endif
 
-CFLAGS = -std=c11 -ggdb -g -Wall -Wextra -pedantic -fsanitize=address -DHYPERMEDIA $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
-CFLAGS_RELEASE = -std=c11 -O3 -DHYPERMEDIA $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
-# CFLAGS = -std=c11 -ggdb -g -fsanitize=address $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS)
+# Base CFLAGS (excluding RAYLIB_LIBS and LDFLAGS to avoid dynamic linking in static target)
+BASE_CFLAGS = -std=c11 -Wall -Wextra -pedantic -DHYPERMEDIA -Ivendor -Ivendor/raylib-web/src $(RAYLIB_CFLAGS)
+CFLAGS_DEBUG = $(BASE_CFLAGS) -ggdb -g -fsanitize=address
+CFLAGS_RELEASE = $(BASE_CFLAGS) -O3
+
+# For the dynamic/hot-reloaded development target:
+CFLAGS_DYN = $(BASE_CFLAGS) -ggdb -g -fsanitize=address $(RAYLIB_LIBS) -lpthread $(LDFLAGS_DYN)
 
 # Web build settings (Emscripten)
 RAYLIB_WEB = vendor/raylib-web/src
@@ -40,27 +46,55 @@ compile_commands.json: Makefile
 
 # Helper to download missing resources before building (needed for libvosk.so linking)
 RESOURCE_HELPER = /tmp/lcars-download-resources
-$(RESOURCE_HELPER): resources_download_main.c resources_download.c resources_download.h
-	$(CC) -std=c11 -g resources_download_main.c resources_download.c -lcurl -o $@
+$(RESOURCE_HELPER): lcars_resources_download_main.c lcars_resources_download.c lcars_resources_download.h
+	$(CC) -std=c11 -g lcars_resources_download_main.c lcars_resources_download.c -lcurl -o $@
 
 ensure-resources: $(RESOURCE_HELPER)
 	@$(RESOURCE_HELPER)
 
-lcars: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
-	cc $(CFLAGS)         -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
+# Target to build static raylib if missing
+vendor/libraylib.a:
+	@if [ ! -d "vendor/raylib-web" ]; then \
+		git clone https://github.com/raysan5/raylib.git vendor/raylib-web; \
+	fi
+	@echo "Building static raylib for desktop..."
+	$(MAKE) -C vendor/raylib-web/src PLATFORM=PLATFORM_DESKTOP -B
+	cp vendor/raylib-web/src/libraylib.a vendor/libraylib.a
+	$(MAKE) -C vendor/raylib-web/src clean
 
-lcars-release: lcars.c voice_rec.c voice_rec.h resources_download.c resources_download.h lcars-lib.so ensure-resources
-	cc $(CFLAGS_RELEASE) -o lcars lcars.c voice_rec.c resources_download.c -lcurl -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
+# Static targets
+lcars: lcars.c lcars_voice_rec.c lcars_voice_rec.h lcars_resources_download.c lcars_resources_download.h liblcars.c vendor/libraylib.a ensure-resources
+	cc $(CFLAGS_DEBUG) -DSTATIC_BUILD -o lcars lcars.c lcars_voice_rec.c lcars_resources_download.c liblcars.c vendor/libraylib.a $(STATIC_LIBS_DESKTOP)
 
-lcars-lib.so: liblcars.h liblcars.c voice_rec.h
-	cc $(CFLAGS) -fPIC -shared $(SHARED_FLAGS) -std=c11 $(RAYLIB_CFLAGS) $(RAYLIB_LIBS) -lsqlite3 -ldl -lcurl -o lcars-lib.so liblcars.c
+lcars-release: lcars.c lcars_voice_rec.c lcars_voice_rec.h lcars_resources_download.c lcars_resources_download.h liblcars.c vendor/libraylib.a ensure-resources
+	cc $(CFLAGS_RELEASE) -DSTATIC_BUILD -o lcars lcars.c lcars_voice_rec.c lcars_resources_download.c liblcars.c vendor/libraylib.a $(STATIC_LIBS_DESKTOP)
 
-run: lcars-lib.so lcars
+# Dynamic targets
+lcars-dynamic: lcars.c lcars_voice_rec.c lcars_voice_rec.h lcars_resources_download.c lcars_resources_download.h lcars-lib.so ensure-resources
+	cc $(CFLAGS_DYN) -o lcars lcars.c lcars_voice_rec.c lcars_resources_download.c -lcurl -lsqlite3 -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
+
+lcars-lib.so: liblcars.h liblcars.c lcars_voice_rec.h
+	cc $(CFLAGS_DYN) -fPIC -shared $(SHARED_FLAGS) -std=c11 -lsqlite3 -ldl -lcurl -o lcars-lib.so liblcars.c
+
+run: lcars
 	./lcars
 
+run-dynamic: lcars-lib.so lcars-dynamic
+	./lcars
+
+# docker run --rm -v $$(pwd):/workspace -w /workspace debian:11-slim sh -c "
+lcars-portable:
+	docker run -v $$(pwd):/workspace -w /workspace debian:11-slim sh -c "\
+		apt-get update && \
+		apt-get install -y build-essential git libcurl4-openssl-dev libsqlite3-dev libx11-dev libglu1-mesa-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libasound2-dev pkg-config && \
+		rm -f vendor/libraylib.a && \
+		make -C vendor/raylib-web/src clean && \
+		make lcars-release && \
+		chown $(shell id -u):$(shell id -g) lcars"
+
 # Web build targets
-lcars-web: lcars.c voice_rec.c resources_download.c $(RAYLIB_WEB)/libraylib.web.a
-	emcc liblcars.c lcars.c voice_rec.c resources_download.c vendor/sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
+lcars-web: lcars.c lcars_voice_rec.c lcars_resources_download.c $(RAYLIB_WEB)/libraylib.web.a
+	emcc liblcars.c lcars.c lcars_voice_rec.c lcars_resources_download.c vendor/sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
 
 serve: lcars-web
 	@echo "Starting server at http://localhost:8080/lcars.html"
@@ -93,5 +127,5 @@ run-web: lcars-web
 	@echo "Starting server at http://localhost:8080/lcars.html"
 	python3 -m http.server 8080
 	
-.PHONY: run clean lcars-web serve setup-emsdk setup-raylib-web setup-web
+.PHONY: run clean lcars-web serve setup-emsdk setup-raylib-web setup-web lcars-portable
 

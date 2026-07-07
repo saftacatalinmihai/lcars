@@ -1,5 +1,5 @@
-#ifndef VOICE_REC_H
-#define VOICE_REC_H
+#ifndef LCARS_VOICE_REC_H
+#define LCARS_VOICE_REC_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -24,4 +24,4 @@ bool VoiceRec_IsRecording(void);
 bool VoiceRec_PollResult(char *outBuffer, size_t maxLen);
 bool VoiceRec_PollPartial(char *outBuffer, size_t maxLen);
 
-#endif // VOICE_REC_H
+#endif // LCARS_VOICE_REC_H

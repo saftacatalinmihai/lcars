@@ -79,7 +79,8 @@ static size_t CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb,
   size_t realsize = size * nmemb;
   struct CurlMemoryBuffer *mem = (struct CurlMemoryBuffer *)userp;
 
-  char *ptr = arena_realloc(mem->arena, mem->data, mem->size, mem->size + realsize + 1);
+  char *ptr =
+      arena_realloc(mem->arena, mem->data, mem->size, mem->size + realsize + 1);
   if (!ptr) {
     return 0;
   }
@@ -277,9 +278,11 @@ void LoadHypermediaDocument(State *s, String source) {
       }
 
       float *w_ptr = arena_alloc(&s->doc_arena, sizeof(float));
-      if (w_ptr) *w_ptr = w_val;
+      if (w_ptr)
+        *w_ptr = w_val;
       float *h_ptr = arena_alloc(&s->doc_arena, sizeof(float));
-      if (h_ptr) *h_ptr = h_val;
+      if (h_ptr)
+        *h_ptr = h_val;
 
       Element e = {0};
       e.kind = kind;
@@ -379,11 +382,13 @@ void LoadHypermediaDocument(State *s, String source) {
               s->elements[textureStatusIdx].text =
                   StringStatic("Texture is invalid!");
             }
+          } else {
+            Model earthModel = LoadModelFromMesh(GenMeshSphere(3.0f, 32, 32));
+            earthModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture =
+                texture;
+            earthModel.transform = MatrixRotateX(DEG2RAD * 90.0f);
+            e.model = earthModel;
           }
-          Model earthModel = LoadModelFromMesh(GenMeshSphere(3.0f, 32, 32));
-          earthModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture;
-          earthModel.transform = MatrixRotateX(DEG2RAD * 90.0f);
-          e.model = earthModel;
         } else {
           TraceLog(LOG_WARNING, "Texture not ready yet!");
           if (textureStatusIdx != -1) {

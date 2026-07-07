@@ -4,7 +4,7 @@
 #include "rlgl.h"
 #include "vendor/raygui.h"
 #include "vendor/sqlite3.h"
-#include "voice_rec.h"
+#include "lcars_voice_rec.h"
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
