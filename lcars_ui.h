@@ -1,6 +1,8 @@
 #ifndef LCARS_UI_H
 #define LCARS_UI_H
 
+#include "liblcars.h"
+
 #ifndef HYPERMEDIA
 // Shared layout static variables
 static float w600 = 600;

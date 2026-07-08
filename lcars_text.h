@@ -1,6 +1,8 @@
 #ifndef LCARS_TEXT_H
 #define LCARS_TEXT_H
 
+#include "liblcars.h"
+
 static int GetLines(String text, int *lineStarts, int maxLines) {
   int count = 0;
   lineStarts[count++] = 0;

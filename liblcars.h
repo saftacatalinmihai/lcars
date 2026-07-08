@@ -1,10 +1,12 @@
+#ifndef LIBLCARS_H
+#define LIBLCARS_H
 #define _POSIX_C_SOURCE 200809L
+#include "lcars_voice_rec.h"
 #include "raylib.h"
 #include "raymath.h"
 #include "rlgl.h"
 #include "vendor/raygui.h"
 #include "vendor/sqlite3.h"
-#include "lcars_voice_rec.h"
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -13,13 +15,8 @@
 #include <time.h>
 
 #include "lcars_arena.h"
+#include "lcars_base.h"
 #include "lcars_string.h"
-
-static inline double GetTimeSeconds(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-}
 
 #define _ISOC99_SOURCE
 #include <math.h>
@@ -290,8 +287,6 @@ static void ClampScrollY(Element *e) {
     e->scrollY = maxScroll;
 }
 
-
-
 void Init(State *s, bool firstInit) {
   double t_init_start = GetTimeSeconds();
 
@@ -410,8 +405,6 @@ void Reload(State *s, bool reset) {
     GuiLoadStyle("resources/style_cyber.rgs");
   }
 }
-
-
 
 void Update(State *s) {
   // Voice recognition updates
@@ -830,7 +823,8 @@ void Update(State *s) {
                                : e->selectTextStart + e->selectTextLength;
             int selLength = e->selectTextLength > 0 ? e->selectTextLength
                                                     : -e->selectTextLength;
-            char *selectedText = (char *)arena_alloc(&s->scratch_arena, selLength + 1);
+            char *selectedText =
+                (char *)arena_alloc(&s->scratch_arena, selLength + 1);
             memcpy(selectedText, e->text.data + selStart, selLength);
             selectedText[selLength] = '\0';
             SetClipboardText(selectedText);
@@ -1140,10 +1134,7 @@ void Update(State *s) {
   }
 }
 
-
-
 // Draw text using font inside rectangle limits with support for text selection
-
 
 // --- Scripted demo driver (only runs when the LCARS_DEMO env var is set). ---
 // Drives the three headline features for a screen recording: voice dictation,
@@ -1542,6 +1533,6 @@ void UpdateDrawFrame(State *s) {
 
 #include "lcars_hypermedia.h"
 
-
-
 #endif // LCARS_IMPLEMENTATION
+
+#endif // LIBLCARS_H

@@ -1,6 +1,8 @@
 #ifndef LCARS_DB_H
 #define LCARS_DB_H
 
+#include "liblcars.h"
+
 static int sqlite_callback(void *state, int argc, char **argv,
                            char **azColName) {
   State *s = (State *)state;

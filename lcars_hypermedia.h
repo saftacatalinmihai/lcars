@@ -1,6 +1,8 @@
 #ifndef LCARS_HYPERMEDIA_H
 #define LCARS_HYPERMEDIA_H
 
+#include "liblcars.h"
+
 #include <curl/curl.h>
 
 static const char *GetAttributeValue(const char *tag, const char *attr,

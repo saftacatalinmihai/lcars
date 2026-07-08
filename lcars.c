@@ -2,7 +2,11 @@
 #include <stdio.h>
 #ifdef __EMSCRIPTEN__
 #endif
+
+#include "lcars_base.h"
+
 #include "liblcars.h"
+
 #include "lcars_db.h"
 #define LCARS_HTTP_IMPLEMENTATION
 #include "lcars_http.h"
@@ -71,14 +75,17 @@ int main(int argc, char **argv) {
     } else if ((strcmp(argv[i], "--user") == 0 || strcmp(argv[i], "-u") == 0) &&
                i + 1 < argc) {
       auth_user = argv[++i];
-    } else if ((strcmp(argv[i], "--password") == 0 || strcmp(argv[i], "--pass") == 0) &&
+    } else if ((strcmp(argv[i], "--password") == 0 ||
+                strcmp(argv[i], "--pass") == 0) &&
                i + 1 < argc) {
       auth_pass = argv[++i];
     } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       printf("Usage: %s [options]\n", argv[0]);
       printf("Options:\n");
-      printf("  --http-only, -s, --server  Start only the API HTTP server (no UI, no voice rec)\n");
-      printf("  --port, -p <port>         Specify HTTP server port (default: 8080)\n");
+      printf("  --http-only, -s, --server  Start only the API HTTP server (no "
+             "UI, no voice rec)\n");
+      printf("  --port, -p <port>         Specify HTTP server port (default: "
+             "8080)\n");
       printf("  --user, -u <username>     Specify Basic Auth username\n");
       printf("  --password, --pass <password> Specify Basic Auth password\n");
       printf("  --help, -h                Show this help message\n");

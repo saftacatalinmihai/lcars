@@ -7,11 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Forward declaration of Arena to avoid dependency cycle if any
-typedef struct Arena Arena;
-
-// Forward declarations of arena functions used by lcars_string.h
-void *arena_alloc(Arena *arena, size_t size);
+#include "lcars_arena.h"
 
 typedef struct String {
   char *data;     // Null-terminated buffer
