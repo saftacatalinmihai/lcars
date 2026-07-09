@@ -227,6 +227,8 @@ void LoadHypermediaDocument(State *s, String source) {
       kind = ELEM_ELBOW;
     else if (strcmp(tag_name, "lcars-text-editor") == 0)
       kind = ELEM_TEXT_EDITOR;
+    else if (strcmp(tag_name, "lcars-entry-list") == 0)
+      kind = ELEM_ENTRY_LIST;
     else if (strcmp(tag_name, "lcars-sphere") == 0)
       kind = ELEM_SPHERE;
 
@@ -313,6 +315,9 @@ void LoadHypermediaDocument(State *s, String source) {
         String dbLog = GetLogFromDB(s);
         make_text_editor(&s->doc_arena, &e, dbLog);
         StringFree(&dbLog);
+      } else if (kind == ELEM_ENTRY_LIST) {
+        printf("Make entry list element\n");
+        make_entry_list(&s->doc_arena, &e, s);
       } else if (kind == ELEM_SPHERE) {
         char src_path[256] = {0};
         GetAttributeValue(tag, "src", src_path, sizeof(src_path));

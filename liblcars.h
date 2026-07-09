@@ -34,6 +34,7 @@
 #define LCARS_ORANGE (Color){255, 154, 102, 255}
 #define LCARS_YELLOW (Color){255, 205, 154, 255}
 #define LCARS_BLUE (Color){155, 155, 255, 255}
+#define LCARS_GREEN (Color){153, 204, 153, 255}
 #define TODO exit(1)
 
 #define MAX_ELEMENTS 10000
@@ -63,6 +64,7 @@ typedef enum ElemKind {
   ELEM_BUTTON,
   ELEM_TEXT,
   ELEM_TEXT_EDITOR,
+  ELEM_ENTRY_LIST,
   ELEM_SPHERE,
   ELEM_TOTAL_KINDS
 } ElemKind;
@@ -118,6 +120,8 @@ typedef struct Element {
   bool isResizing;
   float dragOffsetX;
   float dragOffsetY;
+  bool listCollapsed;
+  int selectedEntryId;
 } Element;
 
 typedef struct State {
@@ -162,6 +166,13 @@ void LoadHypermediaDocument(State *s, String filename);
 // -----------------------------------------------------------------------------
 static inline void updateNotification(State *s, String notificationText);
 
+typedef struct EntryListItem {
+  int id;
+  char title[128];
+  char created_at[32];
+  char last_modified[32];
+} EntryListItem;
+
 #ifdef LCARS_IMPLEMENTATION
 
 // -----------------------------------------------------------------------------
@@ -171,12 +182,19 @@ static void ToggleVoiceRecording(State *s);
 #ifndef HYPERMEDIA
 static void ReLayout(State *s);
 #endif
+
 static inline int sqlite_callback(void *state, int argc, char **argv,
-                           char **azColName);
+                                  char **azColName);
 static inline int ExecSQL(State *s, String sql, String successMsg);
 static void InitDB(State *s, bool firstInit);
 static inline String GetLogFromDB(State *s);
 static inline void UpdateLogInDB(State *s, String newLog);
+static inline String GetEntryContentFromDB(State *s, int id);
+static inline void UpdateEntryContentInDB(State *s, int id, String content);
+static inline int GetEntriesByKind(State *s, const char *kind,
+                                   EntryListItem *items, int maxItems);
+static inline void make_entry_list(Arena *doc_arena, Element *e, State *s);
+static inline void LoadEntryIntoEditor(Element *e, String dbLog);
 static bool IsWordChar(char c);
 static void MoveGap(Element *e, int index);
 static void GapInsertChar(Arena *arena, Element *e, char c);
@@ -249,7 +267,8 @@ static inline void make_text(Element *e) {
   e->textLen = e->text.len;
 }
 
-static inline void make_text_editor(Arena *doc_arena, Element *e, String dbLog) {
+static inline void make_text_editor(Arena *doc_arena, Element *e,
+                                    String dbLog) {
   e->kind = ELEM_TEXT_EDITOR;
 
   int textLen = dbLog.data ? (int)strlen(dbLog.data) : 0;
@@ -288,8 +307,7 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
   int textureStatusIdx = -1;
   for (int i = 0; i < s->numElements; i++) {
     if (s->elements[i].kind == ELEM_RECTANGLE &&
-        s->elements[i].position.x == 0 &&
-        s->elements[i].position.y == 4) {
+        s->elements[i].position.x == 0 && s->elements[i].position.y == 4) {
       textureStatusIdx = i;
       break;
     }
@@ -320,8 +338,7 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
   } else {
     TraceLog(LOG_WARNING, "Texture not ready yet!");
     if (textureStatusIdx != -1) {
-      s->elements[textureStatusIdx].text =
-          StringStatic("Texture not ready!");
+      s->elements[textureStatusIdx].text = StringStatic("Texture not ready!");
       s->elements[textureStatusIdx].textSize = 20;
     }
     s->notification = StringStatic("Failed to load image");
@@ -558,7 +575,8 @@ void Update(State *s) {
     if (vapi->PollResult(voiceBuf, sizeof(voiceBuf))) {
       Element *editor = NULL;
       for (int j = 0; j < s->numElements; j++) {
-        if (s->elements[j].kind == ELEM_TEXT_EDITOR) {
+        if (s->elements[j].kind == ELEM_TEXT_EDITOR ||
+            s->elements[j].kind == ELEM_ENTRY_LIST) {
           editor = &s->elements[j];
           break;
         }
@@ -574,7 +592,11 @@ void Update(State *s) {
 
         if (textChanged) {
           ReconstructText(&s->doc_arena, editor);
-          UpdateLogInDB(s, editor->text);
+          if (editor->kind == ELEM_ENTRY_LIST) {
+            UpdateEntryContentInDB(s, editor->selectedEntryId, editor->text);
+          } else {
+            UpdateLogInDB(s, editor->text);
+          }
           editor->snapToCursor = 2;
         }
       }
@@ -791,14 +813,84 @@ void Update(State *s) {
 
     case ELEM_TEXT:
       break;
-    case ELEM_TEXT_EDITOR: {
-      float scrollbarX = e->position.x + *e->width + 25;
+    case ELEM_TEXT_EDITOR:
+    case ELEM_ENTRY_LIST: {
+      float listWidth = 0.0f;
+      if (e->kind == ELEM_ENTRY_LIST) {
+        listWidth = e->listCollapsed ? 30.0f : 220.0f;
+
+        // Handle list selection panel interactions
+        Vector2 mPos = GetMousePosition();
+        Rectangle listRec =
+            (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
+        if (CheckCollisionPointRec(mPos, listRec)) {
+          if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            Rectangle toggleBtn =
+                (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
+            if (CheckCollisionPointRec(mPos, toggleBtn)) {
+              e->listCollapsed = !e->listCollapsed;
+            } else if (!e->listCollapsed) {
+              Rectangle newEntryBtn = (Rectangle){e->position.x + 35.0f,
+                                                  e->position.y, 170.0f, 30.0f};
+              if (CheckCollisionPointRec(mPos, newEntryBtn)) {
+                UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+
+                char datename[32];
+                struct tm *to;
+                time_t t = time(NULL);
+                to = localtime(&t);
+                strftime(datename, sizeof(datename), "%Y-%m-%d", to);
+
+                char *sql = sqlite3_mprintf(
+                    "INSERT INTO entries (kind, title, content) VALUES "
+                    "('personal_log', 'Captain Log', '%q Captain log');",
+                    datename);
+                if (sql) {
+                  ExecSQL(s, StringStatic(sql),
+                          StringStatic("New entry created"));
+                  sqlite3_free(sql);
+                }
+                int newId = (int)sqlite3_last_insert_rowid(s->db);
+                e->selectedEntryId = newId;
+                String newText = GetEntryContentFromDB(s, newId);
+                LoadEntryIntoEditor(e, newText);
+                StringFree(&newText);
+              } else {
+                EntryListItem items[32];
+                int count = GetEntriesByKind(s, "personal_log", items, 32);
+                float itemY = e->position.y + 40.0f;
+                for (int j = 0; j < count; j++) {
+                  Rectangle itemRec =
+                      (Rectangle){e->position.x + 5.0f, itemY, 205.0f, 50.0f};
+                  if (CheckCollisionPointRec(mPos, itemRec)) {
+                    if (e->selectedEntryId != items[j].id) {
+                      UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+                      e->selectedEntryId = items[j].id;
+                      String newText =
+                          GetEntryContentFromDB(s, e->selectedEntryId);
+                      LoadEntryIntoEditor(e, newText);
+                      StringFree(&newText);
+                    }
+                    break;
+                  }
+                  itemY += 55.0f;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      float editorX = e->position.x + listWidth;
+      float editorWidth = *e->width - listWidth;
+
+      float scrollbarX = editorX + editorWidth + 25;
       float scrollbarY = e->position.y;
       float scrollbarWidth = 18.0f;
       float scrollbarHeight = *e->height;
-      Rectangle activeRec = (Rectangle){.x = e->position.x,
+      Rectangle activeRec = (Rectangle){.x = editorX,
                                         .y = e->position.y,
-                                        .width = *e->width + 55,
+                                        .width = editorWidth + 55,
                                         .height = *e->height};
 
       if (CheckCollisionPointRec(GetMousePosition(), activeRec)) {
@@ -1222,7 +1314,11 @@ void Update(State *s) {
 
         if (textChanged) {
           ReconstructText(&s->doc_arena, e);
-          UpdateLogInDB(s, e->text);
+          if (e->kind == ELEM_ENTRY_LIST) {
+            UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+          } else {
+            UpdateLogInDB(s, e->text);
+          }
         }
 
         // Auto-scroll to cursor
@@ -1444,6 +1540,7 @@ void UpdateDrawFrame(State *s) {
     case ELEM_BUTTON:
     case ELEM_TEXT:
     case ELEM_TEXT_EDITOR:
+    case ELEM_ENTRY_LIST:
     case ELEM_ELBOW:
     case ELEM_NOTHING:
     case ELEM_TOTAL_KINDS:
@@ -1481,18 +1578,88 @@ void UpdateDrawFrame(State *s) {
       DrawText(e->text.data ? e->text.data : "", e->position.x, e->position.y,
                e->textSize, e->color);
       break;
-    case ELEM_TEXT_EDITOR: {
-      DrawRectangleLines(e->position.x, e->position.y, *e->width + 10,
-                         *e->height, LCARS_BLUE);
-      Rectangle r = (Rectangle){e->position.x + 5, e->position.y + 5, *e->width,
-                                *e->height};
+    case ELEM_TEXT_EDITOR:
+    case ELEM_ENTRY_LIST: {
+      float listWidth = 0.0f;
+      if (e->kind == ELEM_ENTRY_LIST) {
+        listWidth = e->listCollapsed ? 30.0f : 220.0f;
+
+        // Draw list panel background
+        DrawRectangle(e->position.x, e->position.y, listWidth - 5.0f,
+                      *e->height, (Color){15, 15, 15, 255});
+        DrawRectangleLines(e->position.x, e->position.y, listWidth - 5.0f,
+                           *e->height, LCARS_ORANGE);
+
+        // Draw toggle button
+        Rectangle toggleBtn =
+            (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
+        DrawRectangleRounded(toggleBtn, 0.3f, 4, LCARS_BLUE);
+        DrawText(e->listCollapsed ? ">" : "<", toggleBtn.x + 10,
+                 toggleBtn.y + 8, 16, BLACK);
+
+        if (!e->listCollapsed) {
+          // Draw "+ New Entry" button
+          Rectangle newEntryBtn =
+              (Rectangle){e->position.x + 35.0f, e->position.y, 170.0f, 30.0f};
+          DrawRectangleRounded(newEntryBtn, 0.3f, 4, LCARS_GREEN);
+          DrawText("+ NEW ENTRY", newEntryBtn.x + 30, newEntryBtn.y + 8, 14,
+                   BLACK);
+
+          // Draw entries
+          EntryListItem items[32];
+          int count = GetEntriesByKind(s, "personal_log", items, 32);
+          float itemY = e->position.y + 40.0f;
+          for (int j = 0; j < count; j++) {
+            Rectangle itemRec =
+                (Rectangle){e->position.x + 5.0f, itemY, 205.0f, 50.0f};
+            Color itemColor = (items[j].id == e->selectedEntryId)
+                                  ? LCARS_YELLOW
+                                  : (Color){40, 40, 40, 255};
+            Color textColor =
+                (items[j].id == e->selectedEntryId) ? BLACK : WHITE;
+            Color subtextColor = (items[j].id == e->selectedEntryId)
+                                     ? (Color){80, 80, 80, 255}
+                                     : (Color){180, 180, 180, 255};
+
+            DrawRectangleRounded(itemRec, 0.2f, 4, itemColor);
+
+            // Draw entry title/id
+            char label[256];
+            snprintf(label, sizeof(label), "Entry #%d (%s)", items[j].id,
+                     items[j].title);
+            DrawText(label, itemRec.x + 5, itemRec.y + 5, 14, textColor);
+
+            // Draw created and updated dates
+            char dates[64];
+            snprintf(dates, sizeof(dates), "U: %s",
+                     items[j].last_modified[0] ? items[j].last_modified
+                                               : items[j].created_at);
+            DrawText(dates, itemRec.x + 5, itemRec.y + 20, 10, subtextColor);
+            char createdDate[64];
+            snprintf(createdDate, sizeof(createdDate), "C: %s",
+                     items[j].created_at);
+            DrawText(createdDate, itemRec.x + 5, itemRec.y + 32, 10,
+                     subtextColor);
+
+            itemY += 55.0f;
+          }
+        }
+      }
+
+      float editorX = e->position.x + listWidth;
+      float editorWidth = *e->width - listWidth;
+
+      DrawRectangleLines(editorX, e->position.y, editorWidth + 10, *e->height,
+                         LCARS_BLUE);
+      Rectangle r =
+          (Rectangle){editorX + 5, e->position.y + 5, editorWidth, *e->height};
       BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
       DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false,
                     e->color, &e->textHeight, &e->cursorY, e->gapStart);
       EndScissorMode();
 
       // Render scrollbar
-      float scrollbarX = e->position.x + *e->width + 25;
+      float scrollbarX = editorX + editorWidth + 25;
       float scrollbarY = e->position.y;
       float scrollbarWidth = 18.0f;
       float scrollbarHeight = *e->height;
@@ -1585,7 +1752,8 @@ void UpdateDrawFrame(State *s) {
       break;
     }
 
-    if (e->text.data && e->kind != ELEM_TEXT && e->kind != ELEM_TEXT_EDITOR) {
+    if (e->text.data && e->kind != ELEM_TEXT && e->kind != ELEM_TEXT_EDITOR &&
+        e->kind != ELEM_ENTRY_LIST) {
       int textWidth = MeasureText(e->text.data, e->textSize);
       if (e->kind == ELEM_ELBOW) {
         DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
