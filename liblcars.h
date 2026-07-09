@@ -5,7 +5,15 @@
 #include "raylib.h"
 #include "raymath.h"
 #include "rlgl.h"
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#endif
 #include "vendor/raygui.h"
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #include "vendor/sqlite3.h"
 #include <stdarg.h>
 #include <stdbool.h>
@@ -163,12 +171,12 @@ static void ToggleVoiceRecording(State *s);
 #ifndef HYPERMEDIA
 static void ReLayout(State *s);
 #endif
-static int sqlite_callback(void *state, int argc, char **argv,
+static inline int sqlite_callback(void *state, int argc, char **argv,
                            char **azColName);
-static int ExecSQL(State *s, String sql, String successMsg);
+static inline int ExecSQL(State *s, String sql, String successMsg);
 static void InitDB(State *s, bool firstInit);
-static String GetLogFromDB(State *s);
-static void UpdateLogInDB(State *s, String newLog);
+static inline String GetLogFromDB(State *s);
+static inline void UpdateLogInDB(State *s, String newLog);
 static bool IsWordChar(char c);
 static void MoveGap(Element *e, int index);
 static void GapInsertChar(Arena *arena, Element *e, char c);
@@ -213,6 +221,123 @@ static int GetCharIndexAtMouse(const State *s, Font font, String text,
 static inline void updateNotification(State *s, String notificationText) {
   StringAssign(&s->doc_arena, &s->notification, notificationText);
   s->notificationTimer = NOTIFICATION_DURATION;
+}
+
+// -----------------------------------------------------------------------------
+// Element constructors (In-place)
+// -----------------------------------------------------------------------------
+static inline void make_rectangle(Element *e) {
+  e->kind = ELEM_RECTANGLE;
+  e->textLen = e->text.len;
+}
+
+static inline void make_elbow(Element *e, int orientation) {
+  e->kind = ELEM_ELBOW;
+  e->elbowOrientation = orientation;
+  e->textLen = e->text.len;
+}
+
+static inline void make_button(Element *e) {
+  e->kind = ELEM_BUTTON;
+  e->textLen = e->text.len;
+}
+
+static inline void make_text(Element *e) {
+  e->kind = ELEM_TEXT;
+  e->width = NULL;
+  e->height = NULL;
+  e->textLen = e->text.len;
+}
+
+static inline void make_text_editor(Arena *doc_arena, Element *e, String dbLog) {
+  e->kind = ELEM_TEXT_EDITOR;
+
+  int textLen = dbLog.data ? (int)strlen(dbLog.data) : 0;
+  int textCapacity = 4096;
+  char *gapBuffer = (char *)arena_alloc(doc_arena, textCapacity + 1);
+  if (gapBuffer && dbLog.data) {
+    memcpy(gapBuffer, dbLog.data, textLen);
+  }
+  e->gapBuffer = gapBuffer;
+  e->gapStart = textLen;
+  e->gapEnd = textCapacity;
+  e->textCapacity = textCapacity;
+
+  char *textAlloc = (char *)arena_alloc(doc_arena, textLen + 1);
+  if (textAlloc && dbLog.data) {
+    memcpy(textAlloc, dbLog.data, textLen);
+    textAlloc[textLen] = '\0';
+  }
+  e->text.data = textAlloc;
+  e->text.len = textLen;
+  e->text.is_static = false;
+
+  e->textLen = textLen;
+  e->textLineLen = textLen;
+}
+
+static inline void make_sphere(State *s, Element *e, const char *imagePath) {
+  e->kind = ELEM_SPHERE;
+
+  Image image = {0};
+  if (imagePath && FileExists(imagePath)) {
+    image = LoadImage(imagePath);
+    ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+  }
+
+  int textureStatusIdx = -1;
+  for (int i = 0; i < s->numElements; i++) {
+    if (s->elements[i].kind == ELEM_RECTANGLE &&
+        s->elements[i].position.x == 0 &&
+        s->elements[i].position.y == 4) {
+      textureStatusIdx = i;
+      break;
+    }
+  }
+
+  if (image.data != NULL) {
+    TraceLog(LOG_WARNING, "Texture ready!");
+    if (textureStatusIdx != -1) {
+      s->elements[textureStatusIdx].text = StringStatic(NULL);
+      s->elements[textureStatusIdx].textSize = 0;
+    }
+    ImageRotateCW(&image);
+    ImageFlipVertical(&image);
+    ImageFlipHorizontal(&image);
+    Texture2D texture = LoadTextureFromImage(image);
+    if (!IsTextureValid(texture)) {
+      TraceLog(LOG_ERROR, "Texture is invalid!");
+      if (textureStatusIdx != -1) {
+        s->elements[textureStatusIdx].text =
+            StringStatic("Texture is invalid!");
+      }
+    } else {
+      Model model = LoadModelFromMesh(GenMeshSphere(3.0f, 32, 32));
+      model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture;
+      model.transform = MatrixRotateX(DEG2RAD * 90.0f);
+      e->model = model;
+    }
+  } else {
+    TraceLog(LOG_WARNING, "Texture not ready yet!");
+    if (textureStatusIdx != -1) {
+      s->elements[textureStatusIdx].text =
+          StringStatic("Texture not ready!");
+      s->elements[textureStatusIdx].textSize = 20;
+    }
+    s->notification = StringStatic("Failed to load image");
+  }
+
+  Camera camera = {0};
+  camera.position = (Vector3){10.0f, -10.0f, 10.0f};
+  camera.target = (Vector3){0.0f, 0.0f, 0.0f};
+  camera.up = (Vector3){0.0f, 1.0f, -0.23f};
+  camera.fovy = 45.0f;
+  camera.projection = CAMERA_PERSPECTIVE;
+  e->camera = camera;
+
+  if (e->width && e->height) {
+    e->renderTexture = LoadRenderTexture((int)*e->width, (int)*e->height);
+  }
 }
 
 #ifdef LCARS_IMPLEMENTATION
@@ -308,14 +433,8 @@ void Init(State *s, bool firstInit) {
   s->numElements = 0;
 
   s->notification = StringInit(&s->doc_arena, "");
-#ifdef HYPERMEDIA
-  LoadHypermediaDocument(s, StringStatic("file://main.html"));
-#else
-  ReLayout(s);
-#endif
-#ifndef HYPERMEDIA
-  double t_layout_end = GetTimeSeconds();
 
+#ifndef HYPERMEDIA
   double t_db_start = GetTimeSeconds();
 #endif
   if (firstInit) {
@@ -330,6 +449,19 @@ void Init(State *s, bool firstInit) {
   }
 
   InitDB(s, firstInit);
+#ifndef HYPERMEDIA
+  double t_db_end = GetTimeSeconds();
+#endif
+
+#ifdef HYPERMEDIA
+  printf("Loading hypermedia\n");
+  LoadHypermediaDocument(s, StringStatic("file://main.html"));
+#else
+  ReLayout(s);
+#endif
+#ifndef HYPERMEDIA
+  double t_layout_end = GetTimeSeconds();
+#endif
 
 #ifdef HYPERMEDIA
   s->font = GetFontDefault();

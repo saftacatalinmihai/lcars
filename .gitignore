@@ -2,6 +2,7 @@ compile_commands.json
 emsdk
 vendor/raylib-web
 vendor/libraylib.a
+vendor/libminiaudio.a
 lcars
 lcars-lib.so
 *.so

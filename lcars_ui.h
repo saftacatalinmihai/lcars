@@ -19,12 +19,14 @@ static float w210;
 
 static void AddBarSegment(State *s, int *x_cursor, int y, float *width,
                           float *height, Color color, int gap) {
-  s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE,
-                                            .position = {*x_cursor + gap, y},
-                                            .width = width,
-                                            .height = height,
-                                            .color = color,
-                                            .originalColor = color};
+  Element e = {0};
+  e.position = (iVec2){*x_cursor + gap, y};
+  e.width = width;
+  e.height = height;
+  e.color = color;
+  e.originalColor = color;
+  make_rectangle(&e);
+  s->elements[s->numElements++] = e;
   *x_cursor += (int)*width + gap;
 }
 
@@ -48,21 +50,26 @@ static void ReLayout(State *s) {
   int yu = s->posY - s->columnHeight - s->innerRadius - s->barHeight;
 
   h100 = 100;
-  s->elements[s->numElements++] = (Element){.kind = ELEM_ELBOW,
-                                            .elbowOrientation = 3,
-                                            .position = {s->posX, yu - gap},
-                                            .width = &s->columnWidth,
-                                            .height = &s->columnHeight,
-                                            .color = LCARS_BLUE};
+  Element e = {0};
+  e.position = (iVec2){s->posX, yu - gap};
+  e.width = &s->columnWidth;
+  e.height = &s->columnHeight;
+  e.color = LCARS_BLUE;
+  e.originalColor = LCARS_BLUE;
+  make_elbow(&e, 3);
+  s->elements[s->numElements++] = e;
+
   yu -= gap;
-  s->elements[s->numElements++] =
-      (Element){.kind = ELEM_RECTANGLE,
-                .position = {s->posX, yu - 100 - gap},
-                .width = &s->columnWidth,
-                .height = &h100,
-                .color = LCARS_PURPLE,
-                .text = temp[1].text,
-                .textSize = temp[1].textSize};
+  e = (Element){0};
+  e.position = (iVec2){s->posX, yu - 100 - gap};
+  e.width = &s->columnWidth;
+  e.height = &h100;
+  e.color = LCARS_PURPLE;
+  e.originalColor = LCARS_PURPLE;
+  e.text = temp[1].text;
+  e.textSize = temp[1].textSize;
+  make_rectangle(&e);
+  s->elements[s->numElements++] = e;
   yu -= 100;
 
   int xu = s->posX + s->columnWidth + s->barWidth;
@@ -73,43 +80,59 @@ static void ReLayout(State *s) {
   AddBarSegment(s, &xu, yu_bar, &w[3], &s->barHeight, LCARS_RED_ORANGE, gap);
 
   // Lower elbo
-  s->elements[s->numElements++] = (Element){.kind = ELEM_ELBOW,
-                                            .position = {s->posX, s->posY},
-                                            .width = &s->columnWidth,
-                                            .height = &s->columnHeight,
-                                            .color = LCARS_RED_ORANGE,
-                                            .text = StringStatic("03-975883"),
-                                            .textSize = 20};
+  e = (Element){0};
+  e.position = (iVec2){s->posX, s->posY};
+  e.width = &s->columnWidth;
+  e.height = &s->columnHeight;
+  e.color = LCARS_RED_ORANGE;
+  e.originalColor = LCARS_RED_ORANGE;
+  e.text = StringStatic("03-975883");
+  e.textSize = 20;
+  make_elbow(&e, 0);
+  s->elements[s->numElements++] = e;
+
   int y = s->posY + s->columnHeight + s->barHeight + s->innerRadius;
 
   h200_60_250[0] = 200;
   h200_60_250[1] = 60;
   h200_60_250[2] = 250;
 
-  s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE,
-                                            .position = {s->posX, y + gap},
-                                            .width = &s->columnWidth,
-                                            .height = &h200_60_250[0],
-                                            .color = LCARS_RED_ORANGE,
-                                            .text = StringStatic("04-785466"),
-                                            .on_click = ACTION_PRINT_DB,
-                                            .textSize = 20};
+  e = (Element){0};
+  e.position = (iVec2){s->posX, y + gap};
+  e.width = &s->columnWidth;
+  e.height = &h200_60_250[0];
+  e.color = LCARS_RED_ORANGE;
+  e.originalColor = LCARS_RED_ORANGE;
+  e.text = StringStatic("04-785466");
+  e.on_click = ACTION_PRINT_DB;
+  e.textSize = 20;
+  make_rectangle(&e);
+  s->elements[s->numElements++] = e;
+
   y = y + 200 + gap;
-  s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE,
-                                            .position = {s->posX, y + gap},
-                                            .width = &s->columnWidth,
-                                            .height = &h200_60_250[1],
-                                            .color = LCARS_ORANGE,
-                                            .text = StringStatic("05-423512"),
-                                            .textSize = 20};
+  e = (Element){0};
+  e.position = (iVec2){s->posX, y + gap};
+  e.width = &s->columnWidth;
+  e.height = &h200_60_250[1];
+  e.color = LCARS_ORANGE;
+  e.originalColor = LCARS_ORANGE;
+  e.text = StringStatic("05-423512");
+  e.textSize = 20;
+  make_rectangle(&e);
+  s->elements[s->numElements++] = e;
+
   y = y + 60 + gap;
-  s->elements[s->numElements++] = (Element){.kind = ELEM_RECTANGLE,
-                                            .position = {s->posX, y + gap},
-                                            .width = &s->columnWidth,
-                                            .height = &h200_60_250[2],
-                                            .color = LCARS_ORANGE,
-                                            .text = StringStatic("06-572983"),
-                                            .textSize = 20};
+  e = (Element){0};
+  e.position = (iVec2){s->posX, y + gap};
+  e.width = &s->columnWidth;
+  e.height = &h200_60_250[2];
+  e.color = LCARS_ORANGE;
+  e.originalColor = LCARS_ORANGE;
+  e.text = StringStatic("06-572983");
+  e.textSize = 20;
+  make_rectangle(&e);
+  s->elements[s->numElements++] = e;
+
   y = y + 250 + gap;
 
   int x = s->posX + s->columnWidth + s->barWidth;
@@ -121,67 +144,76 @@ static void ReLayout(State *s) {
 
   buttonHeight = 50;
   w210 = 210;
-  s->elements[s->numElements++] =
-      (Element){.kind = ELEM_BUTTON,
-                .on_click = ACTION_DEBUG,
-                .position = {x - 220, s->posY - 20 - s->barHeight -
-                                          2 * buttonHeight - 10},
-                .width = &w210,
-                .height = &buttonHeight,
-                .color = LCARS_ORANGE,
-                .text = StringStatic("(LC+d)ebug 9888-24"),
-                .textSize = 20};
-  s->elements[s->numElements++] =
-      (Element){.kind = ELEM_BUTTON,
-                .on_click = ACTION_EDIT,
-                .position = {x - 220 - 220, s->posY - 20 - s->barHeight -
-                                                2 * buttonHeight - 10},
-                .width = &w210,
-                .height = &buttonHeight,
-                .color = LCARS_BLUE,
-                .text = StringStatic("(LC+e)edit 0129-86"),
-                .textSize = 20};
-  s->elements[s->numElements++] = (Element){
-      .kind = ELEM_BUTTON,
-      .on_click = ACTION_RESET,
-      .position = {x - 220, s->posY - 20 - s->barHeight - buttonHeight},
-      .width = &w210,
-      .height = &buttonHeight,
-      .color = LCARS_BLUE,
-      .text = StringStatic("(LC+r)eset 7232-83"),
-      .textSize = 20};
+  e = (Element){0};
+  e.position = (iVec2){x - 220, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10};
+  e.width = &w210;
+  e.height = &buttonHeight;
+  e.color = LCARS_ORANGE;
+  e.originalColor = LCARS_ORANGE;
+  e.text = StringStatic("(LC+d)ebug 9888-24");
+  e.on_click = ACTION_DEBUG;
+  e.textSize = 20;
+  make_button(&e);
+  s->elements[s->numElements++] = e;
+
+  e = (Element){0};
+  e.position = (iVec2){x - 220 - 220, s->posY - 20 - s->barHeight - 2 * buttonHeight - 10};
+  e.width = &w210;
+  e.height = &buttonHeight;
+  e.color = LCARS_BLUE;
+  e.originalColor = LCARS_BLUE;
+  e.text = StringStatic("(LC+e)edit 0129-86");
+  e.on_click = ACTION_EDIT;
+  e.textSize = 20;
+  make_button(&e);
+  s->elements[s->numElements++] = e;
+
+  e = (Element){0};
+  e.position = (iVec2){x - 220, s->posY - 20 - s->barHeight - buttonHeight};
+  e.width = &w210;
+  e.height = &buttonHeight;
+  e.color = LCARS_BLUE;
+  e.originalColor = LCARS_BLUE;
+  e.text = StringStatic("(LC+r)eset 7232-83");
+  e.on_click = ACTION_RESET;
+  e.textSize = 20;
+  make_button(&e);
+  s->elements[s->numElements++] = e;
 
   VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
   bool isRecording = (vapi && vapi->IsRecording());
-  s->elements[s->numElements++] = (Element){
-      .kind = ELEM_BUTTON,
-      .on_click = ACTION_VOICE_INPUT,
-      .position = {x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight},
-      .width = &w210,
-      .height = &buttonHeight,
-      .color = isRecording ? RED : LCARS_BLUE,
-      .originalColor = LCARS_BLUE,
-      .text = StringStatic(isRecording ? TEXT_RECORDING : TEXT_VOICE_INPUT),
-      .textSize = 20};
+  e = (Element){0};
+  e.position = (iVec2){x - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight};
+  e.width = &w210;
+  e.height = &buttonHeight;
+  e.color = isRecording ? RED : LCARS_BLUE;
+  e.originalColor = LCARS_BLUE;
+  e.text = StringStatic(isRecording ? TEXT_RECORDING : TEXT_VOICE_INPUT);
+  e.on_click = ACTION_VOICE_INPUT;
+  e.textSize = 20;
+  make_button(&e);
+  s->elements[s->numElements++] = e;
 
-  s->elements[s->numElements++] =
-      (Element){.kind = ELEM_BUTTON,
-                .on_click = ACTION_LOAD_HYPERMEDIA,
-                .position = {x - 220 - 220 - 220,
-                             s->posY - 20 - s->barHeight - buttonHeight},
-                .width = &w210,
-                .height = &buttonHeight,
-                .color = LCARS_YELLOW,
-                .originalColor = LCARS_YELLOW,
-                .text = StringStatic("http://localhost:8000/main.html"),
-                .textSize = 20};
+  e = (Element){0};
+  e.position = (iVec2){x - 220 - 220 - 220, s->posY - 20 - s->barHeight - buttonHeight};
+  e.width = &w210;
+  e.height = &buttonHeight;
+  e.color = LCARS_YELLOW;
+  e.originalColor = LCARS_YELLOW;
+  e.text = StringStatic("http://localhost:8000/main.html");
+  e.on_click = ACTION_LOAD_HYPERMEDIA;
+  e.textSize = 20;
+  make_button(&e);
+  s->elements[s->numElements++] = e;
 
-  s->elements[s->numElements++] =
-      (Element){.kind = ELEM_TEXT,
-                .position = {x - 220 - 220 - 20, yu},
-                .color = LCARS_YELLOW,
-                .textSize = 48,
-                .text = StringStatic("LCARS ACCESS 441")};
+  e = (Element){0};
+  e.position = (iVec2){x - 220 - 220 - 20, yu};
+  e.color = LCARS_YELLOW;
+  e.originalColor = LCARS_YELLOW;
+  e.text = StringStatic("LCARS ACCESS 441");
+  e.textSize = 48;
+  make_text(&e);
+  s->elements[s->numElements++] = e;
 }
 #endif
 

@@ -5,6 +5,10 @@
 
 #include "lcars_base.h"
 
+#if defined(STATIC_BUILD) || defined(__EMSCRIPTEN__)
+#define LCARS_IMPLEMENTATION
+#define RAYGUI_IMPLEMENTATION
+#endif
 #include "liblcars.h"
 
 #include "lcars_db.h"
@@ -180,17 +184,17 @@ int main(int argc, char **argv) {
   unlink(lib_path);
 
   if (handle) {
-    Update = (Fn_Update)dlsym(handle, "UpdateDrawFrame");
+    *(void **)(&Update) = dlsym(handle, "UpdateDrawFrame");
     if (Update == NULL) {
       printf("Failed to load UpdateDrawFrame: %s\n", dlerror());
       return 1;
     }
-    Init = (Fn_Init)dlsym(handle, "Init");
+    *(void **)(&Init) = dlsym(handle, "Init");
     if (Init == NULL) {
       printf("Failed to load Init: %s\n", dlerror());
       return 1;
     }
-    Reload = (Fn_Reload)dlsym(handle, "Reload");
+    *(void **)(&Reload) = dlsym(handle, "Reload");
     if (Reload == NULL) {
       printf("Failed to load Reload: %s\n", dlerror());
       return 1;
@@ -223,9 +227,9 @@ int main(int argc, char **argv) {
       if (!handle) {
         printf("dlopen failed: %s\n", dlerror());
       } else {
-        Update = (Fn_Update)dlsym(handle, "UpdateDrawFrame");
-        Init = (Fn_Init)dlsym(handle, "Init");
-        Reload = (Fn_Reload)dlsym(handle, "Reload");
+        *(void **)(&Update) = dlsym(handle, "UpdateDrawFrame");
+        *(void **)(&Init) = dlsym(handle, "Init");
+        *(void **)(&Reload) = dlsym(handle, "Reload");
         if (Reload) {
           Reload(s, false);
         }
@@ -242,3 +246,7 @@ int main(int argc, char **argv) {
   CloseWindow();
   return 0;
 }
+
+#include "lcars_resources_download.c"
+#include "lcars_voice_rec.c"
+

@@ -62,16 +62,23 @@ vendor/libraylib.a:
 	cp vendor/raylib-web/src/libraylib.a vendor/libraylib.a
 	$(MAKE) -C vendor/raylib-web/src clean
 
-# Static targets
-lcars: lcars.c lcars_voice_rec.c lcars_voice_rec.h lcars_resources_download.c lcars_resources_download.h liblcars.c vendor/libraylib.a ensure-resources
-	cc $(CFLAGS_DEBUG) -DSTATIC_BUILD -o lcars lcars.c lcars_voice_rec.c lcars_resources_download.c liblcars.c vendor/libraylib.a $(STATIC_LIBS_DESKTOP)
+# Target to build static miniaudio if missing
+vendor/libminiaudio.a: vendor/miniaudio.c
+	@echo "Building static miniaudio..."
+	cc -std=c11 -O2 -c vendor/miniaudio.c -o vendor/miniaudio.o
+	ar rcs vendor/libminiaudio.a vendor/miniaudio.o
+	rm vendor/miniaudio.o
 
-lcars-release: lcars.c lcars_voice_rec.c lcars_voice_rec.h lcars_resources_download.c lcars_resources_download.h liblcars.c vendor/libraylib.a ensure-resources
-	cc $(CFLAGS_RELEASE) -DSTATIC_BUILD -o lcars lcars.c lcars_voice_rec.c lcars_resources_download.c liblcars.c vendor/libraylib.a $(STATIC_LIBS_DESKTOP)
+# Static targets
+lcars: lcars.c vendor/libraylib.a vendor/libminiaudio.a ensure-resources
+	cc $(CFLAGS_DEBUG) -DSTATIC_BUILD -o lcars lcars.c vendor/libraylib.a vendor/libminiaudio.a $(STATIC_LIBS_DESKTOP)
+
+lcars-release: lcars.c vendor/libraylib.a vendor/libminiaudio.a ensure-resources
+	cc $(CFLAGS_RELEASE) -DSTATIC_BUILD -o lcars lcars.c vendor/libraylib.a vendor/libminiaudio.a $(STATIC_LIBS_DESKTOP)
 
 # Dynamic targets
-lcars-dynamic: lcars.c lcars_voice_rec.c lcars_voice_rec.h lcars_resources_download.c lcars_resources_download.h lcars-lib.so ensure-resources
-	cc $(CFLAGS_DYN) -o lcars lcars.c lcars_voice_rec.c lcars_resources_download.c -lcurl -lsqlite3 -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
+lcars-dynamic: lcars.c lcars-lib.so vendor/libminiaudio.a ensure-resources
+	cc $(CFLAGS_DYN) -o lcars lcars.c vendor/libminiaudio.a -lcurl -lsqlite3 -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
 lcars-lib.so: liblcars.h liblcars.c lcars_voice_rec.h
 	cc $(CFLAGS_DYN) -fPIC -shared $(SHARED_FLAGS) -std=c11 -lsqlite3 -ldl -lcurl -o lcars-lib.so liblcars.c
@@ -93,8 +100,8 @@ lcars-portable:
 		chown $(shell id -u):$(shell id -g) lcars"
 
 # Web build targets
-lcars-web: lcars.c lcars_voice_rec.c lcars_resources_download.c $(RAYLIB_WEB)/libraylib.web.a
-	emcc liblcars.c lcars.c lcars_voice_rec.c lcars_resources_download.c vendor/sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
+lcars-web: lcars.c $(RAYLIB_WEB)/libraylib.web.a
+	emcc lcars.c vendor/sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
 
 serve: lcars-web
 	@echo "Starting server at http://localhost:8080/lcars.html"
@@ -127,5 +134,7 @@ run-web: lcars-web
 	@echo "Starting server at http://localhost:8080/lcars.html"
 	python3 -m http.server 8080
 	
-.PHONY: run clean lcars-web serve setup-emsdk setup-raylib-web setup-web lcars-portable
+clean:
+	rm -f lcars lcars-lib.so lcars.js lcars.wasm lcars.data vendor/libminiaudio.a
 
+.PHONY: run clean lcars-web serve setup-emsdk setup-raylib-web setup-web lcars-portable

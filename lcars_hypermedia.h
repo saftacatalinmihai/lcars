@@ -287,130 +287,36 @@ void LoadHypermediaDocument(State *s, String source) {
         *h_ptr = h_val;
 
       Element e = {0};
-      e.kind = kind;
       e.position = (iVec2){x, y};
       e.width = w_ptr;
       e.height = h_ptr;
       e.color = color;
       e.originalColor = color;
       e.on_click = action;
-      e.elbowOrientation = orientation;
       e.textSize = textSize;
       if (innerText) {
         e.text = StringInit(&s->doc_arena, innerText);
-        e.textLen = e.text.len;
       } else {
         e.text = StringStatic(NULL);
-        e.textLen = 0;
       }
 
-      if (kind == ELEM_TEXT_EDITOR) {
+      if (kind == ELEM_RECTANGLE) {
+        make_rectangle(&e);
+      } else if (kind == ELEM_ELBOW) {
+        make_elbow(&e, orientation);
+      } else if (kind == ELEM_BUTTON) {
+        make_button(&e);
+      } else if (kind == ELEM_TEXT) {
+        make_text(&e);
+      } else if (kind == ELEM_TEXT_EDITOR) {
+        printf("Get log from DB\n");
         String dbLog = GetLogFromDB(s);
-        char *text = arena_alloc(&s->scratch_arena, MAX_INPUT_CHARS + 1);
-        if (text) {
-          strncpy(text, dbLog.data ? dbLog.data : "", MAX_INPUT_CHARS);
-          text[MAX_INPUT_CHARS] = '\0';
-        }
+        make_text_editor(&s->doc_arena, &e, dbLog);
         StringFree(&dbLog);
-
-        int textLen = text ? strlen(text) : 0;
-        int textCapacity = 4096;
-        char *gapBuffer = arena_alloc(&s->doc_arena, textCapacity + 1);
-        if (gapBuffer && text) {
-          memcpy(gapBuffer, text, textLen);
-        }
-        int gapStart = textLen;
-        int gapEnd = textCapacity;
-
-        e.text = StringInit(&s->doc_arena, text);
-        e.textLen = textLen;
-        e.textLineLen = textLen;
-        e.gapBuffer = gapBuffer;
-        e.gapStart = gapStart;
-        e.gapEnd = gapEnd;
-        e.textCapacity = textCapacity;
-        e.isFocused = false;
-        e.textSelectedFramesCounter = 0;
-        e.selectTextStart = -1;
-        e.selectTextLength = 0;
-        e.selectTextEnd = -1;
-        e.isDeletingText = false;
-        e.deletingTextStartTime = 0.0f;
-        e.isMovingCursorLeft = false;
-        e.moveCursorLeftStartTime = 0.0f;
-        e.isMovingCursorRight = false;
-        e.moveCursorRightStartTime = 0.0f;
-        e.isMovingCursorUp = false;
-        e.moveCursorUpStartTime = 0.0f;
-        e.isMovingCursorDown = false;
-        e.moveCursorDownStartTime = 0.0f;
-        e.selectingText = false;
-        e.draggingScrollbar = false;
-        e.dragStartY = 0.0f;
-        e.dragStartScrollY = 0.0f;
       } else if (kind == ELEM_SPHERE) {
-        e.position3 = (Vector3){0, 0, 0};
-        e.rotation = 0;
-
-        Image image = {0};
-        if (FileExists("resources/earth.png")) {
-          image = LoadImage("resources/earth.png");
-          ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
-        }
-
-        int textureStatusIdx = -1;
-        for (int i = 0; i < s->numElements; i++) {
-          if (s->elements[i].kind == ELEM_RECTANGLE &&
-              s->elements[i].position.x == 0 &&
-              s->elements[i].position.y == 4) {
-            textureStatusIdx = i;
-            break;
-          }
-        }
-
-        if (image.data != NULL) {
-          TraceLog(LOG_WARNING, "Texture ready!");
-          if (textureStatusIdx != -1) {
-            s->elements[textureStatusIdx].text = StringStatic(NULL);
-            s->elements[textureStatusIdx].textSize = 0;
-          }
-          ImageRotateCW(&image);
-          ImageFlipVertical(&image);
-          ImageFlipHorizontal(&image);
-          Texture2D texture = LoadTextureFromImage(image);
-          if (!IsTextureValid(texture)) {
-            TraceLog(LOG_ERROR, "Texture is invalid!");
-            if (textureStatusIdx != -1) {
-              s->elements[textureStatusIdx].text =
-                  StringStatic("Texture is invalid!");
-            }
-          } else {
-            Model earthModel = LoadModelFromMesh(GenMeshSphere(3.0f, 32, 32));
-            earthModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture =
-                texture;
-            earthModel.transform = MatrixRotateX(DEG2RAD * 90.0f);
-            e.model = earthModel;
-          }
-        } else {
-          TraceLog(LOG_WARNING, "Texture not ready yet!");
-          if (textureStatusIdx != -1) {
-            s->elements[textureStatusIdx].text =
-                StringStatic("Texture not ready!");
-            s->elements[textureStatusIdx].textSize = 20;
-          }
-          s->notification = StringStatic("Failed to load image");
-        }
-
-        Camera camera = {0};
-        camera.position = (Vector3){10.0f, -10.0f, 10.0f};
-        camera.target = (Vector3){0.0f, 0.0f, 0.0f};
-        camera.up = (Vector3){0.0f, 1.0f, -0.23f};
-        camera.fovy = 45.0f;
-        camera.projection = CAMERA_PERSPECTIVE;
-        e.camera = camera;
-
-        RenderTexture renderTexture = LoadRenderTexture(w_val, h_val);
-        e.renderTexture = renderTexture;
+        char src_path[256] = {0};
+        GetAttributeValue(tag, "src", src_path, sizeof(src_path));
+        make_sphere(s, &e, src_path[0] ? src_path : NULL);
       }
 
       s->elements[s->numElements++] = e;

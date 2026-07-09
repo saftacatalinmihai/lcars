@@ -2,9 +2,10 @@
 #define LCARS_DB_H
 
 #include "liblcars.h"
+#include "vendor/sqlite3.h"
 
-static int sqlite_callback(void *state, int argc, char **argv,
-                           char **azColName) {
+static inline int sqlite_callback(void *state, int argc, char **argv,
+                                  char **azColName) {
   State *s = (State *)state;
   (void)s;
   int i;
@@ -15,7 +16,7 @@ static int sqlite_callback(void *state, int argc, char **argv,
   return 0;
 }
 
-static int ExecSQL(State *s, String sql, String successMsg) {
+static inline int ExecSQL(State *s, String sql, String successMsg) {
   char *zErrMsg = 0;
   int rc = sqlite3_exec(s->db, sql.data, sqlite_callback, s, &zErrMsg);
   if (rc != SQLITE_OK) {
@@ -39,9 +40,7 @@ void InitDB(State *s, bool firstInit) {
           StringStatic("Table created successfully"));
   const char *sql_entry_create =
       "CREATE TABLE IF NOT EXISTS entries ("
-      "id INTEGER PRIMARY KEY AUTOINCREMENT," // type of thing, 0=log, 1=task,
-                                              // 2=event, etc. these are just
-                                              // examples.
+      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
       "kind TEXT DEFAULT '',"
       "title TEXT,"
       "content TEXT,"
@@ -73,13 +72,15 @@ void InitDB(State *s, bool firstInit) {
   }
 }
 
-static String GetLogFromDB(State *s) {
+static inline String GetLogFromDB(State *s) {
   String output;
   sqlite3_stmt *stmt;
   int rc = sqlite3_prepare_v2(s->db, "SELECT text FROM log where id=?1", -1,
-                              &stmt, 0);
+                              &stmt, NULL);
   if (rc != SQLITE_OK) {
-    updateNotification(s, StringStatic("failure fetching data"));
+    // updateNotification(s, StringStatic("failure fetching data"));
+    fprintf(stderr, "SQL error failure fetching log: %s\n",
+            sqlite3_errmsg(s->db));
     output = StringInit(&s->scratch_arena, "");
   } else {
     sqlite3_bind_text(stmt, 1, "0", -1, SQLITE_STATIC);
@@ -95,7 +96,7 @@ static String GetLogFromDB(State *s) {
   return output;
 }
 
-static void UpdateLogInDB(State *s, String newLog) {
+static inline void UpdateLogInDB(State *s, String newLog) {
   char *sql_update_full =
       sqlite3_mprintf("UPDATE log SET text = (%Q) WHERE id = 0;", newLog.data);
   if (!sql_update_full) {

@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "lcars_voice_rec.h"
+#include "lcars_base.h"
 
 #ifndef __EMSCRIPTEN__
 #include <stdio.h>
@@ -79,7 +80,6 @@ static bool LoadVoskLibrary(void) {
     return true;
 }
 
-#define MINIAUDIO_IMPLEMENTATION
 #include "vendor/miniaudio.h"
 
 #include <stdio.h>
@@ -89,11 +89,6 @@ static bool LoadVoskLibrary(void) {
 #include <unistd.h>
 #include <time.h>
 
-static inline double GetTimeSeconds(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-}
 
 #define AUDIO_BUFFER_SIZE (64 * 1024)
 #define RESULT_QUEUE_SIZE 32
