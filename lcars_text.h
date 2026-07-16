@@ -332,7 +332,7 @@ static void DrawTextBoxed(State *s, Element *e, Font font, String text,
     DrawText(TextFormat("Selection start: %d, end: %d, length: %d",
                         e->selectTextStart, e->selectTextEnd,
                         e->selectTextLength),
-             rec.x, rec.y - 20, 10, RED);
+             rec.x, rec.y - 25, 20, RED);
 
   int selStart = e->selectTextLength > 0
                      ? e->selectTextStart

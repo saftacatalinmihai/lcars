@@ -44,6 +44,7 @@ void InitDB(State *s, bool firstInit) {
       "value_float REAL,"
       "value_blob BLOB,"
       "done_bool INTEGER DEFAULT 0,"
+      "deleted INTEGER DEFAULT 0,"
       "created_at_utc TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', "
       "'utc')),"
       "last_modified_at_utc TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', "
@@ -102,10 +103,20 @@ static inline void UpdateEntryContentInDB(State *s, int id, String content) {
   sqlite3_free(sql_update_full);
 }
 
+static inline void DeleteEntryFromDB(State *s, int id) {
+  char *sql_delete = sqlite3_mprintf("UPDATE entries SET deleted = 1 WHERE id = %d;", id);
+  if (!sql_delete) {
+    updateNotification(s, StringStatic("SQL error"));
+    return;
+  }
+  ExecSQL(s, StringStatic(sql_delete), StringStatic("Entry deleted"));
+  sqlite3_free(sql_delete);
+}
+
 static inline int GetEntriesByKind(State *s, const char *kind, EntryListItem *items, int maxItems) {
   sqlite3_stmt *stmt;
   int count = 0;
-  int rc = sqlite3_prepare_v2(s->db, "SELECT id, title, created_at_utc, last_modified_at_utc FROM entries WHERE kind=?1 ORDER BY id DESC", -1, &stmt, NULL);
+  int rc = sqlite3_prepare_v2(s->db, "SELECT id, title, created_at_utc, last_modified_at_utc FROM entries WHERE kind=?1 AND (deleted IS NULL OR deleted = 0) ORDER BY id DESC", -1, &stmt, NULL);
   if (rc == SQLITE_OK) {
     sqlite3_bind_text(stmt, 1, kind, -1, SQLITE_STATIC);
     while (sqlite3_step(stmt) == SQLITE_ROW && count < maxItems) {
@@ -135,7 +146,7 @@ static inline int GetEntriesByKind(State *s, const char *kind, EntryListItem *it
 static inline int GetFirstPersonalLogId(State *s) {
   sqlite3_stmt *stmt;
   int id = 1;
-  if (sqlite3_prepare_v2(s->db, "SELECT id FROM entries WHERE kind='personal_log' LIMIT 1", -1, &stmt, NULL) == SQLITE_OK) {
+  if (sqlite3_prepare_v2(s->db, "SELECT id FROM entries WHERE kind='personal_log' AND (deleted IS NULL OR deleted = 0) LIMIT 1", -1, &stmt, NULL) == SQLITE_OK) {
     if (sqlite3_step(stmt) == SQLITE_ROW) {
       id = sqlite3_column_int(stmt, 0);
     }

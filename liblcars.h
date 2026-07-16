@@ -421,7 +421,8 @@ static float w210;
 #include "lcars_text.h"
 #include "lcars_ui.h"
 
-static inline float ClampScrollOffset(float scrollY, float contentHeight, float viewportHeight) {
+static inline float ClampScrollOffset(float scrollY, float contentHeight,
+                                      float viewportHeight) {
   if (scrollY < 0.0f)
     scrollY = 0.0f;
   float maxScroll = contentHeight - viewportHeight;
@@ -454,19 +455,20 @@ static void NavigateEntryList(State *s, Element *e, int direction) {
     LoadEntryIntoEditor(e, newText);
     StringFree(&newText);
 
-    float viewportHeight = *e->height - 40.0f;
+    float viewportHeight = *e->height - 45.0f;
     if (direction < 0) { // Up
-      float itemTop = newIdx * 55.0f;
+      float itemTop = newIdx * 90.0f;
       if (itemTop < e->listScrollY) {
         e->listScrollY = itemTop;
       }
     } else { // Down
-      float itemBottom = newIdx * 55.0f + 50.0f;
+      float itemBottom = newIdx * 90.0f + 80.0f;
       if (itemBottom > e->listScrollY + viewportHeight) {
         e->listScrollY = itemBottom - viewportHeight;
       }
     }
-    e->listScrollY = ClampScrollOffset(e->listScrollY, count * 55.0f, viewportHeight);
+    e->listScrollY =
+        ClampScrollOffset(e->listScrollY, count * 90.0f, viewportHeight);
   }
 }
 
@@ -858,7 +860,7 @@ void Update(State *s) {
     case ELEM_ENTRY_LIST: {
       float listWidth = 0.0f;
       if (e->kind == ELEM_ENTRY_LIST) {
-        listWidth = e->listCollapsed ? 30.0f : 220.0f;
+        listWidth = e->listCollapsed ? 30.0f : 350.0f;
 
         // Handle list selection panel interactions
         Vector2 mPos = GetMousePosition();
@@ -870,9 +872,10 @@ void Update(State *s) {
           if (wheelMove != 0.0f) {
             EntryListItem items[32];
             int count = GetEntriesByKind(s, "personal_log", items, 32);
-            float viewportHeight = *e->height - 40.0f;
+            float viewportHeight = *e->height - 45.0f;
             e->listScrollY -= wheelMove * 30.0f;
-            e->listScrollY = ClampScrollOffset(e->listScrollY, count * 55.0f, viewportHeight);
+            e->listScrollY = ClampScrollOffset(e->listScrollY, count * 90.0f,
+                                               viewportHeight);
           }
 
           if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -882,7 +885,7 @@ void Update(State *s) {
               e->listCollapsed = !e->listCollapsed;
             } else if (!e->listCollapsed) {
               Rectangle newEntryBtn = (Rectangle){e->position.x + 35.0f,
-                                                  e->position.y, 170.0f, 30.0f};
+                                                  e->position.y, listWidth - 50.0f, 30.0f};
               if (CheckCollisionPointRec(mPos, newEntryBtn)) {
                 UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
 
@@ -909,14 +912,21 @@ void Update(State *s) {
               } else {
                 EntryListItem items[32];
                 int count = GetEntriesByKind(s, "personal_log", items, 32);
-                float viewportHeight = *e->height - 40.0f;
-                float itemWidth = (count * 55.0f > viewportHeight) ? 195.0f : 205.0f;
-                float itemY = e->position.y + 40.0f - e->listScrollY;
-                Rectangle scrollableListRec = (Rectangle){e->position.x, e->position.y + 40.0f, listWidth - 5.0f, viewportHeight};
+                float viewportHeight = *e->height - 45.0f;
+                float maxItemWidth = listWidth - 15.0f;
+                bool isScrollable = (count * 90.0f > viewportHeight);
+                float itemWidth = maxItemWidth;
+                if (isScrollable) {
+                  itemWidth = maxItemWidth - 10.0f;
+                }
+                float itemY = e->position.y + 45.0f - e->listScrollY;
+                Rectangle scrollableListRec =
+                    (Rectangle){e->position.x, e->position.y + 45.0f,
+                                listWidth - 5.0f, viewportHeight};
                 if (CheckCollisionPointRec(mPos, scrollableListRec)) {
                   for (int j = 0; j < count; j++) {
-                    Rectangle itemRec =
-                        (Rectangle){e->position.x + 5.0f, itemY, itemWidth, 50.0f};
+                    Rectangle itemRec = (Rectangle){e->position.x + 5.0f, itemY,
+                                                    itemWidth, 80.0f};
                     if (CheckCollisionPointRec(mPos, itemRec)) {
                       if (e->selectedEntryId != items[j].id) {
                         UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
@@ -928,7 +938,7 @@ void Update(State *s) {
                       }
                       break;
                     }
-                    itemY += 55.0f;
+                    itemY += 90.0f;
                   }
                 }
               }
@@ -942,7 +952,7 @@ void Update(State *s) {
 
       float scrollbarX = editorX + editorWidth + 25;
       float scrollbarY = e->position.y;
-      float scrollbarWidth = 18.0f;
+      float scrollbarWidth = 24.0f;
       float scrollbarHeight = *e->height;
       Rectangle activeRec = (Rectangle){.x = editorX,
                                         .y = e->position.y,
@@ -952,6 +962,8 @@ void Update(State *s) {
       if (e->kind == ELEM_ENTRY_LIST) {
         totalActiveRec.x = e->position.x;
         totalActiveRec.width = *e->width + 55;
+        totalActiveRec.y = e->position.y - 25.0f;
+        totalActiveRec.height = *e->height + 25.0f;
       }
 
       if (CheckCollisionPointRec(GetMousePosition(), totalActiveRec)) {
@@ -970,61 +982,103 @@ void Update(State *s) {
 
         // Click handling
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-          Rectangle upButton = (Rectangle){scrollbarX, scrollbarY,
-                                           scrollbarWidth, scrollbarWidth};
-          Rectangle downButton = (Rectangle){
-              scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth,
-              scrollbarWidth, scrollbarWidth};
-          Rectangle track = (Rectangle){
-              scrollbarX, scrollbarY + scrollbarWidth + 5, scrollbarWidth,
-              scrollbarHeight - 2 * scrollbarWidth - 10};
           Vector2 mPos = GetMousePosition();
-
-          if (CheckCollisionPointRec(mPos, upButton)) {
-            e->scrollY -= 30.0f;
-            ClampScrollY(e);
-          } else if (CheckCollisionPointRec(mPos, downButton)) {
-            e->scrollY += 30.0f;
-            ClampScrollY(e);
-          } else if (CheckCollisionPointRec(mPos, track)) {
-            float visibleRatio = *e->height / e->textHeight;
-            if (visibleRatio > 1.0f)
-              visibleRatio = 1.0f;
-            float handleHeight = visibleRatio * track.height;
-            if (handleHeight < 20.0f)
-              handleHeight = 20.0f;
-
-            float scrollRange = e->textHeight - *e->height;
-            float handleY = track.y;
-            if (scrollRange > 0.0f) {
-              handleY +=
-                  (e->scrollY / scrollRange) * (track.height - handleHeight);
-            }
-            Rectangle handle =
-                (Rectangle){scrollbarX, handleY, scrollbarWidth, handleHeight};
-
-            if (CheckCollisionPointRec(mPos, handle)) {
-              e->draggingScrollbar = true;
-              e->dragStartY = mPos.y;
-              e->dragStartScrollY = e->scrollY;
-            } else {
-              // Jump scroll handle to clicked position
-              float clickY = mPos.y;
-              float relativeY = clickY - track.y - handleHeight / 2.0f;
-              float pct = relativeY / (track.height - handleHeight);
-              if (pct < 0.0f)
-                pct = 0.0f;
-              if (pct > 1.0f)
-                pct = 1.0f;
-              if (scrollRange > 0.0f) {
-                e->scrollY = pct * scrollRange;
+          bool deleteClicked = false;
+          if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
+            float btnSize = 18.0f;
+            Rectangle deleteBtn = (Rectangle){
+                editorX + editorWidth + 10.0f - btnSize - 8.0f,
+                e->position.y - btnSize - 4.0f,
+                btnSize,
+                btnSize
+            };
+            if (CheckCollisionPointRec(mPos, deleteBtn)) {
+              DeleteEntryFromDB(s, e->selectedEntryId);
+              EntryListItem remItems[32];
+              int remCount = GetEntriesByKind(s, "personal_log", remItems, 32);
+              if (remCount > 0) {
+                e->selectedEntryId = remItems[0].id;
               } else {
-                e->scrollY = 0.0f;
-              }
+                char datename[32];
+                struct tm *to;
+                time_t t = time(NULL);
+                to = localtime(&t);
+                strftime(datename, sizeof(datename), "%Y-%m-%d", to);
 
-              e->draggingScrollbar = true;
-              e->dragStartY = clickY;
-              e->dragStartScrollY = e->scrollY;
+                char *sql = sqlite3_mprintf(
+                    "INSERT INTO entries (kind, title, content) VALUES "
+                    "('personal_log', 'Captain Log', '%q Captain log');",
+                    datename);
+                if (sql) {
+                  ExecSQL(s, StringStatic(sql),
+                          StringStatic("New entry created"));
+                  sqlite3_free(sql);
+                }
+                e->selectedEntryId = (int)sqlite3_last_insert_rowid(s->db);
+              }
+              String newText = GetEntryContentFromDB(s, e->selectedEntryId);
+              LoadEntryIntoEditor(e, newText);
+              StringFree(&newText);
+              deleteClicked = true;
+            }
+          }
+
+          if (!deleteClicked) {
+            Rectangle upButton = (Rectangle){scrollbarX, scrollbarY,
+                                             scrollbarWidth, scrollbarWidth};
+            Rectangle downButton = (Rectangle){
+                scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth,
+                scrollbarWidth, scrollbarWidth};
+            Rectangle track = (Rectangle){
+                scrollbarX, scrollbarY + scrollbarWidth + 5, scrollbarWidth,
+                scrollbarHeight - 2 * scrollbarWidth - 10};
+
+            if (CheckCollisionPointRec(mPos, upButton)) {
+              e->scrollY -= 30.0f;
+              ClampScrollY(e);
+            } else if (CheckCollisionPointRec(mPos, downButton)) {
+              e->scrollY += 30.0f;
+              ClampScrollY(e);
+            } else if (CheckCollisionPointRec(mPos, track)) {
+              float visibleRatio = *e->height / e->textHeight;
+              if (visibleRatio > 1.0f)
+                visibleRatio = 1.0f;
+              float handleHeight = visibleRatio * track.height;
+              if (handleHeight < 20.0f)
+                handleHeight = 20.0f;
+
+              float scrollRange = e->textHeight - *e->height;
+              float handleY = track.y;
+              if (scrollRange > 0.0f) {
+                handleY +=
+                    (e->scrollY / scrollRange) * (track.height - handleHeight);
+              }
+              Rectangle handle =
+                  (Rectangle){scrollbarX, handleY, scrollbarWidth, handleHeight};
+
+              if (CheckCollisionPointRec(mPos, handle)) {
+                e->draggingScrollbar = true;
+                e->dragStartY = mPos.y;
+                e->dragStartScrollY = e->scrollY;
+              } else {
+                // Jump scroll handle to clicked position
+                float clickY = mPos.y;
+                float relativeY = clickY - track.y - handleHeight / 2.0f;
+                float pct = relativeY / (track.height - handleHeight);
+                if (pct < 0.0f)
+                  pct = 0.0f;
+                if (pct > 1.0f)
+                  pct = 1.0f;
+                if (scrollRange > 0.0f) {
+                  e->scrollY = pct * scrollRange;
+                } else {
+                  e->scrollY = 0.0f;
+                }
+
+                e->draggingScrollbar = true;
+                e->dragStartY = clickY;
+                e->dragStartScrollY = e->scrollY;
+              }
             }
           }
         }
@@ -1076,7 +1130,8 @@ void Update(State *s) {
         bool isMouseOverList = false;
         if (e->kind == ELEM_ENTRY_LIST) {
           Vector2 mPos = GetMousePosition();
-          Rectangle listRec = (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
+          Rectangle listRec =
+              (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
           isMouseOverList = CheckCollisionPointRec(mPos, listRec);
         }
 
@@ -1113,7 +1168,8 @@ void Update(State *s) {
               IsKeyPressed(KEY_C)) {
             if (e->selectTextLength <= 0) {
               SetClipboardText(e->text.data ? e->text.data : "");
-              updateNotification(s, StringStatic("All text copied to clipboard"));
+              updateNotification(s,
+                                 StringStatic("All text copied to clipboard"));
               printf("Copied all text to clipboard: |%s|\n",
                      e->text.data ? e->text.data : "");
             } else {
@@ -1178,7 +1234,8 @@ void Update(State *s) {
                   if (e->text.data[target - 1] == '\n') {
                     target--;
                   } else {
-                    while (target > 0 && !IsWordChar(e->text.data[target - 1]) &&
+                    while (target > 0 &&
+                           !IsWordChar(e->text.data[target - 1]) &&
                            e->text.data[target - 1] != '\n') {
                       target--;
                     }
@@ -1677,9 +1734,10 @@ void UpdateDrawFrame(State *s) {
       bool isMouseOverList = false;
 
       if (e->kind == ELEM_ENTRY_LIST) {
-        listWidth = e->listCollapsed ? 30.0f : 220.0f;
+        listWidth = e->listCollapsed ? 30.0f : 350.0f;
         Vector2 mPos = GetMousePosition();
-        Rectangle listRec = (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
+        Rectangle listRec =
+            (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
         isMouseOverList = CheckCollisionPointRec(mPos, listRec);
 
         if (isMouseOverList) {
@@ -1698,39 +1756,38 @@ void UpdateDrawFrame(State *s) {
         Rectangle toggleBtn =
             (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
         DrawRectangleRounded(toggleBtn, 0.3f, 4, LCARS_BLUE);
-        DrawText(e->listCollapsed ? ">" : "<", toggleBtn.x + 10,
-                 toggleBtn.y + 8, 16, BLACK);
+        DrawText(e->listCollapsed ? ">" : "<", toggleBtn.x + (toggleBtn.width - MeasureText(e->listCollapsed ? ">" : "<", 20)) / 2,
+                 toggleBtn.y + (toggleBtn.height - 20) / 2, 20, BLACK);
 
         if (!e->listCollapsed) {
           // Draw "+ New Entry" button
           Rectangle newEntryBtn =
-              (Rectangle){e->position.x + 35.0f, e->position.y, 170.0f, 30.0f};
+              (Rectangle){e->position.x + 35.0f, e->position.y, listWidth - 50.0f, 30.0f};
           DrawRectangleRounded(newEntryBtn, 0.3f, 4, LCARS_GREEN);
-          DrawText("+ NEW ENTRY", newEntryBtn.x + 30, newEntryBtn.y + 8, 14,
+          DrawText("+ NEW ENTRY", newEntryBtn.x + (newEntryBtn.width - MeasureText("+ NEW ENTRY", 20)) / 2, newEntryBtn.y + (newEntryBtn.height - 20) / 2, 20,
                    BLACK);
 
           // Draw entries
           EntryListItem items[32];
           int count = GetEntriesByKind(s, "personal_log", items, 32);
-          float viewportHeight = *e->height - 40.0f;
-          float itemWidth = 205.0f;
-          bool isScrollable = (count * 55.0f > viewportHeight);
+          float viewportHeight = *e->height - 45.0f;
+          float maxItemWidth = listWidth - 15.0f;
+          bool isScrollable = (count * 90.0f > viewportHeight);
+          float itemWidth = maxItemWidth;
           if (isScrollable) {
-            itemWidth = 195.0f;
+            itemWidth = maxItemWidth - 10.0f;
           }
 
-          float itemY = e->position.y + 40.0f - e->listScrollY;
-          Rectangle listClipRec = (Rectangle){
-              e->position.x,
-              e->position.y + 40.0f,
-              listWidth - 5.0f,
-              viewportHeight
-          };
+          float itemY = e->position.y + 45.0f - e->listScrollY;
+          Rectangle listClipRec =
+              (Rectangle){e->position.x, e->position.y + 45.0f,
+                          listWidth - 5.0f, viewportHeight};
 
-          BeginScissorMode((int)listClipRec.x, (int)listClipRec.y, (int)listClipRec.width, (int)listClipRec.height);
+          BeginScissorMode((int)listClipRec.x, (int)listClipRec.y,
+                           (int)listClipRec.width, (int)listClipRec.height);
           for (int j = 0; j < count; j++) {
             Rectangle itemRec =
-                (Rectangle){e->position.x + 5.0f, itemY, itemWidth, 50.0f};
+                (Rectangle){e->position.x + 5.0f, itemY, itemWidth, 80.0f};
             Color itemColor = (items[j].id == e->selectedEntryId)
                                   ? LCARS_YELLOW
                                   : (Color){40, 40, 40, 255};
@@ -1746,45 +1803,53 @@ void UpdateDrawFrame(State *s) {
             char label[256];
             snprintf(label, sizeof(label), "Entry #%d (%s)", items[j].id,
                      items[j].title);
-            DrawText(label, itemRec.x + 5, itemRec.y + 5, 14, textColor);
+            DrawText(label, itemRec.x + 10, itemRec.y + 7, 20, textColor);
 
             // Draw created and updated dates
             char dates[64];
             snprintf(dates, sizeof(dates), "U: %s",
                      items[j].last_modified[0] ? items[j].last_modified
                                                : items[j].created_at);
-            DrawText(dates, itemRec.x + 5, itemRec.y + 20, 10, subtextColor);
+            DrawText(dates, itemRec.x + 10, itemRec.y + 31, 20, subtextColor);
             char createdDate[64];
             snprintf(createdDate, sizeof(createdDate), "C: %s",
                      items[j].created_at);
-            DrawText(createdDate, itemRec.x + 5, itemRec.y + 32, 10,
+            DrawText(createdDate, itemRec.x + 10, itemRec.y + 55, 20,
                      subtextColor);
 
-            itemY += 55.0f;
+            itemY += 90.0f;
           }
           EndScissorMode();
 
           // Draw scrollbar if scrollable
           if (isScrollable) {
-            float trackX = e->position.x + 205.0f;
-            float trackY = e->position.y + 40.0f;
+            float trackX = e->position.x + listWidth - 15.0f;
+            float trackY = e->position.y + 45.0f;
             float trackWidth = 6.0f;
-            float trackHeight = *e->height - 45.0f;
+            float trackHeight = *e->height - 50.0f;
 
-            float handleHeight = (viewportHeight / (count * 55.0f)) * trackHeight;
-            if (handleHeight < 15.0f) handleHeight = 15.0f;
+            float handleHeight =
+                (viewportHeight / (count * 90.0f)) * trackHeight;
+            if (handleHeight < 15.0f)
+              handleHeight = 15.0f;
 
-            float scrollRange = count * 55.0f - viewportHeight;
+            float scrollRange = count * 90.0f - viewportHeight;
             float handleY = trackY;
             if (scrollRange > 0.0f) {
-              handleY += (e->listScrollY / scrollRange) * (trackHeight - handleHeight);
+              handleY +=
+                  (e->listScrollY / scrollRange) * (trackHeight - handleHeight);
             }
 
             // Draw track
-            DrawRectangleRounded((Rectangle){trackX, trackY, trackWidth, trackHeight}, 0.5f, 4, (Color){30, 30, 30, 255});
+            DrawRectangleRounded(
+                (Rectangle){trackX, trackY, trackWidth, trackHeight}, 0.5f, 4,
+                (Color){30, 30, 30, 255});
             // Draw handle
-            Color handleColor = isMouseOverList ? LCARS_ORANGE : ColorAlpha(LCARS_ORANGE, 0.5f);
-            DrawRectangleRounded((Rectangle){trackX, handleY, trackWidth, handleHeight}, 0.5f, 4, handleColor);
+            Color handleColor =
+                isMouseOverList ? LCARS_ORANGE : ColorAlpha(LCARS_ORANGE, 0.5f);
+            DrawRectangleRounded(
+                (Rectangle){trackX, handleY, trackWidth, handleHeight}, 0.5f, 4,
+                handleColor);
           }
         }
       }
@@ -1794,6 +1859,30 @@ void UpdateDrawFrame(State *s) {
 
       DrawRectangleLines(editorX, e->position.y, editorWidth + 10, *e->height,
                          editorBorderColor);
+
+      if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
+        float btnSize = 18.0f;
+        Rectangle deleteBtn = (Rectangle){
+            editorX + editorWidth + 10.0f - btnSize - 8.0f,
+            e->position.y - btnSize - 4.0f,
+            btnSize,
+            btnSize
+        };
+
+        Vector2 mPos = GetMousePosition();
+        bool isHovered = CheckCollisionPointRec(mPos, deleteBtn);
+        Color btnColor = isHovered ? RED : LCARS_RED_ORANGE;
+        DrawRectangleRounded(deleteBtn, 0.3f, 4, btnColor);
+
+        int fontSize = 14;
+        const char *btnText = "x";
+        int textWidth = MeasureText(btnText, fontSize);
+        DrawText(btnText,
+                 deleteBtn.x + (deleteBtn.width - textWidth) / 2.0f,
+                 deleteBtn.y + (deleteBtn.height - fontSize) / 2.0f,
+                 fontSize, BLACK);
+      }
+
       Rectangle r =
           (Rectangle){editorX + 5, e->position.y + 5, editorWidth, *e->height};
       BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
@@ -1804,7 +1893,7 @@ void UpdateDrawFrame(State *s) {
       // Render scrollbar
       float scrollbarX = editorX + editorWidth + 25;
       float scrollbarY = e->position.y;
-      float scrollbarWidth = 18.0f;
+      float scrollbarWidth = 24.0f;
       float scrollbarHeight = *e->height;
 
       Rectangle upButton =
@@ -1821,11 +1910,11 @@ void UpdateDrawFrame(State *s) {
       DrawRectangleRounded(downButton, 0.5f, 4, e->color);
 
       // Draw Up/Down arrow indicators
-      DrawText("^", upButton.x + upButton.width / 2 - MeasureText("^", 12) / 2,
-               upButton.y + upButton.height / 2 - 6, 12, BLACK);
+      DrawText("^", upButton.x + (upButton.width - MeasureText("^", 20)) / 2,
+               upButton.y + (upButton.height - 20) / 2, 20, BLACK);
       DrawText("v",
-               downButton.x + downButton.width / 2 - MeasureText("v", 12) / 2,
-               downButton.y + downButton.height / 2 - 6, 12, BLACK);
+               downButton.x + (downButton.width - MeasureText("v", 20)) / 2,
+               downButton.y + (downButton.height - 20) / 2, 20, BLACK);
 
       // Draw track background
       DrawRectangleRounded(track, 0.5f, 4, (Color){30, 30, 30, 255});
@@ -1922,7 +2011,7 @@ void UpdateDrawFrame(State *s) {
   if (s->debug) {
     DrawFPS(10, 10);
     DrawText(TextFormat("x:%.2f, y:%.2f", mPos.x, mPos.y), mPos.x + 20, mPos.y,
-             10, GREEN);
+             20, GREEN);
   }
 
   // Draw interactive handles on top of all elements

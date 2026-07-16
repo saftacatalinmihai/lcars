@@ -256,8 +256,11 @@ void LoadHypermediaDocument(State *s, String source) {
         action = ParseAction(StringStatic(val));
       if (GetAttributeValue(tag, "orientation", val, sizeof(val)))
         orientation = atoi(val);
-      if (GetAttributeValue(tag, "size", val, sizeof(val)))
+      if (GetAttributeValue(tag, "size", val, sizeof(val))) {
         textSize = atoi(val);
+        if (textSize < 20)
+          textSize = 20;
+      }
 
       char *innerText = NULL;
       bool self_closing = false;
