@@ -1298,7 +1298,12 @@ void Update(State *s) {
         bool triggerMoveUp = false;
         if (IsKeyDown(KEY_UP)) {
           if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
-            if (IsKeyPressed(KEY_UP)) {
+            if (!e->isMovingCursorUp)
+              e->moveCursorUpStartTime = GetTime();
+            e->isMovingCursorUp = true;
+            if (IsKeyPressed(KEY_UP) ||
+                (GetTime() - e->moveCursorUpStartTime > 0.4f &&
+                 e->textSelectedFramesCounter % 10 == 0)) {
               NavigateEntryList(s, e, -1);
             }
           } else {
@@ -1318,7 +1323,12 @@ void Update(State *s) {
         bool triggerMoveDown = false;
         if (IsKeyDown(KEY_DOWN)) {
           if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
-            if (IsKeyPressed(KEY_DOWN)) {
+            if (!e->isMovingCursorDown)
+              e->moveCursorDownStartTime = GetTime();
+            e->isMovingCursorDown = true;
+            if (IsKeyPressed(KEY_DOWN) ||
+                (GetTime() - e->moveCursorDownStartTime > 0.4f &&
+                 e->textSelectedFramesCounter % 10 == 0)) {
               NavigateEntryList(s, e, 1);
             }
           } else {
