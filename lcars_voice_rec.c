@@ -44,7 +44,8 @@ static bool LoadVoskLibrary(void) {
     const char *paths[] = {
         "./resources/libvosk.so",
         "./libvosk.so",
-        "libvosk.so"
+        "libvosk.so",
+      "resources/libvosk.dylib",
     };
     for (size_t i = 0; i < sizeof(paths)/sizeof(paths[0]); i++) {
         g_vosk_handle = dlopen(paths[i], RTLD_LAZY);
