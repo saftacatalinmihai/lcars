@@ -884,8 +884,9 @@ void Update(State *s) {
             if (CheckCollisionPointRec(mPos, toggleBtn)) {
               e->listCollapsed = !e->listCollapsed;
             } else if (!e->listCollapsed) {
-              Rectangle newEntryBtn = (Rectangle){e->position.x + 35.0f,
-                                                  e->position.y, listWidth - 50.0f, 30.0f};
+              Rectangle newEntryBtn =
+                  (Rectangle){e->position.x + 35.0f, e->position.y,
+                              listWidth - 50.0f, 30.0f};
               if (CheckCollisionPointRec(mPos, newEntryBtn)) {
                 UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
 
@@ -986,12 +987,9 @@ void Update(State *s) {
           bool deleteClicked = false;
           if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
             float btnSize = 18.0f;
-            Rectangle deleteBtn = (Rectangle){
-                editorX + editorWidth + 10.0f - btnSize - 8.0f,
-                e->position.y - btnSize - 4.0f,
-                btnSize,
-                btnSize
-            };
+            Rectangle deleteBtn =
+                (Rectangle){editorX + editorWidth + 10.0f - btnSize - 8.0f,
+                            e->position.y - btnSize - 4.0f, btnSize, btnSize};
             if (CheckCollisionPointRec(mPos, deleteBtn)) {
               DeleteEntryFromDB(s, e->selectedEntryId);
               EntryListItem remItems[32];
@@ -1053,8 +1051,8 @@ void Update(State *s) {
                 handleY +=
                     (e->scrollY / scrollRange) * (track.height - handleHeight);
               }
-              Rectangle handle =
-                  (Rectangle){scrollbarX, handleY, scrollbarWidth, handleHeight};
+              Rectangle handle = (Rectangle){scrollbarX, handleY,
+                                             scrollbarWidth, handleHeight};
 
               if (CheckCollisionPointRec(mPos, handle)) {
                 e->draggingScrollbar = true;
@@ -1766,16 +1764,21 @@ void UpdateDrawFrame(State *s) {
         Rectangle toggleBtn =
             (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
         DrawRectangleRounded(toggleBtn, 0.3f, 4, LCARS_BLUE);
-        DrawText(e->listCollapsed ? ">" : "<", toggleBtn.x + (toggleBtn.width - MeasureText(e->listCollapsed ? ">" : "<", 20)) / 2,
+        DrawText(e->listCollapsed ? ">" : "<",
+                 toggleBtn.x + (toggleBtn.width -
+                                MeasureText(e->listCollapsed ? ">" : "<", 20)) /
+                                   2,
                  toggleBtn.y + (toggleBtn.height - 20) / 2, 20, BLACK);
 
         if (!e->listCollapsed) {
           // Draw "+ New Entry" button
-          Rectangle newEntryBtn =
-              (Rectangle){e->position.x + 35.0f, e->position.y, listWidth - 50.0f, 30.0f};
+          Rectangle newEntryBtn = (Rectangle){
+              e->position.x + 35.0f, e->position.y, listWidth - 50.0f, 30.0f};
           DrawRectangleRounded(newEntryBtn, 0.3f, 4, LCARS_GREEN);
-          DrawText("+ NEW ENTRY", newEntryBtn.x + (newEntryBtn.width - MeasureText("+ NEW ENTRY", 20)) / 2, newEntryBtn.y + (newEntryBtn.height - 20) / 2, 20,
-                   BLACK);
+          DrawText("+ NEW ENTRY",
+                   newEntryBtn.x +
+                       (newEntryBtn.width - MeasureText("+ NEW ENTRY", 20)) / 2,
+                   newEntryBtn.y + (newEntryBtn.height - 20) / 2, 20, BLACK);
 
           // Draw entries
           EntryListItem items[32];
@@ -1872,12 +1875,9 @@ void UpdateDrawFrame(State *s) {
 
       if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
         float btnSize = 18.0f;
-        Rectangle deleteBtn = (Rectangle){
-            editorX + editorWidth + 10.0f - btnSize - 8.0f,
-            e->position.y - btnSize - 4.0f,
-            btnSize,
-            btnSize
-        };
+        Rectangle deleteBtn =
+            (Rectangle){editorX + editorWidth + 10.0f - btnSize - 8.0f,
+                        e->position.y - btnSize - 4.0f, btnSize, btnSize};
 
         Vector2 mPos = GetMousePosition();
         bool isHovered = CheckCollisionPointRec(mPos, deleteBtn);
@@ -1887,10 +1887,9 @@ void UpdateDrawFrame(State *s) {
         int fontSize = 14;
         const char *btnText = "x";
         int textWidth = MeasureText(btnText, fontSize);
-        DrawText(btnText,
-                 deleteBtn.x + (deleteBtn.width - textWidth) / 2.0f,
-                 deleteBtn.y + (deleteBtn.height - fontSize) / 2.0f,
-                 fontSize, BLACK);
+        DrawText(btnText, deleteBtn.x + (deleteBtn.width - textWidth) / 2.0f,
+                 deleteBtn.y + (deleteBtn.height - fontSize) / 2.0f, fontSize,
+                 BLACK);
       }
 
       Rectangle r =
