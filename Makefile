@@ -80,7 +80,7 @@ lcars-release: lcars.c vendor/libraylib.a vendor/libminiaudio.a ensure-resources
 lcars-dynamic: lcars.c lcars-lib.so vendor/libminiaudio.a ensure-resources
 	cc $(CFLAGS_DYN) -o lcars lcars.c vendor/libminiaudio.a -lcurl -lsqlite3 -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
-lcars-lib.so: liblcars.h liblcars.c lcars_voice_rec.h
+lcars-lib.so: lcars_ui.h liblcars.h liblcars.c lcars_voice_rec.h
 	cc $(CFLAGS_DYN) -fPIC -shared $(SHARED_FLAGS) -std=c11 -lsqlite3 -ldl -lcurl -o lcars-lib.so liblcars.c
 
 run: lcars

@@ -35,7 +35,7 @@
 #define LCARS_YELLOW (Color){255, 205, 154, 255}
 #define LCARS_BLUE (Color){155, 155, 255, 255}
 #define LCARS_GREEN (Color){153, 204, 153, 255}
-#define TODO exit(1)
+#define TODO printf("Exiting %s:%d", __FILE__, __LINE__); exit(1)
 
 #define MAX_ELEMENTS 10000
 #define MAX_INPUT_CHARS 1024
@@ -214,7 +214,7 @@ static void AddBarSegment(State *s, int *x_cursor, int y, float *width,
                           float *height, Color color, int gap);
 #endif
 static void clickOrHoverNotification(State *s, int i, String elem_pretty_name);
-static Rectangle GetElementBoundingBox(const Element *e);
+static Rectangle GetElementBoundingBox(State *s, Element *e);
 static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
                                     String text, Rectangle rec, float fontSize,
                                     float spacing, bool wordWrap, Color tint,
@@ -242,7 +242,7 @@ static inline void updateNotification(State *s, String notificationText) {
   StringAssign(&s->doc_arena, &s->notification, notificationText);
   s->notificationTimer = NOTIFICATION_DURATION;
 }
-
+// 1
 // -----------------------------------------------------------------------------
 // Element constructors (In-place)
 // -----------------------------------------------------------------------------
@@ -638,6 +638,7 @@ void Update(State *s) {
           if (editor->kind == ELEM_ENTRY_LIST) {
             UpdateEntryContentInDB(s, editor->selectedEntryId, editor->text);
           } else {
+                        
             UpdateLogInDB(s, editor->text);
           }
           editor->snapToCursor = 2;
@@ -703,7 +704,7 @@ void Update(State *s) {
         if (e->kind == ELEM_NOTHING)
           continue;
 
-        Rectangle r = GetElementBoundingBox(e);
+        Rectangle r = GetElementBoundingBox(s, e);
 
         // Drag handle at top-left
         Rectangle dragHandle = {r.x - 8, r.y - 8, 16, 16};
@@ -733,8 +734,7 @@ void Update(State *s) {
   }
   for (int i = 0; i < MAX_ELEMENTS; i++) {
     Element *e = &s->elements[i];
-    bool isHovering =
-        CheckCollisionPointRec(GetMousePosition(), GetElementBoundingBox(e));
+    bool isHovering = IsHoveringElement(s, e);
     if (isHovering) {
       if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
         switch (e->on_click) {
@@ -773,66 +773,15 @@ void Update(State *s) {
 
     switch (s->elements[i].kind) {
     case ELEM_RECTANGLE:
-      if (isHovering) {
-        s->elements[i].color =
-            ColorBrightness(s->elements[i].originalColor, 0.2f);
-        clickOrHoverNotification(s, i, StringStatic("element"));
-      } else {
-        s->elements[i].color = s->elements[i].originalColor;
-      }
-      break;
     case ELEM_ELBOW:
-      switch (s->elements[i].elbowOrientation) {
-      case 0:
-        if (CheckCollisionPointRec(
-                GetMousePosition(),
-                (Rectangle){.x = s->elements[i].position.x,
-                            .y = s->elements[i].position.y,
-                            .width = *(s->elements[i].width),
-                            .height = *(s->elements[i].height) + s->barHeight +
-                                      s->innerRadius}) ||
-            CheckCollisionPointRec(
-                GetMousePosition(),
-                (Rectangle){.x = s->elements[i].position.x,
-                            .y = s->elements[i].position.y,
-                            .width = s->columnWidth + s->barWidth,
-                            .height = s->barHeight})) {
-          s->elements[i].color =
-              ColorBrightness(s->elements[i].originalColor, 0.2f);
-          clickOrHoverNotification(s, i, StringStatic("elbow element"));
-        } else {
-          s->elements[i].color = s->elements[i].originalColor;
+        if (isHovering) {
+            s->elements[i].color =
+                ColorBrightness(s->elements[i].originalColor, 0.2f);
+            clickOrHoverNotification(s, i, StringStatic("elbow element"));
+        }  else {
+            s->elements[i].color = s->elements[i].originalColor;
         }
         break;
-      case 1:
-        TODO;
-        break;
-      case 2:
-        break;
-      case 3:
-        if (CheckCollisionPointRec(
-                GetMousePosition(),
-                (Rectangle){.x = s->elements[i].position.x,
-                            .y = s->elements[i].position.y,
-                            .width = *(s->elements[i].width),
-                            .height = *(s->elements[i].height) + s->barHeight +
-                                      s->innerRadius}) ||
-            CheckCollisionPointRec(
-                GetMousePosition(),
-                (Rectangle){.x = s->elements[i].position.x,
-                            .y = s->elements[i].position.y + s->columnHeight +
-                                 s->innerRadius,
-                            .width = s->columnWidth + s->barWidth,
-                            .height = s->barHeight})) {
-          s->elements[i].color =
-              ColorBrightness(s->elements[i].originalColor, 0.2f);
-          clickOrHoverNotification(s, i, StringStatic("elbow element"));
-        } else {
-          s->elements[i].color = s->elements[i].originalColor;
-        }
-        break;
-      }
-      break;
     case ELEM_BUTTON: {
       VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
       bool isRecording =
@@ -1510,141 +1459,11 @@ void Update(State *s) {
         e->rotation += 0.1f;
       }
       e->rotation = fmodf(e->rotation, 360.0f);
+      break;
     }
     case ELEM_NOTHING:
     case ELEM_TOTAL_KINDS:
       break;
-    }
-  }
-}
-
-// Draw text using font inside rectangle limits with support for text selection
-
-// --- Scripted demo driver (only runs when the LCARS_DEMO env var is set). ---
-// Drives the three headline features for a screen recording: voice dictation,
-// dragging an element, and resizing the editor. Called AFTER Update() so the
-// drag/resize flags it sets survive the real input pass (which clears them).
-static void DemoTick(State *s) {
-  Element *editor = NULL, *voiceBtn = NULL, *earth = NULL;
-  for (int i = 0; i < s->numElements; i++) {
-    Element *e = &s->elements[i];
-    if (!editor && e->kind == ELEM_TEXT_EDITOR)
-      editor = e;
-    if (!voiceBtn && e->kind == ELEM_BUTTON &&
-        e->on_click == ACTION_VOICE_INPUT)
-      voiceBtn = e;
-    if (!earth && e->kind == ELEM_SPHERE)
-      earth = e;
-  }
-
-  static bool cleared = false;
-  if (!cleared && editor) {
-    editor->gapStart = 0;
-    editor->gapEnd = editor->textCapacity;
-    editor->selectTextStart = -1;
-    editor->selectTextEnd = -1;
-    editor->selectTextLength = 0;
-    ReconstructText(&s->doc_arena, editor);
-    cleared = true;
-  }
-
-  // Idle (showing the clean initial frame) until the capture script drops the
-  // "go" sentinel, so the recording starts exactly when the action does.
-  static double t0 = -1.0;
-  if (t0 < 0.0) {
-    FILE *gof = fopen("/tmp/lcars_go", "r");
-    if (!gof)
-      return;
-    fclose(gof);
-    t0 = GetTime();
-  }
-  double t = GetTime() - t0;
-
-  static const char *logLine =
-      "CAPTAIN'S LOG, STARDATE 79341.2. WE HAVE ENTERED THE NEUTRAL ZONE. ";
-  int L = (int)strlen(logLine);
-  static int typed = 0;
-  static iVec2 earthHome;
-  static bool earthHomeSet = false;
-  static float edW0 = 0, edH0 = 0, demoEdW = 0, demoEdH = 0;
-  static bool edSized = false;
-
-  const double TYPE_START = 0.6, CPS = 24.0;
-  double typeDone = TYPE_START + (double)L / CPS;
-  double tEdit = typeDone + 0.6;
-  double tDrag = tEdit + 0.2, dragDur = 1.8;
-  double tResize = tDrag + dragDur + 0.3, resizeDur = 1.6;
-
-  // Phase 1: voice dictation - button lights up red, text streams in.
-  if (t > 0.4 && t < typeDone + 0.3 && voiceBtn) {
-    StringAssignStatic(&voiceBtn->text, TEXT_RECORDING);
-    voiceBtn->color = RED;
-  }
-  if (t > TYPE_START && editor) {
-    int target = (int)((t - TYPE_START) * CPS);
-    if (target > L)
-      target = L;
-    bool changed = false;
-    while (typed < target) {
-      GapInsertChar(&s->doc_arena, editor, logLine[typed]);
-      typed++;
-      changed = true;
-    }
-    if (changed) {
-      ReconstructText(&s->doc_arena, editor);
-      editor->snapToCursor = 2;
-      int s0 = typed > 22 ? typed - 22 : 0;
-      char note[80];
-      snprintf(note, sizeof(note), "[Voice: \"...%.*s\"]", typed - s0,
-               logLine + s0);
-      updateNotification(s, StringStatic(note));
-    }
-  }
-  if (t > typeDone + 0.3 && voiceBtn) {
-    StringAssignStatic(&voiceBtn->text, TEXT_VOICE_INPUT);
-    voiceBtn->color = voiceBtn->originalColor;
-  }
-
-  // Phase 2: enter edit mode, then drag the Earth to a new spot.
-  if (t > tEdit) {
-    s->is_editing = true;
-    updateNotification(s, StringStatic("EDIT MODE: drag + resize"));
-  }
-  if (earth) {
-    if (!earthHomeSet) {
-      earthHome = earth->position;
-      earthHomeSet = true;
-    }
-    if (t > tDrag && t < tDrag + dragDur) {
-      double p = (t - tDrag) / dragDur;
-      double e = p * p * (3.0 - 2.0 * p); // smoothstep ease
-      earth->isDragging = true;
-      earth->position.x = (int)(earthHome.x - 330.0 * e);
-      earth->position.y = (int)(earthHome.y + 30.0 * e);
-    } else if (t >= tDrag + dragDur) {
-      earth->isDragging = false;
-    }
-  }
-
-  // Phase 3: resize the editor panel via its bottom-right handle.
-  if (editor && t > tResize) {
-    if (!edSized) {
-      edW0 = *editor->width;
-      edH0 = *editor->height;
-      demoEdW = edW0;
-      demoEdH = edH0;
-      editor->width = &demoEdW;
-      editor->height = &demoEdH;
-      edSized = true;
-    }
-    if (t < tResize + resizeDur) {
-      double p = (t - tResize) / resizeDur;
-      double e = p * p * (3.0 - 2.0 * p);
-      editor->isResizing = true;
-      demoEdW = edW0 + 140.0f * (float)e;
-      demoEdH = edH0 + 80.0f * (float)e;
-    } else {
-      editor->isResizing = false;
     }
   }
 }
@@ -1668,8 +1487,6 @@ void UpdateDrawFrame(State *s) {
   }
 
   Update(s);
-  if (getenv("LCARS_DEMO"))
-    DemoTick(s);
   Vector2 mPos = GetMousePosition();
 
   // Pre render on texture areas or any other requirements for first pass:
@@ -2031,9 +1848,8 @@ void UpdateDrawFrame(State *s) {
       if (e->kind == ELEM_NOTHING)
         break;
 
-      Rectangle r = GetElementBoundingBox(e);
-      bool isElementHovered = CheckCollisionPointRec(mousePos, r);
-
+      Rectangle r = GetElementBoundingBox(s, e);
+      bool isElementHovered =  IsHoveringElement(s, e);
       // Drag handle at top-left
       Rectangle dragHandle = {r.x - 8, r.y - 8, 16, 16};
       // Resize handle at bottom-right

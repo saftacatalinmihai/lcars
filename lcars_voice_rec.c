@@ -403,8 +403,9 @@ bool VoiceRec_StartRecording(void) {
         return false;
     }
     
-    if (ma_device_start(&g_device) != MA_SUCCESS) {
-        fprintf(stderr, "VoiceRec: Failed to start capture device\n");
+    ma_result result = ma_device_start(&g_device);
+    if (result != MA_SUCCESS) {
+        fprintf(stderr, "VoiceRec: Failed to start capture device: %s\n", ma_result_description(result));
         g_isRecording = false;
         pthread_join(g_thread, NULL);
         ma_device_uninit(&g_device);

@@ -217,34 +217,105 @@ static void ReLayout(State *s) {
 }
 #endif
 
+#define NOTIFICATION_MAX_LEN 48
+
 static void clickOrHoverNotification(State *s, int i, String elem_pretty_name) {
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ||
       s->notificationOnElemIdx != i) {
     String buf = {0};
     const char *action =
         IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ? "Clicked" : "Hovering";
-    StringFormat(&s->scratch_arena, &buf, "[%s %s %d] %s", action,
+    StringFormat(&s->scratch_arena, &buf, "[%s %s %d] %.*s", action,
                  elem_pretty_name.data ? elem_pretty_name.data : "", i,
-                 s->elements[i].text.data ? s->elements[i].text.data : "");
+                 NOTIFICATION_MAX_LEN, s->elements[i].text.data ? s->elements[i].text.data : "");
     updateNotification(s, buf);
     StringFree(&buf);
     s->notificationOnElemIdx = i;
   }
 }
 
-static Rectangle GetElementBoundingBox(const Element *e) {
+static Rectangle GetElementBoundingBox(State* s, Element *e) {
   float w = 0;
   float h = 0;
-  if (e->kind == ELEM_TEXT) {
-    if (e->width == NULL)
-      w = MeasureText(e->text.data ? e->text.data : "", e->textSize);
-    if (e->height == NULL)
-      h = e->textSize;
-  } else {
-    w = e->width != NULL ? *e->width : 0;
-    h = e->height != NULL ? *e->height : 0;
-  }
+    if (ELEM_TOTAL_KINDS != 8) {
+        // If new element kinds are added, update this function to handle them.
+        TODO;
+    }
+    switch (e->kind) {
+        case ELEM_TEXT:
+            if (e->width == NULL)
+                w = MeasureText(e->text.data ? e->text.data : "", e->textSize);
+            if (e->height == NULL)
+                h = e->textSize;
+            break;
+        case ELEM_ELBOW:
+            w = e->width != NULL ? *e->width + s->barWidth : 0;
+            h = e->height != NULL ? *e->height + s->columnHeight + s->barHeight : 0;
+            break;
+        default:
+            w = e->width != NULL ? *e->width : 0;
+            h = e->height != NULL ? *e->height : 0;
+            break;
+    }
   return (Rectangle){(float)e->position.x, (float)e->position.y, w, h};
+}
+
+static bool IsHoveringElement(State *s, Element *e) {
+  switch (e->kind) {
+        case ELEM_RECTANGLE:
+        case ELEM_BUTTON:
+        case ELEM_TEXT:
+        case ELEM_TEXT_EDITOR:
+        case ELEM_ENTRY_LIST:
+        case ELEM_SPHERE: {
+            return CheckCollisionPointRec(GetMousePosition(), GetElementBoundingBox(s, e));
+        }
+
+        case ELEM_ELBOW:
+            // For elbows, we might want to expand the bounding box slightly to
+            // account for the elbow curve. This is a simple approximation.
+            switch (e->elbowOrientation) {
+                case 0:
+                    return CheckCollisionPointRec(
+                        GetMousePosition(),
+                        (Rectangle){.x = e->position.x,
+                            .y = e->position.y,
+                            .width = *(e->width),
+                            .height = *(e->height) + s->barHeight +
+                            s->innerRadius}) ||
+                    CheckCollisionPointRec(
+                        GetMousePosition(),
+                        (Rectangle){.x = e->position.x,
+                            .y = e->position.y,
+                            .width = s->columnWidth + s->barWidth,
+                            .height = s->barHeight});
+                case 1:
+                case 2:
+                    TODO;
+                    return false;
+                    break;
+                case 3:
+                    return CheckCollisionPointRec(
+                        GetMousePosition(),
+                        (Rectangle){.x = e->position.x,
+                            .y = e->position.y,
+                            .width = *(e->width),
+                            .height = *(e->height) + s->barHeight +
+                            s->innerRadius}) ||
+                    CheckCollisionPointRec(
+                        GetMousePosition(),
+                        (Rectangle){.x = e->position.x,
+                            .y = e->position.y + s->columnHeight +
+                            s->innerRadius,
+                            .width = s->columnWidth + s->barWidth,
+                            .height = s->barHeight});
+            };
+            break;
+        case ELEM_NOTHING:
+        case ELEM_TOTAL_KINDS:
+            return false;
+            break;
+    }
 }
 
 // Orientation: 0 - corner at top-left, 1 - corner at top-right, 2 - corner at
