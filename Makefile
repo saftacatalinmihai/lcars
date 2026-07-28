@@ -31,6 +31,7 @@ CFLAGS_RELEASE = $(BASE_CFLAGS) -O3
 
 # For the dynamic/hot-reloaded development target:
 CFLAGS_DYN = $(BASE_CFLAGS) -ggdb -g -fsanitize=address $(RAYLIB_LIBS) -lpthread $(LDFLAGS_DYN)
+# CFLAGS_DYN = $(BASE_CFLAGS) -O3                         $(RAYLIB_LIBS) -lpthread $(LDFLAGS_DYN)
 
 # Web build settings (Emscripten)
 RAYLIB_WEB = vendor/raylib-web/src
@@ -80,8 +81,8 @@ lcars-release: lcars.c vendor/libraylib.a vendor/libminiaudio.a ensure-resources
 lcars-dynamic: lcars.c lcars-lib.so vendor/libminiaudio.a ensure-resources
 	cc $(CFLAGS_DYN) -o lcars lcars.c vendor/libminiaudio.a -lcurl -lsqlite3 -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
-lcars-lib.so: lcars_ui.h liblcars.h liblcars.c lcars_voice_rec.h
-	cc $(CFLAGS_DYN) -fPIC -shared $(SHARED_FLAGS) -std=c11 -lsqlite3 -ldl -lcurl -o lcars-lib.so liblcars.c
+lcars-lib.so: liblcars.h liblcars.c lcars_voice_rec.h lcars_db.h
+	cc $(CFLAGS_DYN) -fPIC -shared $(SHARED_FLAGS) -lsqlite3 -ldl -lcurl -o lcars-lib.so liblcars.c
 
 run: lcars
 	./lcars

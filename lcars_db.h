@@ -1,6 +1,8 @@
 #ifndef LCARS_DB_H
 #define LCARS_DB_H
 
+#include "lcars_arena.h"
+#include "lcars_string.h"
 #include "liblcars.h"
 #include "vendor/sqlite3.h"
 
@@ -61,8 +63,8 @@ void InitDB(State *s, bool firstInit) {
 
   char *sql_insert_full = sqlite3_mprintf(
       "INSERT INTO entries (kind, title, content) "
-      "SELECT 'personal_log', 'Captain Log', '%q Captain log' "
-      "WHERE NOT EXISTS (SELECT 1 FROM entries WHERE kind = 'personal_log');",
+      "SELECT 'architect_log', 'Captain Log', '%q Captain log' "
+      "WHERE NOT EXISTS (SELECT 1 FROM entries WHERE kind = 'architect_log');",
       datename);
   if (sql_insert_full) {
     ExecSQL(s, StringStatic(sql_insert_full),
@@ -118,6 +120,29 @@ static inline void DeleteEntryFromDB(State *s, int id) {
   sqlite3_free(sql_delete);
 }
 
+static KindList GetAllKindsFromDB(State *s) {
+  KindList kindList = {0};
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(
+      s->db, "SELECT DISTINCT kind FROM entries WHERE deleted IS NULL OR "
+              "deleted = 0 ORDER BY kind ASC",
+      -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    fprintf(stderr, "SQL error failure fetching kinds: %s\n",
+            sqlite3_errmsg(s->db));
+  } else {
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+      const char *col_text = (const char *)sqlite3_column_text(stmt, 0);
+      if (col_text) {
+        kindList.kinds[kindList.count] = StringInit(&s->doc_arena, col_text);
+        kindList.count++;
+      }
+    }
+    sqlite3_finalize(stmt);
+  }
+  return kindList;
+}
+
 static inline int GetEntriesByKind(State *s, const char *kind,
                                    EntryListItem *items, int maxItems) {
   sqlite3_stmt *stmt;
@@ -161,7 +186,7 @@ static inline int GetFirstPersonalLogId(State *s) {
   int id = 1;
   if (sqlite3_prepare_v2(
           s->db,
-          "SELECT id FROM entries WHERE kind='personal_log' AND (deleted IS "
+          "SELECT id FROM entries WHERE kind='architect_log' AND (deleted IS "
           "NULL OR deleted = 0) ORDER BY ID DESC LIMIT 1",
           -1, &stmt, NULL) == SQLITE_OK) {
     if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -209,6 +234,8 @@ static inline void make_entry_list(Arena *doc_arena, Element *e, State *s) {
   e->kind = ELEM_ENTRY_LIST;
   e->listCollapsed = false;
   e->selectedEntryId = GetFirstPersonalLogId(s);
+  e->kindList = GetAllKindsFromDB(s);
+  e->selectedKind = e->kindList.count > 0 ? e->kindList.kinds[0] : StringStatic("architect_log");
 
   String content = GetEntryContentFromDB(s, e->selectedEntryId);
   make_text_editor(doc_arena, e, content);

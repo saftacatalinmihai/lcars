@@ -2,6 +2,7 @@
 #define LCARS_HYPERMEDIA_H
 
 #include "liblcars.h"
+#include "raylib.h"
 
 #include <curl/curl.h>
 
@@ -175,6 +176,7 @@ static String LoadDocumentContent(String source, State *s) {
 void LoadHypermediaDocument(State *s, String source) {
   // Reset the document arena to reclaim all memory from the previous document
   arena_reset(&s->doc_arena);
+    s->numElements = 0;
 
   String buf = LoadDocumentContent(source, s);
   if (!buf.data) {
@@ -292,7 +294,7 @@ void LoadHypermediaDocument(State *s, String source) {
         *h_ptr = h_val;
 
       Element e = {0};
-      e.position = (iVec2){x, y};
+      e.position = (Vector2){x, y};
       e.width = w_ptr;
       e.height = h_ptr;
       e.color = color;
@@ -314,10 +316,7 @@ void LoadHypermediaDocument(State *s, String source) {
       } else if (kind == ELEM_TEXT) {
         make_text(&e);
       } else if (kind == ELEM_TEXT_EDITOR) {
-        printf("Get log from DB\n");
-        String dbLog = GetLogFromDB(s);
-        make_text_editor(&s->doc_arena, &e, dbLog);
-        StringFree(&dbLog);
+        make_text_editor(&s->doc_arena, &e, StringStatic(""));
       } else if (kind == ELEM_ENTRY_LIST) {
         printf("Make entry list element\n");
         make_entry_list(&s->doc_arena, &e, s);
