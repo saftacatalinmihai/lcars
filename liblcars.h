@@ -1549,11 +1549,12 @@ void UpdateDrawFrame(State *s) {
     ToggleVoiceRecording(s);
   }
 
+  if (IsKeyDown(KEY_LEFT_SUPER) && IsKeyPressed(KEY_S)) {
+    system("./scripts/db-push.sh");
+  }
+
   Update(s);
   Vector2 mPos = GetMousePosition();
-
-
-
 
   // Pre render on texture areas or any other requirements for first pass:
   for (int i = 0; i < s->numElements; i++) {
