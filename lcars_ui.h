@@ -3,8 +3,6 @@
 
 #include "liblcars.h"
 
-#define NOTIFICATION_MAX_LEN 48
-
 static void clickOrHoverNotification(State *s, int i, String elem_pretty_name) {
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ||
       s->notificationOnElemIdx != i) {
