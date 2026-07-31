@@ -634,33 +634,26 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
   case ELEM_ENTRY_LIST: {
     float listWidth = 0.0f;
     if (e->kind == ELEM_ENTRY_LIST) {
-      listWidth = e->listCollapsed ? 30.0f : 350.0f;
+      EntryListLayout el = ComputeEntryListLayout(e);
+      listWidth = el.width;
 
       // Handle list selection panel interactions
-      Rectangle listRec =
-          (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
-      if (CheckCollisionPointRec(mPos, listRec)) {
+      if (CheckCollisionPointRec(mPos, el.panelRec)) {
         // Mouse wheel scrolling for list
         float wheelMove = GetMouseWheelMove();
         if (wheelMove != 0.0f) {
           EntryListItem items[32];
           int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
-          float viewportHeight = *e->height - 45.0f;
           e->listScrollY -= wheelMove * 30.0f;
-          e->listScrollY = ClampScrollOffset(e->listScrollY, count * 90.0f,
-                                             viewportHeight);
+          e->listScrollY = ClampScrollOffset(
+              e->listScrollY, count * el.itemStride, el.viewportHeight);
         }
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-          Rectangle toggleBtn =
-              (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
-          if (CheckCollisionPointRec(mPos, toggleBtn)) {
+          if (CheckCollisionPointRec(mPos, el.toggleBtn)) {
             e->listCollapsed = !e->listCollapsed;
           } else if (!e->listCollapsed) {
-            Rectangle newEntryBtn =
-                (Rectangle){e->position.x + 35.0f, e->position.y,
-                            listWidth - 50.0f, 30.0f};
-            if (CheckCollisionPointRec(mPos, newEntryBtn)) {
+            if (CheckCollisionPointRec(mPos, el.newEntryBtn)) {
               UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
 
               char datename[32];
@@ -689,21 +682,22 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
               e->kindList = GetAllKindsFromDB(s);
               int count =
                   GetEntriesByKind(s, e->selectedKind.data, items, 32);
-              float viewportHeight = *e->height - 45.0f;
-              float maxItemWidth = listWidth - 15.0f;
-              bool isScrollable = (count * 90.0f > viewportHeight);
+              float maxItemWidth = el.width - 15.0f;
+              bool isScrollable = (count * el.itemStride > el.viewportHeight);
               float itemWidth = maxItemWidth;
               if (isScrollable) {
                 itemWidth = maxItemWidth - 10.0f;
               }
-              float itemY = e->position.y + 45.0f - e->listScrollY;
+              float itemY =
+                  e->position.y + el.headerHeight - e->listScrollY;
               Rectangle scrollableListRec =
-                  (Rectangle){e->position.x, e->position.y + 45.0f,
-                              listWidth - 5.0f, viewportHeight};
+                  (Rectangle){e->position.x,
+                              e->position.y + el.headerHeight, el.width - 5.0f,
+                              el.viewportHeight};
               if (CheckCollisionPointRec(mPos, scrollableListRec)) {
                 for (int j = 0; j < count; j++) {
                   Rectangle itemRec = (Rectangle){e->position.x + 5.0f, itemY,
-                                                  itemWidth, 80.0f};
+                                                  itemWidth, el.itemHeight};
                   if (CheckCollisionPointRec(mPos, itemRec)) {
                     if (e->selectedEntryId != items[j].id) {
                       UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
@@ -715,7 +709,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                     }
                     break;
                   }
-                  itemY += 90.0f;
+                  itemY += el.itemStride;
                 }
               }
             }
@@ -1308,10 +1302,9 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
     bool isMouseOverList = false;
 
     if (e->kind == ELEM_ENTRY_LIST) {
-      listWidth = e->listCollapsed ? 30.0f : 350.0f;
-      Rectangle listRec =
-          (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
-      isMouseOverList = CheckCollisionPointRec(mPos, listRec);
+      EntryListLayout el = ComputeEntryListLayout(e);
+      listWidth = el.width;
+      isMouseOverList = CheckCollisionPointRec(mPos, el.panelRec);
 
       if (isMouseOverList) {
         editorBorderColor = ColorAlpha(LCARS_BLUE, 0.4f);
@@ -1326,46 +1319,43 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
                          *e->height, listBorderColor);
 
       // Draw toggle button
-      Rectangle toggleBtn =
-          (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
-      DrawRectangleRounded(toggleBtn, 0.3f, 4, LCARS_BLUE);
+      DrawRectangleRounded(el.toggleBtn, 0.3f, 4, LCARS_BLUE);
       DrawText(e->listCollapsed ? ">" : "<",
-               toggleBtn.x + (toggleBtn.width -
-                              MeasureText(e->listCollapsed ? ">" : "<", 20)) /
-                                 2,
-               toggleBtn.y + (toggleBtn.height - 20) / 2, 20, BLACK);
+               el.toggleBtn.x + (el.toggleBtn.width -
+                                 MeasureText(e->listCollapsed ? ">" : "<", 20)) /
+                                    2,
+               el.toggleBtn.y + (el.toggleBtn.height - 20) / 2, 20, BLACK);
 
       if (!e->listCollapsed) {
         // Draw "+ New Entry" button
-        Rectangle newEntryBtn = (Rectangle){
-            e->position.x + 35.0f, e->position.y, listWidth - 50.0f, 30.0f};
-        DrawRectangleRounded(newEntryBtn, 0.3f, 4, LCARS_GREEN);
+        DrawRectangleRounded(el.newEntryBtn, 0.3f, 4, LCARS_GREEN);
         DrawText("+ NEW ENTRY",
-                 newEntryBtn.x +
-                     (newEntryBtn.width - MeasureText("+ NEW ENTRY", 20)) / 2,
-                 newEntryBtn.y + (newEntryBtn.height - 20) / 2, 20, BLACK);
+                 el.newEntryBtn.x + (el.newEntryBtn.width -
+                                     MeasureText("+ NEW ENTRY", 20)) /
+                                        2,
+                 el.newEntryBtn.y + (el.newEntryBtn.height - 20) / 2, 20,
+                 BLACK);
 
         // Draw entries
         EntryListItem items[32];
         int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
-        float viewportHeight = *e->height - 45.0f;
-        float maxItemWidth = listWidth - 15.0f;
-        bool isScrollable = (count * 90.0f > viewportHeight);
+        float maxItemWidth = el.width - 15.0f;
+        bool isScrollable = (count * el.itemStride > el.viewportHeight);
         float itemWidth = maxItemWidth;
         if (isScrollable) {
           itemWidth = maxItemWidth - 10.0f;
         }
 
-        float itemY = e->position.y + 45.0f - e->listScrollY;
+        float itemY = e->position.y + el.headerHeight - e->listScrollY;
         Rectangle listClipRec =
-            (Rectangle){e->position.x, e->position.y + 45.0f,
-                        listWidth - 5.0f, viewportHeight};
+            (Rectangle){e->position.x, e->position.y + el.headerHeight,
+                        el.width - 5.0f, el.viewportHeight};
 
         BeginScissorMode((int)listClipRec.x, (int)listClipRec.y,
                          (int)listClipRec.width, (int)listClipRec.height);
         for (int j = 0; j < count; j++) {
-          Rectangle itemRec =
-              (Rectangle){e->position.x + 5.0f, itemY, itemWidth, 80.0f};
+          Rectangle itemRec = (Rectangle){e->position.x + 5.0f, itemY,
+                                          itemWidth, el.itemHeight};
           Color itemColor = (items[j].id == e->selectedEntryId)
                                 ? LCARS_YELLOW
                                 : (Color){40, 40, 40, 255};
@@ -1395,23 +1385,23 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
           DrawText(createdDate, itemRec.x + 10, itemRec.y + 55, 20,
                    subtextColor);
 
-          itemY += 90.0f;
+          itemY += el.itemStride;
         }
         EndScissorMode();
 
         // Draw scrollbar if scrollable
         if (isScrollable) {
-          float trackX = e->position.x + listWidth - 15.0f;
-          float trackY = e->position.y + 45.0f;
+          float trackX = e->position.x + el.width - 15.0f;
+          float trackY = e->position.y + el.headerHeight;
           float trackWidth = 6.0f;
           float trackHeight = *e->height - 50.0f;
 
           float handleHeight =
-              (viewportHeight / (count * 90.0f)) * trackHeight;
+              (el.viewportHeight / (count * el.itemStride)) * trackHeight;
           if (handleHeight < 15.0f)
             handleHeight = 15.0f;
 
-          float scrollRange = count * 90.0f - viewportHeight;
+          float scrollRange = count * el.itemStride - el.viewportHeight;
           float handleY = trackY;
           if (scrollRange > 0.0f) {
             handleY +=

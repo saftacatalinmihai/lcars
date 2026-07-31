@@ -2,6 +2,7 @@
 #define LCARS_TEXT_H
 
 #include "lcars_types.h"
+#include "lcars_ui.h"
 #include <math.h>
 
 static int GetLines(String text, int *lineStarts, int maxLines);
@@ -325,11 +326,9 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
   // Draw the cursor if focused
   bool isMouseOverList = false;
   if (e->kind == ELEM_ENTRY_LIST) {
-    float listWidth = e->listCollapsed ? 30.0f : 220.0f;
+    EntryListLayout el = ComputeEntryListLayout(e);
     Vector2 mPos = GetMousePosition();
-    Rectangle listRec =
-        (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
-    isMouseOverList = CheckCollisionPointRec(mPos, listRec);
+    isMouseOverList = CheckCollisionPointRec(mPos, el.panelRec);
   }
   if (e->isFocused && !isMouseOverList) {
     if (e->textSelectedFramesCounter / 40 % 2 == 0) {

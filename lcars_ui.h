@@ -11,6 +11,7 @@ static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
                       int orientation, bool debug);
 static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
                                               float editorWidth);
+static EntryListLayout ComputeEntryListLayout(Element *e);
 
 #ifdef LCARS_IMPLEMENTATION
 
@@ -48,6 +49,27 @@ static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
   sb.handle = (Rectangle){sb.bounds.x, handleY, sb.bounds.width, handleHeight};
 
   return sb;
+}
+
+// Computes the geometry of an ELEM_ENTRY_LIST's left-hand panel (width,
+// panel/toggle/new-entry button rects, header/item metrics) from the
+// element's current position/height/listCollapsed. Pure function of `e` —
+// the single source of truth for this panel's layout so input handling,
+// drawing, and the text renderer's cursor-visibility check can't disagree
+// about it (they previously did: lcars_text.h used a stale 220px width
+// where everywhere else used 350px).
+static EntryListLayout ComputeEntryListLayout(Element *e) {
+  EntryListLayout el = {0};
+  el.width = e->listCollapsed ? 30.0f : 350.0f;
+  el.panelRec = (Rectangle){e->position.x, e->position.y, el.width, *e->height};
+  el.toggleBtn = (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
+  el.newEntryBtn = (Rectangle){e->position.x + 35.0f, e->position.y,
+                               el.width - 50.0f, 30.0f};
+  el.headerHeight = 45.0f;
+  el.itemStride = 90.0f;
+  el.itemHeight = 80.0f;
+  el.viewportHeight = *e->height - el.headerHeight;
+  return el;
 }
 
 static void clickOrHoverNotification(State *s, int i, String elem_pretty_name) {

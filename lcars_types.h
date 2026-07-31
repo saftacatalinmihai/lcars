@@ -78,6 +78,21 @@ typedef struct ScrollbarLayout {
   float scrollRange;
 } ScrollbarLayout;
 
+// Geometry of an ELEM_ENTRY_LIST's left-hand entry list panel, shared
+// between input handling, drawing, and cursor-visibility logic in
+// lcars_text.h so they can't disagree about the panel's width. See
+// ComputeEntryListLayout() in lcars_ui.h.
+typedef struct EntryListLayout {
+  float width;          // 30 collapsed, 350 expanded
+  Rectangle panelRec;   // whole panel: {pos.x, pos.y, width, *height}
+  Rectangle toggleBtn;  // top-left collapse/expand button
+  Rectangle newEntryBtn; // "+ NEW ENTRY" button (only meaningful when expanded)
+  float headerHeight;   // vertical offset from panel top to the first item row
+  float itemStride;     // vertical spacing between item rows
+  float itemHeight;     // height of each item row
+  float viewportHeight; // *height - headerHeight
+} EntryListLayout;
+
 typedef struct Element {
   ElemKind kind;
   ButtonAction on_click;
