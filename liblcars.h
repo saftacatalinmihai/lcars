@@ -657,21 +657,10 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
               UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
 
               char datename[32];
-              struct tm *to;
-              time_t t = time(NULL);
-              to = localtime(&t);
-              strftime(datename, sizeof(datename), "%Y-%m-%d", to);
-
-              char *sql = sqlite3_mprintf(
-                  "INSERT INTO entries (kind, title, content) VALUES "
-                  "('%s', '%s', '%q');",
-                  e->selectedKind.data, e->selectedKind.data, datename);
-              if (sql) {
-                ExecSQL(s, StringStatic(sql),
-                        StringStatic("New entry created"));
-                sqlite3_free(sql);
-              }
-              int newId = (int)sqlite3_last_insert_rowid(s->db);
+              GetTodayDateString(datename, sizeof(datename));
+              int newId = CreateNewEntry(s, e->selectedKind.data,
+                                         e->selectedKind.data,
+                                         StringStatic(datename));
               SwitchToEntry(s, e, newId);
             } else {
               EntryListItem items[MAX_LIST_ITEMS];
@@ -755,21 +744,12 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
               nextEntryId = remItems[0].id;
             } else {
               char datename[32];
-              struct tm *to;
-              time_t t = time(NULL);
-              to = localtime(&t);
-              strftime(datename, sizeof(datename), "%Y-%m-%d", to);
-
-              char *sql = sqlite3_mprintf(
-                  "INSERT INTO entries (kind, title, content) VALUES "
-                  "('personal_log', 'Captain Log', '%q Captain log');",
-                  datename);
-              if (sql) {
-                ExecSQL(s, StringStatic(sql),
-                        StringStatic("New entry created"));
-                sqlite3_free(sql);
-              }
-              nextEntryId = (int)sqlite3_last_insert_rowid(s->db);
+              GetTodayDateString(datename, sizeof(datename));
+              String content = {0};
+              StringFormat(&s->scratch_arena, &content, "%s Captain log",
+                          datename);
+              nextEntryId =
+                  CreateNewEntry(s, "personal_log", "Captain Log", content);
             }
             SwitchToEntry(s, e, nextEntryId);
             deleteClicked = true;

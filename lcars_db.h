@@ -11,6 +11,9 @@ static inline int sqlite_callback(void *state, int argc, char **argv,
                                   char **azColName);
 static inline int ExecSQL(State *s, String sql, String successMsg);
 static void InitDB(State *s, bool firstInit);
+static inline void GetTodayDateString(char *buf, size_t bufSize);
+static inline int CreateNewEntry(State *s, const char *kind,
+                                 const char *title, String content);
 static inline String GetEntryContentFromDB(State *s, int id);
 static inline void UpdateEntryContentInDB(State *s, int id, String content);
 static inline void DeleteEntryFromDB(State *s, int id);
@@ -52,6 +55,30 @@ static inline int ExecSQL(State *s, String sql, String successMsg) {
     }
   }
   return rc;
+}
+
+static inline void GetTodayDateString(char *buf, size_t bufSize) {
+  time_t t = time(NULL);
+  struct tm *to = localtime(&t);
+  strftime(buf, bufSize, "%Y-%m-%d", to);
+}
+
+// Inserts a new entry with the given kind/title/content and returns its id
+// (0 if the insert failed). All three fields are %q-escaped, so callers
+// don't need to worry about quote characters in user-supplied kind/title
+// values breaking the SQL.
+static inline int CreateNewEntry(State *s, const char *kind,
+                                 const char *title, String content) {
+  char *sql = sqlite3_mprintf(
+      "INSERT INTO entries (kind, title, content) VALUES ('%q', '%q', '%q');",
+      kind, title, content.data ? content.data : "");
+  if (!sql) {
+    updateNotification(s, StringStatic("SQL error"));
+    return 0;
+  }
+  ExecSQL(s, StringStatic(sql), StringStatic("New entry created"));
+  sqlite3_free(sql);
+  return (int)sqlite3_last_insert_rowid(s->db);
 }
 
 static void InitDB(State *s, bool firstInit) {
