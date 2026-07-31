@@ -271,10 +271,7 @@ static void NavigateEntryList(State *s, Element *e, int direction) {
   int newIdx = selectedIdx + direction;
   if (newIdx >= 0 && newIdx < count) {
     UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
-    e->selectedEntryId = items[newIdx].id;
-    String newText = GetEntryContentFromDB(s, e->selectedEntryId);
-    LoadEntryIntoEditor(e, newText);
-    StringFree(&newText);
+    SwitchToEntry(s, e, items[newIdx].id);
 
     float viewportHeight = *e->height - 45.0f;
     if (direction < 0) { // Up
@@ -675,10 +672,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                 sqlite3_free(sql);
               }
               int newId = (int)sqlite3_last_insert_rowid(s->db);
-              e->selectedEntryId = newId;
-              String newText = GetEntryContentFromDB(s, newId);
-              LoadEntryIntoEditor(e, newText);
-              StringFree(&newText);
+              SwitchToEntry(s, e, newId);
             } else {
               EntryListItem items[MAX_LIST_ITEMS];
 
@@ -702,11 +696,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                   if (CheckCollisionPointRec(mPos, itemRec)) {
                     if (e->selectedEntryId != items[j].id) {
                       UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
-                      e->selectedEntryId = items[j].id;
-                      String newText =
-                          GetEntryContentFromDB(s, e->selectedEntryId);
-                      LoadEntryIntoEditor(e, newText);
-                      StringFree(&newText);
+                      SwitchToEntry(s, e, items[j].id);
                     }
                     break;
                   }
@@ -760,8 +750,9 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             EntryListItem remItems[MAX_LIST_ITEMS];
             int remCount =
                 GetEntriesByKind(s, "personal_log", remItems, MAX_LIST_ITEMS);
+            int nextEntryId;
             if (remCount > 0) {
-              e->selectedEntryId = remItems[0].id;
+              nextEntryId = remItems[0].id;
             } else {
               char datename[32];
               struct tm *to;
@@ -778,11 +769,9 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                         StringStatic("New entry created"));
                 sqlite3_free(sql);
               }
-              e->selectedEntryId = (int)sqlite3_last_insert_rowid(s->db);
+              nextEntryId = (int)sqlite3_last_insert_rowid(s->db);
             }
-            String newText = GetEntryContentFromDB(s, e->selectedEntryId);
-            LoadEntryIntoEditor(e, newText);
-            StringFree(&newText);
+            SwitchToEntry(s, e, nextEntryId);
             deleteClicked = true;
           }
         }

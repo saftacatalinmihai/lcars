@@ -21,6 +21,7 @@ static inline int GetFirstPersonalLogId(State *s);
 static inline String GetLogFromDB(State *s);
 static inline void UpdateLogInDB(State *s, String newLog);
 static inline void LoadEntryIntoEditor(Element *e, String dbLog);
+static inline void SwitchToEntry(State *s, Element *e, int newEntryId);
 static inline void make_entry_list(Arena *doc_arena, Element *e, State *s);
 
 #ifdef LCARS_IMPLEMENTATION
@@ -247,6 +248,19 @@ static inline void LoadEntryIntoEditor(Element *e, String dbLog) {
   e->scrollY = 0.0f;
   e->cursorY = 0.0f;
   e->snapToCursor = 2;
+}
+
+// Switches an entry-list editor to display a different entry: fetches its
+// content and loads it into the (gap-buffer-backed) editor. Does NOT save
+// the currently-displayed entry first — callers that need that (switching
+// away from an entry the user was editing) call UpdateEntryContentInDB()
+// themselves before this, since callers that are switching away from an
+// entry that's being deleted must not.
+static inline void SwitchToEntry(State *s, Element *e, int newEntryId) {
+  e->selectedEntryId = newEntryId;
+  String newText = GetEntryContentFromDB(s, newEntryId);
+  LoadEntryIntoEditor(e, newText);
+  StringFree(&newText);
 }
 
 static inline void make_entry_list(Arena *doc_arena, Element *e, State *s) {
