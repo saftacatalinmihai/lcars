@@ -9,8 +9,46 @@ static bool IsHoveringElement(State *s, Element *e);
 static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
                       int barWidth, int barHeight, int innerRadius, Color color,
                       int orientation, bool debug);
+static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
+                                              float editorWidth);
 
 #ifdef LCARS_IMPLEMENTATION
+
+// Computes the geometry of a text editor's vertical scrollbar (bounds,
+// up/down buttons, track, and drag handle) from the element's current
+// height/textHeight/scrollY. Pure function of `e` and the editor's screen
+// position — safe to call from both input handling and drawing, and the
+// only place this geometry should be computed so the two can't diverge.
+static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
+                                              float editorWidth) {
+  ScrollbarLayout sb = {0};
+  sb.bounds = (Rectangle){editorX + editorWidth + 25, e->position.y, 24.0f,
+                          *e->height};
+  sb.upButton =
+      (Rectangle){sb.bounds.x, sb.bounds.y, sb.bounds.width, sb.bounds.width};
+  sb.downButton = (Rectangle){sb.bounds.x,
+                              sb.bounds.y + sb.bounds.height - sb.bounds.width,
+                              sb.bounds.width, sb.bounds.width};
+  sb.track = (Rectangle){sb.bounds.x, sb.bounds.y + sb.bounds.width + 5,
+                         sb.bounds.width,
+                         sb.bounds.height - 2 * sb.bounds.width - 10};
+
+  float visibleRatio = *e->height / e->textHeight;
+  if (visibleRatio > 1.0f)
+    visibleRatio = 1.0f;
+  float handleHeight = visibleRatio * sb.track.height;
+  if (handleHeight < 20.0f)
+    handleHeight = 20.0f;
+
+  sb.scrollRange = e->textHeight - *e->height;
+  float handleY = sb.track.y;
+  if (sb.scrollRange > 0.0f) {
+    handleY += (e->scrollY / sb.scrollRange) * (sb.track.height - handleHeight);
+  }
+  sb.handle = (Rectangle){sb.bounds.x, handleY, sb.bounds.width, handleHeight};
+
+  return sb;
+}
 
 static void clickOrHoverNotification(State *s, int i, String elem_pretty_name) {
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ||

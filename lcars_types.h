@@ -66,6 +66,18 @@ typedef struct KeyRepeat {
   float startTime;
 } KeyRepeat;
 
+// Geometry of a text editor's vertical scrollbar, shared between input
+// handling and drawing so they can't compute it differently. See
+// ComputeScrollbarLayout() in lcars_ui.h.
+typedef struct ScrollbarLayout {
+  Rectangle bounds;
+  Rectangle upButton;
+  Rectangle downButton;
+  Rectangle track;
+  Rectangle handle;
+  float scrollRange;
+} ScrollbarLayout;
+
 typedef struct Element {
   ElemKind kind;
   ButtonAction on_click;

@@ -726,11 +726,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
 
     float editorX = e->position.x + listWidth;
     float editorWidth = *e->width - listWidth;
-
-    float scrollbarX = editorX + editorWidth + 25;
-    float scrollbarY = e->position.y;
-    float scrollbarWidth = 24.0f;
-    float scrollbarHeight = *e->height;
+    ScrollbarLayout sb = ComputeScrollbarLayout(e, editorX, editorWidth);
     Rectangle activeRec = (Rectangle){.x = editorX,
                                       .y = e->position.y,
                                       .width = editorWidth + 55,
@@ -797,53 +793,29 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         }
 
         if (!deleteClicked) {
-          Rectangle upButton = (Rectangle){scrollbarX, scrollbarY,
-                                           scrollbarWidth, scrollbarWidth};
-          Rectangle downButton = (Rectangle){
-              scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth,
-              scrollbarWidth, scrollbarWidth};
-          Rectangle track = (Rectangle){
-              scrollbarX, scrollbarY + scrollbarWidth + 5, scrollbarWidth,
-              scrollbarHeight - 2 * scrollbarWidth - 10};
-
-          if (CheckCollisionPointRec(mPos, upButton)) {
+          if (CheckCollisionPointRec(mPos, sb.upButton)) {
             e->scrollY -= 30.0f;
             ClampScrollY(e);
-          } else if (CheckCollisionPointRec(mPos, downButton)) {
+          } else if (CheckCollisionPointRec(mPos, sb.downButton)) {
             e->scrollY += 30.0f;
             ClampScrollY(e);
-          } else if (CheckCollisionPointRec(mPos, track)) {
-            float visibleRatio = *e->height / e->textHeight;
-            if (visibleRatio > 1.0f)
-              visibleRatio = 1.0f;
-            float handleHeight = visibleRatio * track.height;
-            if (handleHeight < 20.0f)
-              handleHeight = 20.0f;
-
-            float scrollRange = e->textHeight - *e->height;
-            float handleY = track.y;
-            if (scrollRange > 0.0f) {
-              handleY +=
-                  (e->scrollY / scrollRange) * (track.height - handleHeight);
-            }
-            Rectangle handle = (Rectangle){scrollbarX, handleY,
-                                           scrollbarWidth, handleHeight};
-
-            if (CheckCollisionPointRec(mPos, handle)) {
+          } else if (CheckCollisionPointRec(mPos, sb.track)) {
+            if (CheckCollisionPointRec(mPos, sb.handle)) {
               e->draggingScrollbar = true;
               e->dragStartY = mPos.y;
               e->dragStartScrollY = e->scrollY;
             } else {
               // Jump scroll handle to clicked position
               float clickY = mPos.y;
-              float relativeY = clickY - track.y - handleHeight / 2.0f;
-              float pct = relativeY / (track.height - handleHeight);
+              float relativeY =
+                  clickY - sb.track.y - sb.handle.height / 2.0f;
+              float pct = relativeY / (sb.track.height - sb.handle.height);
               if (pct < 0.0f)
                 pct = 0.0f;
               if (pct > 1.0f)
                 pct = 1.0f;
-              if (scrollRange > 0.0f) {
-                e->scrollY = pct * scrollRange;
+              if (sb.scrollRange > 0.0f) {
+                e->scrollY = pct * sb.scrollRange;
               } else {
                 e->scrollY = 0.0f;
               }
@@ -865,19 +837,10 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
     // Active dragging logic (independent of mouse hovering over activeRec)
     if (e->draggingScrollbar) {
       if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        float trackHeight = *e->height - 2 * scrollbarWidth - 10;
-        float visibleRatio = *e->height / e->textHeight;
-        if (visibleRatio > 1.0f)
-          visibleRatio = 1.0f;
-        float handleHeight = visibleRatio * trackHeight;
-        if (handleHeight < 20.0f)
-          handleHeight = 20.0f;
-
-        float dragRange = trackHeight - handleHeight;
+        float dragRange = sb.track.height - sb.handle.height;
         if (dragRange > 0.0f) {
           float deltaY = GetMousePosition().y - e->dragStartY;
-          float scrollRange = e->textHeight - *e->height;
-          float deltaScrollY = (deltaY / dragRange) * scrollRange;
+          float deltaScrollY = (deltaY / dragRange) * sb.scrollRange;
           e->scrollY = e->dragStartScrollY + deltaScrollY;
 
           // Clamp
@@ -891,10 +854,8 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
     // Keyboard input & editing logic
     if (e->isFocused) {
       e->textSelectedFramesCounter++;
-      Rectangle scrollbarRec = (Rectangle){scrollbarX, scrollbarY,
-                                           scrollbarWidth, scrollbarHeight};
 
-      if (CheckCollisionPointRec(mPos, scrollbarRec)) {
+      if (CheckCollisionPointRec(mPos, sb.bounds)) {
         SetMouseCursor(MOUSE_CURSOR_DEFAULT);
       } else if (draggingIdx == -1 && resizingIdx == -1) {
         SetMouseCursor(MOUSE_CURSOR_IBEAM);
@@ -1091,7 +1052,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       }
 
       if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
-          !CheckCollisionPointRec(mPos, scrollbarRec)) {
+          !CheckCollisionPointRec(mPos, sb.bounds)) {
         e->selectingText = true;
         int clickedIndex = GetCharIndexAtMouse(
             s, s->font, e->text,
@@ -1525,54 +1486,29 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
     EndScissorMode();
 
     // Render scrollbar
-    float scrollbarX = editorX + editorWidth + 25;
-    float scrollbarY = e->position.y;
-    float scrollbarWidth = 24.0f;
-    float scrollbarHeight = *e->height;
-
-    Rectangle upButton =
-        (Rectangle){scrollbarX, scrollbarY, scrollbarWidth, scrollbarWidth};
-    Rectangle downButton =
-        (Rectangle){scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth,
-                    scrollbarWidth, scrollbarWidth};
-    Rectangle track = (Rectangle){scrollbarX, scrollbarY + scrollbarWidth + 5,
-                                  scrollbarWidth,
-                                  scrollbarHeight - 2 * scrollbarWidth - 10};
+    ScrollbarLayout sb = ComputeScrollbarLayout(e, editorX, editorWidth);
 
     // Draw up/down buttons
-    DrawRectangleRounded(upButton, 0.5f, 4, e->color);
-    DrawRectangleRounded(downButton, 0.5f, 4, e->color);
+    DrawRectangleRounded(sb.upButton, 0.5f, 4, e->color);
+    DrawRectangleRounded(sb.downButton, 0.5f, 4, e->color);
 
     // Draw Up/Down arrow indicators
-    DrawText("^", upButton.x + (upButton.width - MeasureText("^", 20)) / 2,
-             upButton.y + (upButton.height - 20) / 2, 20, BLACK);
+    DrawText("^",
+             sb.upButton.x + (sb.upButton.width - MeasureText("^", 20)) / 2,
+             sb.upButton.y + (sb.upButton.height - 20) / 2, 20, BLACK);
     DrawText("v",
-             downButton.x + (downButton.width - MeasureText("v", 20)) / 2,
-             downButton.y + (downButton.height - 20) / 2, 20, BLACK);
+             sb.downButton.x +
+                 (sb.downButton.width - MeasureText("v", 20)) / 2,
+             sb.downButton.y + (sb.downButton.height - 20) / 2, 20, BLACK);
 
     // Draw track background
-    DrawRectangleRounded(track, 0.5f, 4, (Color){30, 30, 30, 255});
+    DrawRectangleRounded(sb.track, 0.5f, 4, (Color){30, 30, 30, 255});
 
-    // Calculate and draw handle
-    float visibleRatio = *e->height / e->textHeight;
-    if (visibleRatio > 1.0f)
-      visibleRatio = 1.0f;
-    float handleHeight = visibleRatio * track.height;
-    if (handleHeight < 20.0f)
-      handleHeight = 20.0f;
-
-    float scrollRange = e->textHeight - *e->height;
-    float handleY = track.y;
-    if (scrollRange > 0.0f) {
-      handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
-    }
-    Rectangle handle =
-        (Rectangle){scrollbarX, handleY, scrollbarWidth, handleHeight};
-
-    bool hoverHandle = CheckCollisionPointRec(GetMousePosition(), handle);
+    // Draw handle
+    bool hoverHandle = CheckCollisionPointRec(GetMousePosition(), sb.handle);
     Color handleColor =
         (hoverHandle || e->draggingScrollbar) ? LCARS_YELLOW : LCARS_ORANGE;
-    DrawRectangleRounded(handle, 0.5f, 4, handleColor);
+    DrawRectangleRounded(sb.handle, 0.5f, 4, handleColor);
 
     break;
   }
