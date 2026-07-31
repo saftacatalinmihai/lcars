@@ -224,7 +224,6 @@ static inline void LoadEntryIntoEditor(Element *e, String dbLog) {
   }
   e->text.len = textLen;
   e->textLen = textLen;
-  e->textLineLen = textLen;
   e->scrollY = 0.0f;
   e->cursorY = 0.0f;
   e->snapToCursor = 2;

@@ -57,10 +57,6 @@ typedef enum ButtonAction {
   ACTION_LOAD_HYPERMEDIA,
 } ButtonAction;
 
-typedef struct iVec2 {
-  int x, y;
-} iVec2;
-
 typedef struct KindList {
     String kinds[MAX_KINDS];
     int count;
@@ -89,8 +85,6 @@ typedef struct Element {
   int elbowOrientation; // Only used if kind == ELBOW
   String text;          // Text on button or just text elem
   int textLen;          // text lenght of chars.
-  int textLineLen;      // crt line len
-  int textLines;
   int textSize; // Only used if kind == TEXT / TEXTBOX for display size
   Model model;
   float rotation;
@@ -144,15 +138,11 @@ typedef struct State {
   float posX, posY, columnWidth, columnHeight, barWidth, barHeight, innerRadius;
   bool debug;
   bool is_editing;
-  int controllsX;
-  int controllsY;
   bool textBoxEditMode;
   Font font;
   String notification;
   int notificationOnElemIdx;
   float notificationTimer;
-  Ray ray;                // Picking line ray
-  RayCollision collision; // Ray collision hit info
   sqlite3 *db;
   void *voiceApi;
   double time_resource_download;
@@ -303,7 +293,6 @@ if (initText.len == 0 && e->text.len > 0 ) {
   e->text.is_static = false;
 
   e->textLen = textLen;
-  e->textLineLen = textLen;
 }
 
 static inline void make_sphere(State *s, Element *e, const char *imagePath) {
@@ -471,8 +460,6 @@ void Init(State *s, bool firstInit) {
 
   s->debug = false;
   s->is_editing = false;
-  s->controllsX = 600;
-  s->controllsY = 400;
   s->lcarsColor = (Color){204, 153, 204, 255}; // Purple
   s->posX = 0;
   s->posY = 210;
