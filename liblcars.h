@@ -361,62 +361,106 @@ void Reload(State *s, bool reset) {
   }
 }
 
-void Update(State *s) {
-  // Voice recognition updates
+// Polls the voice recognition API for partial/final results and, on a
+// final result, inserts the recognized text into the currently active
+// text editor or entry-list element (the first one found).
+static void UpdateVoiceInput(State *s) {
   VoiceRecApi *vapi = s->voiceApi;
-  if (vapi) {
-    if (vapi->IsRecording()) {
-      char partialBuf[256];
-      if (vapi->PollPartial(partialBuf, sizeof(partialBuf))) {
-        if (strlen(partialBuf) > 0) {
-          char fullNotify[300];
-          snprintf(fullNotify, sizeof(fullNotify), "[Voice: \"%s\"]",
-                   partialBuf);
-          updateNotification(s, StringStatic(fullNotify));
-        }
-      }
-    }
-
-    char voiceBuf[256];
-    if (vapi->PollResult(voiceBuf, sizeof(voiceBuf))) {
-      Element *editor = NULL;
-      for (int j = 0; j < s->numElements; j++) {
-        if (s->elements[j].kind == ELEM_TEXT_EDITOR ||
-            s->elements[j].kind == ELEM_ENTRY_LIST) {
-          editor = &s->elements[j];
-          break;
-        }
-      }
-
-      if (editor) {
-        bool textChanged = false;
-        int voiceBufLen = strlen(voiceBuf);
-        for (int k = 0; k < voiceBufLen; k++) {
-          GapInsertChar(&s->doc_arena, editor, voiceBuf[k]);
-          textChanged = true;
-        }
-
-        if (textChanged) {
-          ReconstructText(&s->doc_arena, editor);
-          if (editor->kind == ELEM_ENTRY_LIST) {
-            UpdateEntryContentInDB(s, editor->selectedEntryId, editor->text);
-          } else {
-
-            UpdateLogInDB(s, editor->text);
-          }
-          editor->snapToCursor = 2;
-        }
-      }
-    }
-  } else {
+  if (!vapi) {
     updateNotification(s, StringStatic("VOICE ERROR"));
+    return;
   }
 
-  Vector2 mPos = GetMousePosition();
-  Vector2 mDelta = GetMouseDelta();
-  SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+  if (vapi->IsRecording()) {
+    char partialBuf[256];
+    if (vapi->PollPartial(partialBuf, sizeof(partialBuf))) {
+      if (strlen(partialBuf) > 0) {
+        char fullNotify[300];
+        snprintf(fullNotify, sizeof(fullNotify), "[Voice: \"%s\"]",
+                 partialBuf);
+        updateNotification(s, StringStatic(fullNotify));
+      }
+    }
+  }
 
-  // Handle element dragging and resizing
+  char voiceBuf[256];
+  if (vapi->PollResult(voiceBuf, sizeof(voiceBuf))) {
+    Element *editor = NULL;
+    for (int j = 0; j < s->numElements; j++) {
+      if (s->elements[j].kind == ELEM_TEXT_EDITOR ||
+          s->elements[j].kind == ELEM_ENTRY_LIST) {
+        editor = &s->elements[j];
+        break;
+      }
+    }
+
+    if (editor) {
+      bool textChanged = false;
+      int voiceBufLen = strlen(voiceBuf);
+      for (int k = 0; k < voiceBufLen; k++) {
+        GapInsertChar(&s->doc_arena, editor, voiceBuf[k]);
+        textChanged = true;
+      }
+
+      if (textChanged) {
+        ReconstructText(&s->doc_arena, editor);
+        if (editor->kind == ELEM_ENTRY_LIST) {
+          UpdateEntryContentInDB(s, editor->selectedEntryId, editor->text);
+        } else {
+          UpdateLogInDB(s, editor->text);
+        }
+        editor->snapToCursor = 2;
+      }
+    }
+  }
+}
+
+static void HandleElementClick(State *s, Element *e) {
+  switch (e->on_click) {
+  case ACTION_DEBUG:
+    s->debug = !s->debug;
+    break;
+  case ACTION_EDIT:
+    s->is_editing = !s->is_editing;
+    break;
+  case ACTION_RESET:
+    Reload(s, true);
+    break;
+  case ACTION_VOICE_INPUT:
+    ToggleVoiceRecording(s);
+    break;
+  case ACTION_PRINT_DB:
+    printf("Executing SQL query to print database entries...\n");
+    ExecSQL(s, StringStatic("SELECT * FROM entries;"), StringStatic("Done"));
+    break;
+  case ACTION_LOAD_HYPERMEDIA: {
+    // Hack: the first element doubles as the URL input for loading
+    // hypermedia documents.
+    Element *url_input = &s->elements[0];
+    if (url_input->text.data &&
+        (strncmp(url_input->text.data, "http://", 7) == 0 ||
+         strncmp(url_input->text.data, "https://", 8) == 0 ||
+         strncmp(url_input->text.data, "file://", 7) == 0 ||
+         strstr(url_input->text.data, ".html") != NULL)) {
+      LoadHypermediaDocument(s, url_input->text);
+    } else {
+      LoadHypermediaDocument(s, StringStatic("file://document.html"));
+    }
+    break;
+  }
+  default:
+    break;
+  }
+}
+
+// Applies in-progress element dragging/resizing, and detects the start of a
+// new drag or resize from either the edit-mode corner handles or the
+// Super+click/Super+right-click shortcut. Reports which element (if any)
+// is now being dragged/resized via *outDraggingIdx / *outResizingIdx (-1
+// if none), which callers need for cursor/focus decisions later in the
+// frame.
+static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
+                                int *outDraggingIdx, int *outResizingIdx) {
   int draggingIdx = -1;
   int resizingIdx = -1;
   for (int i = 0; i < s->numElements; i++) {
@@ -531,660 +575,650 @@ void Update(State *s) {
     }
   }
 
-  for (int i = 0; i < s->numElements; i++) {
-    Element *e = &s->elements[i];
-    bool isHovering = IsHoveringElement(s, e);
-    if (isHovering && !e->isDragging && !e->isResizing) {
-      if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        switch (e->on_click) {
-        case ACTION_DEBUG:
-          s->debug = !s->debug;
-          break;
-        case ACTION_EDIT:
-          s->is_editing = !s->is_editing;
-          break;
-        case ACTION_RESET:
-          Reload(s, true);
-          break;
-        case ACTION_VOICE_INPUT:
-          ToggleVoiceRecording(s);
-          break;
-        case ACTION_PRINT_DB:
-          printf("Executing SQL query to print database entries...\n");
-          ExecSQL(s, StringStatic("SELECT * FROM entries;"),
-                  StringStatic("Done"));
-          break;
-        case ACTION_LOAD_HYPERMEDIA: {
-          // Hack: the first element doubles as the URL input for loading
-          // hypermedia documents.
-          Element *url_input = &s->elements[0];
-          if (url_input->text.data &&
-              (strncmp(url_input->text.data, "http://", 7) == 0 ||
-               strncmp(url_input->text.data, "https://", 8) == 0 ||
-               strncmp(url_input->text.data, "file://", 7) == 0 ||
-               strstr(url_input->text.data, ".html") != NULL)) {
-            LoadHypermediaDocument(s, url_input->text);
-          } else {
-            LoadHypermediaDocument(s, StringStatic("file://document.html"));
-          }
-          break;
-        }
-        default:
-          break;
-        }
-      }
-    }
+  *outDraggingIdx = draggingIdx;
+  *outResizingIdx = resizingIdx;
+}
 
-    if (e->isDragging) {
-      continue; // Skip hover effect if dragging
+// Updates a single element's hover/click/drag interaction state for this
+// frame: hover detection, on_click dispatch, and per-kind behavior
+// (rectangle/elbow highlight, button recording indicator, text editor and
+// entry-list panel input, sphere camera/rotation).
+static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
+                         int resizingIdx) {
+  VoiceRecApi *vapi = s->voiceApi;
+  Element *e = &s->elements[i];
+  bool isHovering = IsHoveringElement(s, e);
+  if (isHovering && !e->isDragging && !e->isResizing) {
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+      HandleElementClick(s, e);
     }
-    switch (s->elements[i].kind) {
-    case ELEM_RECTANGLE:
-    case ELEM_ELBOW:
-      if (isHovering) {
+  }
+
+  if (e->isDragging) {
+    return; // Skip hover effect if dragging
+  }
+  switch (s->elements[i].kind) {
+  case ELEM_RECTANGLE:
+  case ELEM_ELBOW:
+    if (isHovering) {
+      s->elements[i].color =
+          ColorBrightness(s->elements[i].originalColor, 0.2f);
+      clickOrHoverNotification(s, i, StringStatic("elbow element"));
+    } else {
+      s->elements[i].color = s->elements[i].originalColor;
+    }
+    break;
+  case ELEM_BUTTON: {
+    bool isRecording =
+        (vapi && vapi->IsRecording() && e->on_click == ACTION_VOICE_INPUT);
+    if (isHovering) {
+      if (isRecording) {
+        s->elements[i].color = (Color){255, 100, 100, 255};
+      } else {
         s->elements[i].color =
             ColorBrightness(s->elements[i].originalColor, 0.2f);
-        clickOrHoverNotification(s, i, StringStatic("elbow element"));
+      }
+      clickOrHoverNotification(s, i, StringStatic("button element"));
+    } else {
+      if (isRecording) {
+        s->elements[i].color = RED;
       } else {
         s->elements[i].color = s->elements[i].originalColor;
       }
-      break;
-    case ELEM_BUTTON: {
-      bool isRecording =
-          (vapi && vapi->IsRecording() && e->on_click == ACTION_VOICE_INPUT);
-      if (isHovering) {
-        if (isRecording) {
-          s->elements[i].color = (Color){255, 100, 100, 255};
-        } else {
-          s->elements[i].color =
-              ColorBrightness(s->elements[i].originalColor, 0.2f);
-        }
-        clickOrHoverNotification(s, i, StringStatic("button element"));
-      } else {
-        if (isRecording) {
-          s->elements[i].color = RED;
-        } else {
-          s->elements[i].color = s->elements[i].originalColor;
-        }
-      }
-    } break;
+    }
+  } break;
 
-    case ELEM_TEXT:
-      break;
-    case ELEM_TEXT_EDITOR:
-    case ELEM_ENTRY_LIST: {
-      float listWidth = 0.0f;
-      if (e->kind == ELEM_ENTRY_LIST) {
-        listWidth = e->listCollapsed ? 30.0f : 350.0f;
+  case ELEM_TEXT:
+    break;
+  case ELEM_TEXT_EDITOR:
+  case ELEM_ENTRY_LIST: {
+    float listWidth = 0.0f;
+    if (e->kind == ELEM_ENTRY_LIST) {
+      listWidth = e->listCollapsed ? 30.0f : 350.0f;
 
-        // Handle list selection panel interactions
-        Rectangle listRec =
-            (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
-        if (CheckCollisionPointRec(mPos, listRec)) {
-          // Mouse wheel scrolling for list
-          float wheelMove = GetMouseWheelMove();
-          if (wheelMove != 0.0f) {
-            EntryListItem items[32];
-            int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
-            float viewportHeight = *e->height - 45.0f;
-            e->listScrollY -= wheelMove * 30.0f;
-            e->listScrollY = ClampScrollOffset(e->listScrollY, count * 90.0f,
-                                               viewportHeight);
-          }
-
-          if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            Rectangle toggleBtn =
-                (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
-            if (CheckCollisionPointRec(mPos, toggleBtn)) {
-              e->listCollapsed = !e->listCollapsed;
-            } else if (!e->listCollapsed) {
-              Rectangle newEntryBtn =
-                  (Rectangle){e->position.x + 35.0f, e->position.y,
-                              listWidth - 50.0f, 30.0f};
-              if (CheckCollisionPointRec(mPos, newEntryBtn)) {
-                UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
-
-                char datename[32];
-                struct tm *to;
-                time_t t = time(NULL);
-                to = localtime(&t);
-                strftime(datename, sizeof(datename), "%Y-%m-%d", to);
-
-                char *sql = sqlite3_mprintf(
-                    "INSERT INTO entries (kind, title, content) VALUES "
-                    "('%s', '%s', '%q');",
-                    e->selectedKind.data, e->selectedKind.data, datename);
-                if (sql) {
-                  ExecSQL(s, StringStatic(sql),
-                          StringStatic("New entry created"));
-                  sqlite3_free(sql);
-                }
-                int newId = (int)sqlite3_last_insert_rowid(s->db);
-                e->selectedEntryId = newId;
-                String newText = GetEntryContentFromDB(s, newId);
-                LoadEntryIntoEditor(e, newText);
-                StringFree(&newText);
-              } else {
-                EntryListItem items[32];
-
-                e->kindList = GetAllKindsFromDB(s);
-                int count =
-                    GetEntriesByKind(s, e->selectedKind.data, items, 32);
-                float viewportHeight = *e->height - 45.0f;
-                float maxItemWidth = listWidth - 15.0f;
-                bool isScrollable = (count * 90.0f > viewportHeight);
-                float itemWidth = maxItemWidth;
-                if (isScrollable) {
-                  itemWidth = maxItemWidth - 10.0f;
-                }
-                float itemY = e->position.y + 45.0f - e->listScrollY;
-                Rectangle scrollableListRec =
-                    (Rectangle){e->position.x, e->position.y + 45.0f,
-                                listWidth - 5.0f, viewportHeight};
-                if (CheckCollisionPointRec(mPos, scrollableListRec)) {
-                  for (int j = 0; j < count; j++) {
-                    Rectangle itemRec = (Rectangle){e->position.x + 5.0f, itemY,
-                                                    itemWidth, 80.0f};
-                    if (CheckCollisionPointRec(mPos, itemRec)) {
-                      if (e->selectedEntryId != items[j].id) {
-                        UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
-                        e->selectedEntryId = items[j].id;
-                        String newText =
-                            GetEntryContentFromDB(s, e->selectedEntryId);
-                        LoadEntryIntoEditor(e, newText);
-                        StringFree(&newText);
-                      }
-                      break;
-                    }
-                    itemY += 90.0f;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      float editorX = e->position.x + listWidth;
-      float editorWidth = *e->width - listWidth;
-
-      float scrollbarX = editorX + editorWidth + 25;
-      float scrollbarY = e->position.y;
-      float scrollbarWidth = 24.0f;
-      float scrollbarHeight = *e->height;
-      Rectangle activeRec = (Rectangle){.x = editorX,
-                                        .y = e->position.y,
-                                        .width = editorWidth + 55,
-                                        .height = *e->height};
-      Rectangle totalActiveRec = activeRec;
-      if (e->kind == ELEM_ENTRY_LIST) {
-        totalActiveRec.x = e->position.x;
-        totalActiveRec.width = *e->width + 55;
-        totalActiveRec.y = e->position.y - 25.0f;
-        totalActiveRec.height = *e->height + 25.0f;
-      }
-
-      if (CheckCollisionPointRec(GetMousePosition(), totalActiveRec)) {
-        clickOrHoverNotification(s, i, StringStatic("text box element"));
-        if (!e->isFocused)
-          e->color = ColorBrightness(e->originalColor, 0.2f);
-        e->isFocused = true;
-
-        // Mouse wheel scrolling
+      // Handle list selection panel interactions
+      Rectangle listRec =
+          (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
+      if (CheckCollisionPointRec(mPos, listRec)) {
+        // Mouse wheel scrolling for list
         float wheelMove = GetMouseWheelMove();
         if (wheelMove != 0.0f) {
-          e->scrollY -=
-              wheelMove * 30.0f; // Scroll speed: 30 pixels per wheel tick
-          ClampScrollY(e);
+          EntryListItem items[32];
+          int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
+          float viewportHeight = *e->height - 45.0f;
+          e->listScrollY -= wheelMove * 30.0f;
+          e->listScrollY = ClampScrollOffset(e->listScrollY, count * 90.0f,
+                                             viewportHeight);
         }
 
-        // Click handling
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-          bool deleteClicked = false;
-          if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
-            float btnSize = 18.0f;
-            Rectangle deleteBtn =
-                (Rectangle){editorX + editorWidth + 10.0f - btnSize - 8.0f,
-                            e->position.y - btnSize - 4.0f, btnSize, btnSize};
-            if (CheckCollisionPointRec(mPos, deleteBtn)) {
-              DeleteEntryFromDB(s, e->selectedEntryId);
-              EntryListItem remItems[32];
-              int remCount = GetEntriesByKind(s, "personal_log", remItems, 32);
-              if (remCount > 0) {
-                e->selectedEntryId = remItems[0].id;
-              } else {
-                char datename[32];
-                struct tm *to;
-                time_t t = time(NULL);
-                to = localtime(&t);
-                strftime(datename, sizeof(datename), "%Y-%m-%d", to);
+          Rectangle toggleBtn =
+              (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
+          if (CheckCollisionPointRec(mPos, toggleBtn)) {
+            e->listCollapsed = !e->listCollapsed;
+          } else if (!e->listCollapsed) {
+            Rectangle newEntryBtn =
+                (Rectangle){e->position.x + 35.0f, e->position.y,
+                            listWidth - 50.0f, 30.0f};
+            if (CheckCollisionPointRec(mPos, newEntryBtn)) {
+              UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
 
-                char *sql = sqlite3_mprintf(
-                    "INSERT INTO entries (kind, title, content) VALUES "
-                    "('personal_log', 'Captain Log', '%q Captain log');",
-                    datename);
-                if (sql) {
-                  ExecSQL(s, StringStatic(sql),
-                          StringStatic("New entry created"));
-                  sqlite3_free(sql);
-                }
-                e->selectedEntryId = (int)sqlite3_last_insert_rowid(s->db);
+              char datename[32];
+              struct tm *to;
+              time_t t = time(NULL);
+              to = localtime(&t);
+              strftime(datename, sizeof(datename), "%Y-%m-%d", to);
+
+              char *sql = sqlite3_mprintf(
+                  "INSERT INTO entries (kind, title, content) VALUES "
+                  "('%s', '%s', '%q');",
+                  e->selectedKind.data, e->selectedKind.data, datename);
+              if (sql) {
+                ExecSQL(s, StringStatic(sql),
+                        StringStatic("New entry created"));
+                sqlite3_free(sql);
               }
-              String newText = GetEntryContentFromDB(s, e->selectedEntryId);
+              int newId = (int)sqlite3_last_insert_rowid(s->db);
+              e->selectedEntryId = newId;
+              String newText = GetEntryContentFromDB(s, newId);
               LoadEntryIntoEditor(e, newText);
               StringFree(&newText);
-              deleteClicked = true;
-            }
-          }
+            } else {
+              EntryListItem items[32];
 
-          if (!deleteClicked) {
-            Rectangle upButton = (Rectangle){scrollbarX, scrollbarY,
-                                             scrollbarWidth, scrollbarWidth};
-            Rectangle downButton = (Rectangle){
-                scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth,
-                scrollbarWidth, scrollbarWidth};
-            Rectangle track = (Rectangle){
-                scrollbarX, scrollbarY + scrollbarWidth + 5, scrollbarWidth,
-                scrollbarHeight - 2 * scrollbarWidth - 10};
-
-            if (CheckCollisionPointRec(mPos, upButton)) {
-              e->scrollY -= 30.0f;
-              ClampScrollY(e);
-            } else if (CheckCollisionPointRec(mPos, downButton)) {
-              e->scrollY += 30.0f;
-              ClampScrollY(e);
-            } else if (CheckCollisionPointRec(mPos, track)) {
-              float visibleRatio = *e->height / e->textHeight;
-              if (visibleRatio > 1.0f)
-                visibleRatio = 1.0f;
-              float handleHeight = visibleRatio * track.height;
-              if (handleHeight < 20.0f)
-                handleHeight = 20.0f;
-
-              float scrollRange = e->textHeight - *e->height;
-              float handleY = track.y;
-              if (scrollRange > 0.0f) {
-                handleY +=
-                    (e->scrollY / scrollRange) * (track.height - handleHeight);
+              e->kindList = GetAllKindsFromDB(s);
+              int count =
+                  GetEntriesByKind(s, e->selectedKind.data, items, 32);
+              float viewportHeight = *e->height - 45.0f;
+              float maxItemWidth = listWidth - 15.0f;
+              bool isScrollable = (count * 90.0f > viewportHeight);
+              float itemWidth = maxItemWidth;
+              if (isScrollable) {
+                itemWidth = maxItemWidth - 10.0f;
               }
-              Rectangle handle = (Rectangle){scrollbarX, handleY,
-                                             scrollbarWidth, handleHeight};
-
-              if (CheckCollisionPointRec(mPos, handle)) {
-                e->draggingScrollbar = true;
-                e->dragStartY = mPos.y;
-                e->dragStartScrollY = e->scrollY;
-              } else {
-                // Jump scroll handle to clicked position
-                float clickY = mPos.y;
-                float relativeY = clickY - track.y - handleHeight / 2.0f;
-                float pct = relativeY / (track.height - handleHeight);
-                if (pct < 0.0f)
-                  pct = 0.0f;
-                if (pct > 1.0f)
-                  pct = 1.0f;
-                if (scrollRange > 0.0f) {
-                  e->scrollY = pct * scrollRange;
-                } else {
-                  e->scrollY = 0.0f;
+              float itemY = e->position.y + 45.0f - e->listScrollY;
+              Rectangle scrollableListRec =
+                  (Rectangle){e->position.x, e->position.y + 45.0f,
+                              listWidth - 5.0f, viewportHeight};
+              if (CheckCollisionPointRec(mPos, scrollableListRec)) {
+                for (int j = 0; j < count; j++) {
+                  Rectangle itemRec = (Rectangle){e->position.x + 5.0f, itemY,
+                                                  itemWidth, 80.0f};
+                  if (CheckCollisionPointRec(mPos, itemRec)) {
+                    if (e->selectedEntryId != items[j].id) {
+                      UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+                      e->selectedEntryId = items[j].id;
+                      String newText =
+                          GetEntryContentFromDB(s, e->selectedEntryId);
+                      LoadEntryIntoEditor(e, newText);
+                      StringFree(&newText);
+                    }
+                    break;
+                  }
+                  itemY += 90.0f;
                 }
-
-                e->draggingScrollbar = true;
-                e->dragStartY = clickY;
-                e->dragStartScrollY = e->scrollY;
               }
             }
           }
+        }
+      }
+    }
+
+    float editorX = e->position.x + listWidth;
+    float editorWidth = *e->width - listWidth;
+
+    float scrollbarX = editorX + editorWidth + 25;
+    float scrollbarY = e->position.y;
+    float scrollbarWidth = 24.0f;
+    float scrollbarHeight = *e->height;
+    Rectangle activeRec = (Rectangle){.x = editorX,
+                                      .y = e->position.y,
+                                      .width = editorWidth + 55,
+                                      .height = *e->height};
+    Rectangle totalActiveRec = activeRec;
+    if (e->kind == ELEM_ENTRY_LIST) {
+      totalActiveRec.x = e->position.x;
+      totalActiveRec.width = *e->width + 55;
+      totalActiveRec.y = e->position.y - 25.0f;
+      totalActiveRec.height = *e->height + 25.0f;
+    }
+
+    if (CheckCollisionPointRec(GetMousePosition(), totalActiveRec)) {
+      clickOrHoverNotification(s, i, StringStatic("text box element"));
+      if (!e->isFocused)
+        e->color = ColorBrightness(e->originalColor, 0.2f);
+      e->isFocused = true;
+
+      // Mouse wheel scrolling
+      float wheelMove = GetMouseWheelMove();
+      if (wheelMove != 0.0f) {
+        e->scrollY -=
+            wheelMove * 30.0f; // Scroll speed: 30 pixels per wheel tick
+        ClampScrollY(e);
+      }
+
+      // Click handling
+      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        bool deleteClicked = false;
+        if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
+          float btnSize = 18.0f;
+          Rectangle deleteBtn =
+              (Rectangle){editorX + editorWidth + 10.0f - btnSize - 8.0f,
+                          e->position.y - btnSize - 4.0f, btnSize, btnSize};
+          if (CheckCollisionPointRec(mPos, deleteBtn)) {
+            DeleteEntryFromDB(s, e->selectedEntryId);
+            EntryListItem remItems[32];
+            int remCount = GetEntriesByKind(s, "personal_log", remItems, 32);
+            if (remCount > 0) {
+              e->selectedEntryId = remItems[0].id;
+            } else {
+              char datename[32];
+              struct tm *to;
+              time_t t = time(NULL);
+              to = localtime(&t);
+              strftime(datename, sizeof(datename), "%Y-%m-%d", to);
+
+              char *sql = sqlite3_mprintf(
+                  "INSERT INTO entries (kind, title, content) VALUES "
+                  "('personal_log', 'Captain Log', '%q Captain log');",
+                  datename);
+              if (sql) {
+                ExecSQL(s, StringStatic(sql),
+                        StringStatic("New entry created"));
+                sqlite3_free(sql);
+              }
+              e->selectedEntryId = (int)sqlite3_last_insert_rowid(s->db);
+            }
+            String newText = GetEntryContentFromDB(s, e->selectedEntryId);
+            LoadEntryIntoEditor(e, newText);
+            StringFree(&newText);
+            deleteClicked = true;
+          }
+        }
+
+        if (!deleteClicked) {
+          Rectangle upButton = (Rectangle){scrollbarX, scrollbarY,
+                                           scrollbarWidth, scrollbarWidth};
+          Rectangle downButton = (Rectangle){
+              scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth,
+              scrollbarWidth, scrollbarWidth};
+          Rectangle track = (Rectangle){
+              scrollbarX, scrollbarY + scrollbarWidth + 5, scrollbarWidth,
+              scrollbarHeight - 2 * scrollbarWidth - 10};
+
+          if (CheckCollisionPointRec(mPos, upButton)) {
+            e->scrollY -= 30.0f;
+            ClampScrollY(e);
+          } else if (CheckCollisionPointRec(mPos, downButton)) {
+            e->scrollY += 30.0f;
+            ClampScrollY(e);
+          } else if (CheckCollisionPointRec(mPos, track)) {
+            float visibleRatio = *e->height / e->textHeight;
+            if (visibleRatio > 1.0f)
+              visibleRatio = 1.0f;
+            float handleHeight = visibleRatio * track.height;
+            if (handleHeight < 20.0f)
+              handleHeight = 20.0f;
+
+            float scrollRange = e->textHeight - *e->height;
+            float handleY = track.y;
+            if (scrollRange > 0.0f) {
+              handleY +=
+                  (e->scrollY / scrollRange) * (track.height - handleHeight);
+            }
+            Rectangle handle = (Rectangle){scrollbarX, handleY,
+                                           scrollbarWidth, handleHeight};
+
+            if (CheckCollisionPointRec(mPos, handle)) {
+              e->draggingScrollbar = true;
+              e->dragStartY = mPos.y;
+              e->dragStartScrollY = e->scrollY;
+            } else {
+              // Jump scroll handle to clicked position
+              float clickY = mPos.y;
+              float relativeY = clickY - track.y - handleHeight / 2.0f;
+              float pct = relativeY / (track.height - handleHeight);
+              if (pct < 0.0f)
+                pct = 0.0f;
+              if (pct > 1.0f)
+                pct = 1.0f;
+              if (scrollRange > 0.0f) {
+                e->scrollY = pct * scrollRange;
+              } else {
+                e->scrollY = 0.0f;
+              }
+
+              e->draggingScrollbar = true;
+              e->dragStartY = clickY;
+              e->dragStartScrollY = e->scrollY;
+            }
+          }
+        }
+      }
+    } else {
+      if (!e->draggingScrollbar) {
+        e->isFocused = false;
+        e->color = e->originalColor;
+      }
+    }
+
+    // Active dragging logic (independent of mouse hovering over activeRec)
+    if (e->draggingScrollbar) {
+      if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        float trackHeight = *e->height - 2 * scrollbarWidth - 10;
+        float visibleRatio = *e->height / e->textHeight;
+        if (visibleRatio > 1.0f)
+          visibleRatio = 1.0f;
+        float handleHeight = visibleRatio * trackHeight;
+        if (handleHeight < 20.0f)
+          handleHeight = 20.0f;
+
+        float dragRange = trackHeight - handleHeight;
+        if (dragRange > 0.0f) {
+          float deltaY = GetMousePosition().y - e->dragStartY;
+          float scrollRange = e->textHeight - *e->height;
+          float deltaScrollY = (deltaY / dragRange) * scrollRange;
+          e->scrollY = e->dragStartScrollY + deltaScrollY;
+
+          // Clamp
+          ClampScrollY(e);
         }
       } else {
-        if (!e->draggingScrollbar) {
-          e->isFocused = false;
-          e->color = e->originalColor;
-        }
+        e->draggingScrollbar = false;
+      }
+    }
+
+    // Keyboard input & editing logic
+    if (e->isFocused) {
+      e->textSelectedFramesCounter++;
+      Rectangle scrollbarRec = (Rectangle){scrollbarX, scrollbarY,
+                                           scrollbarWidth, scrollbarHeight};
+
+      if (CheckCollisionPointRec(mPos, scrollbarRec)) {
+        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+      } else if (draggingIdx == -1 && resizingIdx == -1) {
+        SetMouseCursor(MOUSE_CURSOR_IBEAM);
       }
 
-      // Active dragging logic (independent of mouse hovering over activeRec)
-      if (e->draggingScrollbar) {
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-          float trackHeight = *e->height - 2 * scrollbarWidth - 10;
-          float visibleRatio = *e->height / e->textHeight;
-          if (visibleRatio > 1.0f)
-            visibleRatio = 1.0f;
-          float handleHeight = visibleRatio * trackHeight;
-          if (handleHeight < 20.0f)
-            handleHeight = 20.0f;
-
-          float dragRange = trackHeight - handleHeight;
-          if (dragRange > 0.0f) {
-            float deltaY = GetMousePosition().y - e->dragStartY;
-            float scrollRange = e->textHeight - *e->height;
-            float deltaScrollY = (deltaY / dragRange) * scrollRange;
-            e->scrollY = e->dragStartScrollY + deltaScrollY;
-
-            // Clamp
-            ClampScrollY(e);
-          }
-        } else {
-          e->draggingScrollbar = false;
-        }
+      bool isMouseOverList = false;
+      if (e->kind == ELEM_ENTRY_LIST) {
+        Rectangle listRec =
+            (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
+        isMouseOverList = CheckCollisionPointRec(mPos, listRec);
       }
 
-      // Keyboard input & editing logic
-      if (e->isFocused) {
-        e->textSelectedFramesCounter++;
-        Rectangle scrollbarRec = (Rectangle){scrollbarX, scrollbarY,
-                                             scrollbarWidth, scrollbarHeight};
+      bool shiftDown =
+          IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
 
-        if (CheckCollisionPointRec(mPos, scrollbarRec)) {
-          SetMouseCursor(MOUSE_CURSOR_DEFAULT);
-        } else if (draggingIdx == -1 && resizingIdx == -1) {
-          SetMouseCursor(MOUSE_CURSOR_IBEAM);
+      // Get char pressed (unicode character) on the queue
+      int key = GetCharPressed();
+      bool textChanged = false;
+
+      if (isMouseOverList) {
+        while (key > 0) {
+          key = GetCharPressed();
         }
-
-        bool isMouseOverList = false;
-        if (e->kind == ELEM_ENTRY_LIST) {
-          Rectangle listRec =
-              (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
-          isMouseOverList = CheckCollisionPointRec(mPos, listRec);
-        }
-
-        bool shiftDown =
-            IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-
-        // Get char pressed (unicode character) on the queue
-        int key = GetCharPressed();
-        bool textChanged = false;
-
-        if (isMouseOverList) {
-          while (key > 0) {
-            key = GetCharPressed();
-          }
-        } else {
-          // Check if more characters have been pressed on the same frame
-          while (key > 0) {
-            // NOTE: Only allow keys in range [32..125]
-            if ((key >= 32) && (key <= 125) && (e->textLen < MAX_INPUT_CHARS)) {
-              if (DeleteSelection(e)) {
-                textChanged = true;
-              }
-              GapInsertChar(&s->doc_arena, e, (char)key);
-              textChanged = true;
-              e->snapToCursor = 2;
-            }
-
-            key = GetCharPressed(); // Check next character in the queue
-          }
-        }
-
-        if (!isMouseOverList) {
-          if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) &&
-              IsKeyPressed(KEY_C)) {
-            if (e->selectTextLength <= 0) {
-              SetClipboardText(e->text.data ? e->text.data : "");
-              updateNotification(s,
-                                 StringStatic("All text copied to clipboard"));
-            } else {
-              int selStart = e->selectTextLength > 0
-                                 ? e->selectTextStart
-                                 : e->selectTextStart + e->selectTextLength;
-              int selLength = e->selectTextLength > 0 ? e->selectTextLength
-                                                      : -e->selectTextLength;
-              char *selectedText =
-                  (char *)arena_alloc(&s->scratch_arena, selLength + 1);
-              memcpy(selectedText, e->text.data + selStart, selLength);
-              selectedText[selLength] = '\0';
-              SetClipboardText(selectedText);
-              updateNotification(
-                  s, StringStatic("Selected text copied to clipboard"));
-            }
-          }
-          if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) &&
-              IsKeyPressed(KEY_V)) {
-            const char *clipboardText = GetClipboardText();
-            if (clipboardText) {
-              if (DeleteSelection(e)) {
-                textChanged = true;
-              }
-              int clipboardTextLen = strlen(clipboardText);
-              for (int j = 0; j < clipboardTextLen; j++) {
-                GapInsertChar(&s->doc_arena, e, clipboardText[j]);
-              }
-              textChanged = true;
-              e->snapToCursor = 2;
-              updateNotification(s, StringStatic("Clipboard text pasted"));
-            }
-          }
-
-          if (IsKeyPressed(KEY_ENTER)) {
+      } else {
+        // Check if more characters have been pressed on the same frame
+        while (key > 0) {
+          // NOTE: Only allow keys in range [32..125]
+          if ((key >= 32) && (key <= 125) && (e->textLen < MAX_INPUT_CHARS)) {
             if (DeleteSelection(e)) {
               textChanged = true;
             }
-            GapInsertChar(&s->doc_arena, e, '\n');
+            GapInsertChar(&s->doc_arena, e, (char)key);
             textChanged = true;
             e->snapToCursor = 2;
           }
 
-          // Cursor movements
-          if (KeyRepeatFired(&e->moveLeftRepeat, KEY_LEFT, 0.4f,
-                             e->textSelectedFramesCounter, 2)) {
-            StartTextSelection(e, shiftDown);
-            bool isWordJump =
-                IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
-                IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-            int target = isWordJump
-                             ? FindWordBoundary(e->text, e->gapStart, -1)
-                             : e->gapStart - 1;
-            MoveGap(e, target);
-            EndTextSelection(e, shiftDown);
-          }
-
-          if (KeyRepeatFired(&e->moveRightRepeat, KEY_RIGHT, 0.4f,
-                             e->textSelectedFramesCounter, 2)) {
-            StartTextSelection(e, shiftDown);
-            bool isWordJump =
-                IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
-                IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-            int target = isWordJump
-                             ? FindWordBoundary(e->text, e->gapStart, 1)
-                             : e->gapStart + 1;
-            MoveGap(e, target);
-            EndTextSelection(e, shiftDown);
-          }
-        } else {
-          e->moveLeftRepeat.isHeld = false;
-          e->moveRightRepeat.isHeld = false;
+          key = GetCharPressed(); // Check next character in the queue
         }
-        bool triggerMoveUp = false;
-        if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
-          if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, 0.4f,
-                             e->textSelectedFramesCounter, 10)) {
-            NavigateEntryList(s, e, -1);
-          }
-        } else {
-          if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, 0.4f,
-                             e->textSelectedFramesCounter, 2)) {
-            triggerMoveUp = true;
-          }
-        }
+      }
 
-        bool triggerMoveDown = false;
-        if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
-          if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN, 0.4f,
-                             e->textSelectedFramesCounter, 10)) {
-            NavigateEntryList(s, e, 1);
-          }
-        } else {
-          if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN, 0.4f,
-                             e->textSelectedFramesCounter, 2)) {
-            triggerMoveDown = true;
-          }
-        }
-
-        if (triggerMoveUp || triggerMoveDown) {
-          int lineStarts[1024];
-          int numLines = GetLines(e->text, lineStarts, 1024);
-          int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
-          int col = e->gapStart - lineStarts[currLine];
-
-          StartTextSelection(e, shiftDown);
-
-          if (triggerMoveUp) {
-            if (currLine > 0) {
-              int targetLineLen =
-                  lineStarts[currLine] - 1 - lineStarts[currLine - 1];
-              int targetCol = col < targetLineLen ? col : targetLineLen;
-              MoveGap(e, lineStarts[currLine - 1] + targetCol);
-            }
-          } else if (triggerMoveDown) {
-            if (currLine < numLines - 1) {
-              int targetLineLen = 0;
-              if (currLine + 1 < numLines - 1) {
-                targetLineLen =
-                    lineStarts[currLine + 2] - 1 - lineStarts[currLine + 1];
-              } else {
-                targetLineLen = e->textLen - lineStarts[currLine + 1];
-              }
-              int targetCol = col < targetLineLen ? col : targetLineLen;
-              MoveGap(e, lineStarts[currLine + 1] + targetCol);
-            }
-          }
-
-          EndTextSelection(e, shiftDown);
-        }
-        if (IsKeyPressed(KEY_HOME)) {
-          StartTextSelection(e, shiftDown);
-          int lineStarts[1024];
-          int numLines = GetLines(e->text, lineStarts, 1024);
-          int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
-          MoveGap(e, lineStarts[currLine]);
-          EndTextSelection(e, shiftDown);
-        }
-        if (IsKeyPressed(KEY_END)) {
-          StartTextSelection(e, shiftDown);
-          int lineStarts[1024];
-          int numLines = GetLines(e->text, lineStarts, 1024);
-          int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
-          int targetIndex = (currLine < numLines - 1)
-                                ? lineStarts[currLine + 1] - 1
-                                : e->textLen;
-          MoveGap(e, targetIndex);
-          EndTextSelection(e, shiftDown);
-        }
-
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
-            !CheckCollisionPointRec(mPos, scrollbarRec)) {
-          e->selectingText = true;
-          int clickedIndex = GetCharIndexAtMouse(
-              s, s->font, e->text,
-              (Vector2){editorX + 5, e->position.y + 5 - e->scrollY},
-              e->textSize, 2.0, mPos, editorWidth);
-          if (shiftDown) {
-            if (e->selectTextStart == -1) {
-              e->selectTextStart = e->gapStart;
-            }
+      if (!isMouseOverList) {
+        if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) &&
+            IsKeyPressed(KEY_C)) {
+          if (e->selectTextLength <= 0) {
+            SetClipboardText(e->text.data ? e->text.data : "");
+            updateNotification(s,
+                               StringStatic("All text copied to clipboard"));
           } else {
-            e->selectTextStart = clickedIndex;
-          }
-          e->selectTextEnd = clickedIndex;
-          e->selectTextLength = e->selectTextEnd - e->selectTextStart;
-          MoveGap(e, clickedIndex);
-          e->snapToCursor = 2;
-        }
-
-        if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_A)) {
-          e->selectingText = true;
-          e->selectTextStart = 0;
-          e->selectTextEnd = e->textLen;
-          e->selectTextLength = e->textLen;
-        }
-
-        if (e->selectingText) {
-          int textEnd = GetCharIndexAtMouse(
-              s, s->font, e->text,
-              (Vector2){editorX + 5, e->position.y + 5 - e->scrollY},
-              e->textSize, 2.0, mPos, editorWidth);
-          e->selectTextEnd = textEnd;
-          e->selectTextLength = e->selectTextEnd - e->selectTextStart;
-
-          if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-            e->selectingText = false;
+            int selStart = e->selectTextLength > 0
+                               ? e->selectTextStart
+                               : e->selectTextStart + e->selectTextLength;
+            int selLength = e->selectTextLength > 0 ? e->selectTextLength
+                                                    : -e->selectTextLength;
+            char *selectedText =
+                (char *)arena_alloc(&s->scratch_arena, selLength + 1);
+            memcpy(selectedText, e->text.data + selStart, selLength);
+            selectedText[selLength] = '\0';
+            SetClipboardText(selectedText);
+            updateNotification(
+                s, StringStatic("Selected text copied to clipboard"));
           }
         }
+        if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) &&
+            IsKeyPressed(KEY_V)) {
+          const char *clipboardText = GetClipboardText();
+          if (clipboardText) {
+            if (DeleteSelection(e)) {
+              textChanged = true;
+            }
+            int clipboardTextLen = strlen(clipboardText);
+            for (int j = 0; j < clipboardTextLen; j++) {
+              GapInsertChar(&s->doc_arena, e, clipboardText[j]);
+            }
+            textChanged = true;
+            e->snapToCursor = 2;
+            updateNotification(s, StringStatic("Clipboard text pasted"));
+          }
+        }
 
-        if (e->selectTextStart >= 0 && e->selectTextEnd != e->selectTextStart &&
-            (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))) {
-          DeleteSelection(e);
+        if (IsKeyPressed(KEY_ENTER)) {
+          if (DeleteSelection(e)) {
+            textChanged = true;
+          }
+          GapInsertChar(&s->doc_arena, e, '\n');
           textChanged = true;
           e->snapToCursor = 2;
-        } else if (IsKeyDown(KEY_BACKSPACE)) {
-          if (KeyRepeatFired(&e->deleteRepeat, KEY_BACKSPACE, 0.5f,
-                             e->textSelectedFramesCounter, 10)) {
-            GapDeleteBack(e);
-            textChanged = true;
-            e->snapToCursor = 2;
-          }
-        } else if (IsKeyDown(KEY_DELETE)) {
-          if (KeyRepeatFired(&e->deleteRepeat, KEY_DELETE, 0.5f,
-                             e->textSelectedFramesCounter, 10)) {
-            GapDeleteForward(e);
-            textChanged = true;
-            e->snapToCursor = 2;
-          }
         }
 
-        if (IsKeyUp(KEY_BACKSPACE) && IsKeyUp(KEY_DELETE)) {
-          e->deleteRepeat.isHeld = false;
-          e->deleteRepeat.startTime = 0;
+        // Cursor movements
+        if (KeyRepeatFired(&e->moveLeftRepeat, KEY_LEFT, 0.4f,
+                           e->textSelectedFramesCounter, 2)) {
+          StartTextSelection(e, shiftDown);
+          bool isWordJump =
+              IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
+              IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
+          int target = isWordJump
+                           ? FindWordBoundary(e->text, e->gapStart, -1)
+                           : e->gapStart - 1;
+          MoveGap(e, target);
+          EndTextSelection(e, shiftDown);
         }
 
-        if (textChanged) {
-          ReconstructText(&s->doc_arena, e);
-          if (e->kind == ELEM_ENTRY_LIST) {
-            UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
-          } else {
-            UpdateLogInDB(s, e->text);
-          }
+        if (KeyRepeatFired(&e->moveRightRepeat, KEY_RIGHT, 0.4f,
+                           e->textSelectedFramesCounter, 2)) {
+          StartTextSelection(e, shiftDown);
+          bool isWordJump =
+              IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
+              IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
+          int target = isWordJump
+                           ? FindWordBoundary(e->text, e->gapStart, 1)
+                           : e->gapStart + 1;
+          MoveGap(e, target);
+          EndTextSelection(e, shiftDown);
         }
-
-        // Auto-scroll to cursor
-        if (e->snapToCursor > 0) {
-          e->snapToCursor--;
-          float lineHeight = (s->font.baseSize + (float)s->font.baseSize / 2) *
-                             (e->textSize / (float)s->font.baseSize);
-          if (e->cursorY > e->scrollY + *e->height - lineHeight) {
-            e->scrollY = e->cursorY - *e->height + lineHeight;
-          } else if (e->cursorY < e->scrollY) {
-            e->scrollY = e->cursorY;
-          }
-        }
-
-        // Clamp scrollY to valid range
-        ClampScrollY(e);
       } else {
-        e->textSelectedFramesCounter = 0;
+        e->moveLeftRepeat.isHeld = false;
+        e->moveRightRepeat.isHeld = false;
       }
-      break;
-    }
-    case ELEM_SPHERE: {
-      if (isHovering) {
-        e->color = ColorBrightness(GREEN, 0.8f);
-        clickOrHoverNotification(s, i, StringStatic("sphere element"));
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-          UpdateCamera(&e->camera, CAMERA_THIRD_PERSON);
+      bool triggerMoveUp = false;
+      if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
+        if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, 0.4f,
+                           e->textSelectedFramesCounter, 10)) {
+          NavigateEntryList(s, e, -1);
+        }
+      } else {
+        if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, 0.4f,
+                           e->textSelectedFramesCounter, 2)) {
+          triggerMoveUp = true;
+        }
+      }
+
+      bool triggerMoveDown = false;
+      if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
+        if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN, 0.4f,
+                           e->textSelectedFramesCounter, 10)) {
+          NavigateEntryList(s, e, 1);
+        }
+      } else {
+        if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN, 0.4f,
+                           e->textSelectedFramesCounter, 2)) {
+          triggerMoveDown = true;
+        }
+      }
+
+      if (triggerMoveUp || triggerMoveDown) {
+        int lineStarts[1024];
+        int numLines = GetLines(e->text, lineStarts, 1024);
+        int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
+        int col = e->gapStart - lineStarts[currLine];
+
+        StartTextSelection(e, shiftDown);
+
+        if (triggerMoveUp) {
+          if (currLine > 0) {
+            int targetLineLen =
+                lineStarts[currLine] - 1 - lineStarts[currLine - 1];
+            int targetCol = col < targetLineLen ? col : targetLineLen;
+            MoveGap(e, lineStarts[currLine - 1] + targetCol);
+          }
+        } else if (triggerMoveDown) {
+          if (currLine < numLines - 1) {
+            int targetLineLen = 0;
+            if (currLine + 1 < numLines - 1) {
+              targetLineLen =
+                  lineStarts[currLine + 2] - 1 - lineStarts[currLine + 1];
+            } else {
+              targetLineLen = e->textLen - lineStarts[currLine + 1];
+            }
+            int targetCol = col < targetLineLen ? col : targetLineLen;
+            MoveGap(e, lineStarts[currLine + 1] + targetCol);
+          }
+        }
+
+        EndTextSelection(e, shiftDown);
+      }
+      if (IsKeyPressed(KEY_HOME)) {
+        StartTextSelection(e, shiftDown);
+        int lineStarts[1024];
+        int numLines = GetLines(e->text, lineStarts, 1024);
+        int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
+        MoveGap(e, lineStarts[currLine]);
+        EndTextSelection(e, shiftDown);
+      }
+      if (IsKeyPressed(KEY_END)) {
+        StartTextSelection(e, shiftDown);
+        int lineStarts[1024];
+        int numLines = GetLines(e->text, lineStarts, 1024);
+        int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
+        int targetIndex = (currLine < numLines - 1)
+                              ? lineStarts[currLine + 1] - 1
+                              : e->textLen;
+        MoveGap(e, targetIndex);
+        EndTextSelection(e, shiftDown);
+      }
+
+      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+          !CheckCollisionPointRec(mPos, scrollbarRec)) {
+        e->selectingText = true;
+        int clickedIndex = GetCharIndexAtMouse(
+            s, s->font, e->text,
+            (Vector2){editorX + 5, e->position.y + 5 - e->scrollY},
+            e->textSize, 2.0, mPos, editorWidth);
+        if (shiftDown) {
+          if (e->selectTextStart == -1) {
+            e->selectTextStart = e->gapStart;
+          }
         } else {
-          e->rotation += 0.05f;
+          e->selectTextStart = clickedIndex;
         }
-      } else {
-        e->color = e->originalColor;
-        e->rotation += 0.1f;
+        e->selectTextEnd = clickedIndex;
+        e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+        MoveGap(e, clickedIndex);
+        e->snapToCursor = 2;
       }
-      e->rotation = fmodf(e->rotation, 360.0f);
-      break;
+
+      if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_A)) {
+        e->selectingText = true;
+        e->selectTextStart = 0;
+        e->selectTextEnd = e->textLen;
+        e->selectTextLength = e->textLen;
+      }
+
+      if (e->selectingText) {
+        int textEnd = GetCharIndexAtMouse(
+            s, s->font, e->text,
+            (Vector2){editorX + 5, e->position.y + 5 - e->scrollY},
+            e->textSize, 2.0, mPos, editorWidth);
+        e->selectTextEnd = textEnd;
+        e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+          e->selectingText = false;
+        }
+      }
+
+      if (e->selectTextStart >= 0 && e->selectTextEnd != e->selectTextStart &&
+          (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))) {
+        DeleteSelection(e);
+        textChanged = true;
+        e->snapToCursor = 2;
+      } else if (IsKeyDown(KEY_BACKSPACE)) {
+        if (KeyRepeatFired(&e->deleteRepeat, KEY_BACKSPACE, 0.5f,
+                           e->textSelectedFramesCounter, 10)) {
+          GapDeleteBack(e);
+          textChanged = true;
+          e->snapToCursor = 2;
+        }
+      } else if (IsKeyDown(KEY_DELETE)) {
+        if (KeyRepeatFired(&e->deleteRepeat, KEY_DELETE, 0.5f,
+                           e->textSelectedFramesCounter, 10)) {
+          GapDeleteForward(e);
+          textChanged = true;
+          e->snapToCursor = 2;
+        }
+      }
+
+      if (IsKeyUp(KEY_BACKSPACE) && IsKeyUp(KEY_DELETE)) {
+        e->deleteRepeat.isHeld = false;
+        e->deleteRepeat.startTime = 0;
+      }
+
+      if (textChanged) {
+        ReconstructText(&s->doc_arena, e);
+        if (e->kind == ELEM_ENTRY_LIST) {
+          UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+        } else {
+          UpdateLogInDB(s, e->text);
+        }
+      }
+
+      // Auto-scroll to cursor
+      if (e->snapToCursor > 0) {
+        e->snapToCursor--;
+        float lineHeight = (s->font.baseSize + (float)s->font.baseSize / 2) *
+                           (e->textSize / (float)s->font.baseSize);
+        if (e->cursorY > e->scrollY + *e->height - lineHeight) {
+          e->scrollY = e->cursorY - *e->height + lineHeight;
+        } else if (e->cursorY < e->scrollY) {
+          e->scrollY = e->cursorY;
+        }
+      }
+
+      // Clamp scrollY to valid range
+      ClampScrollY(e);
+    } else {
+      e->textSelectedFramesCounter = 0;
     }
-    case ELEM_NOTHING:
-    case ELEM_TOTAL_KINDS:
-      break;
+    break;
+  }
+  case ELEM_SPHERE: {
+    if (isHovering) {
+      e->color = ColorBrightness(GREEN, 0.8f);
+      clickOrHoverNotification(s, i, StringStatic("sphere element"));
+      if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        UpdateCamera(&e->camera, CAMERA_THIRD_PERSON);
+      } else {
+        e->rotation += 0.05f;
+      }
+    } else {
+      e->color = e->originalColor;
+      e->rotation += 0.1f;
     }
+    e->rotation = fmodf(e->rotation, 360.0f);
+    break;
+  }
+  case ELEM_NOTHING:
+  case ELEM_TOTAL_KINDS:
+    break;
+  }
+}
+
+void Update(State *s) {
+  UpdateVoiceInput(s);
+
+  Vector2 mPos = GetMousePosition();
+  Vector2 mDelta = GetMouseDelta();
+  SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+
+  int draggingIdx = -1;
+  int resizingIdx = -1;
+  UpdateDragAndResize(s, mPos, mDelta, &draggingIdx, &resizingIdx);
+
+  for (int i = 0; i < s->numElements; i++) {
+    UpdateElement(s, i, mPos, draggingIdx, resizingIdx);
   }
 }
 
