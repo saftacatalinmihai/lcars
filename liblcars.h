@@ -193,9 +193,6 @@ typedef struct EntryListItem {
 // Internal Helper Declarations
 // -----------------------------------------------------------------------------
 static void ToggleVoiceRecording(State *s);
-#ifndef HYPERMEDIA
-static void ReLayout(State *s);
-#endif
 
 static inline int sqlite_callback(void *state, int argc, char **argv,
                                   char **azColName);
@@ -222,10 +219,6 @@ static void ClampScrollY(Element *e);
 static void NavigateEntryList(State *s, Element *e, int direction);
 static int GetLines(String text, int *lineStarts, int maxLines);
 static int GetLineForIndex(int index, const int *lineStarts, int numLines);
-#ifndef HYPERMEDIA
-static void AddBarSegment(State *s, int *x_cursor, int y, float *width,
-                          float *height, Color color, int gap);
-#endif
 static void clickOrHoverNotification(State *s, int i, String elem_pretty_name);
 static Rectangle GetElementBoundingBox(State *s, Element *e);
 static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
@@ -417,21 +410,6 @@ static void ToggleVoiceRecording(State *s) {
   }
 }
 
-#ifndef HYPERMEDIA
-// Shared layout static variables
-static float w600 = 600;
-static float h400 = 400;
-static float w300 = 300;
-static float h300 = 300;
-
-static float w[4];
-static float h100;
-static float h200_60_250[3];
-static float halfBarHeight;
-static float buttonHeight;
-static float w210;
-#endif
-
 #include "lcars_db.h"
 #include "lcars_gap_buffer.h"
 #include "lcars_text.h"
@@ -491,9 +469,6 @@ static void NavigateEntryList(State *s, Element *e, int direction) {
 void Init(State *s, bool firstInit) {
   double t_init_start = GetTimeSeconds();
 
-#ifndef HYPERMEDIA
-  double t_layout_start = GetTimeSeconds();
-#endif
   s->debug = false;
   s->is_editing = false;
   s->controllsX = 600;
@@ -510,9 +485,6 @@ void Init(State *s, bool firstInit) {
 
   s->notification = StringInit(&s->doc_arena, "");
 
-#ifndef HYPERMEDIA
-  double t_db_start = GetTimeSeconds();
-#endif
   if (firstInit) {
     sqlite3 *db = NULL;
     int rc = sqlite3_open("lcars.db", &db);
@@ -525,64 +497,15 @@ void Init(State *s, bool firstInit) {
   }
 
   InitDB(s, firstInit);
-#ifndef HYPERMEDIA
-  double t_db_end = GetTimeSeconds();
-#endif
 
-#ifdef HYPERMEDIA
   printf("Loading hypermedia\n");
   LoadHypermediaDocument(s, StringStatic("file://main.html"));
-#else
-  ReLayout(s);
-#endif
-#ifndef HYPERMEDIA
-  double t_layout_end = GetTimeSeconds();
-#endif
 
-#ifdef HYPERMEDIA
   s->font = GetFontDefault();
   GuiLoadStyle("resources/style_cyber.rgs");
-#endif
 
   double t_init_end = GetTimeSeconds();
 
-#ifndef HYPERMEDIA
-  printf(
-      "\n=================== STARTUP PERFORMANCE TIMING ===================\n");
-  if (firstInit) {
-    printf("1. Resource Download:     %8.2f ms\n",
-           s->time_resource_download * 1000.0);
-    printf("2. Voice Rec Init (Lazy):  %8.2f ms\n",
-           s->time_voice_init * 1000.0);
-    printf("3. Window Initialization:  %8.2f ms\n",
-           s->time_window_init * 1000.0);
-  }
-  printf("4. Basic Layout Setup:     %8.2f ms\n",
-         (t_layout_end - t_layout_start) * 1000.0);
-  printf("5. DB Open & Init:         %8.2f ms\n",
-         (t_db_end - t_db_start) * 1000.0);
-  printf("6. Text Editor Setup:      %8.2f ms\n",
-         (t_editor_end - t_editor_start) * 1000.0);
-  printf("7. Font & Image Loading:   %8.2f ms\n",
-         (t_media_end - t_media_start) * 1000.0);
-  printf("8. 3D Model Generation:    %8.2f ms\n",
-         (t_model_end - t_model_start) * 1000.0);
-  printf("9. GUI Style Loading:      %8.2f ms\n",
-         (t_style_end - t_style_start) * 1000.0);
-  printf("10. RenderTexture Setup:   %8.2f ms\n",
-         (t_render_texture_end - t_render_texture_start) * 1000.0);
-  printf("-----------------------------------------------------------------\n");
-  double total_init_time = (t_init_end - t_init_start);
-  printf("Total Init() Time:         %8.2f ms\n", total_init_time * 1000.0);
-  if (firstInit) {
-    double total_startup_time = s->time_resource_download + s->time_voice_init +
-                                s->time_window_init + total_init_time;
-    printf("Total App Startup Time:    %8.2f ms\n",
-           total_startup_time * 1000.0);
-  }
-  printf(
-      "==================================================================\n\n");
-#else
   printf(
       "\n=================== STARTUP PERFORMANCE TIMING ===================\n");
   if (firstInit) {
@@ -603,7 +526,6 @@ void Init(State *s, bool firstInit) {
   }
   printf(
       "==================================================================\n\n");
-#endif
 }
 
 void Reload(State *s, bool reset) {
