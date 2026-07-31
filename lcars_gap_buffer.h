@@ -4,6 +4,7 @@
 #include "lcars_types.h"
 
 static bool IsWordChar(char c);
+static int FindWordBoundary(String text, int from, int dir);
 static void MoveGap(Element *e, int index);
 static void GapInsertChar(Arena *arena, Element *e, char c);
 static void GapDeleteBack(Element *e);
@@ -18,6 +19,40 @@ static void EndTextSelection(Element *e, bool shiftDown);
 static bool IsWordChar(char c) {
   return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
           (c >= '0' && c <= '9') || c == '_');
+}
+
+// Finds the next word boundary in `text` starting at `from`, searching
+// left (dir == -1) or right (dir == 1). Mirrors typical editor Ctrl+Arrow
+// behavior: a newline immediately adjacent to `from` stops the jump right
+// there, otherwise it skips any run of non-word characters and then the
+// following run of word characters.
+static int FindWordBoundary(String text, int from, int dir) {
+  int limit = (dir < 0) ? 0 : text.len;
+  int target = from;
+  if (target == limit) {
+    return target;
+  }
+
+  char adjacent = (dir < 0) ? text.data[target - 1] : text.data[target];
+  if (adjacent == '\n') {
+    return target + dir;
+  }
+
+  while (target != limit) {
+    char c = (dir < 0) ? text.data[target - 1] : text.data[target];
+    if (IsWordChar(c) || c == '\n') {
+      break;
+    }
+    target += dir;
+  }
+  while (target != limit) {
+    char c = (dir < 0) ? text.data[target - 1] : text.data[target];
+    if (!IsWordChar(c)) {
+      break;
+    }
+    target += dir;
+  }
+  return target;
 }
 
 static void MoveGap(Element *e, int index) {

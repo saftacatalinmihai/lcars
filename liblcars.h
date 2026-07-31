@@ -971,26 +971,10 @@ void Update(State *s) {
             bool isWordJump =
                 IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
                 IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-            if (isWordJump) {
-              int target = e->gapStart;
-              if (target > 0) {
-                if (e->text.data[target - 1] == '\n') {
-                  target--;
-                } else {
-                  while (target > 0 &&
-                         !IsWordChar(e->text.data[target - 1]) &&
-                         e->text.data[target - 1] != '\n') {
-                    target--;
-                  }
-                  while (target > 0 && IsWordChar(e->text.data[target - 1])) {
-                    target--;
-                  }
-                }
-              }
-              MoveGap(e, target);
-            } else {
-              MoveGap(e, e->gapStart - 1);
-            }
+            int target = isWordJump
+                             ? FindWordBoundary(e->text, e->gapStart, -1)
+                             : e->gapStart - 1;
+            MoveGap(e, target);
             EndTextSelection(e, shiftDown);
           }
 
@@ -1000,27 +984,10 @@ void Update(State *s) {
             bool isWordJump =
                 IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
                 IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-            if (isWordJump) {
-              int target = e->gapStart;
-              if (target < e->textLen) {
-                if (e->text.data[target] == '\n') {
-                  target++;
-                } else {
-                  while (target < e->textLen &&
-                         !IsWordChar(e->text.data[target]) &&
-                         e->text.data[target] != '\n') {
-                    target++;
-                  }
-                  while (target < e->textLen &&
-                         IsWordChar(e->text.data[target])) {
-                    target++;
-                  }
-                }
-              }
-              MoveGap(e, target);
-            } else {
-              MoveGap(e, e->gapStart + 1);
-            }
+            int target = isWordJump
+                             ? FindWordBoundary(e->text, e->gapStart, 1)
+                             : e->gapStart + 1;
+            MoveGap(e, target);
             EndTextSelection(e, shiftDown);
           }
         } else {
