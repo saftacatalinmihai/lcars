@@ -1206,23 +1206,10 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
   }
 }
 
-void Update(State *s) {
-  UpdateVoiceInput(s);
-
-  Vector2 mPos = GetMousePosition();
-  Vector2 mDelta = GetMouseDelta();
-  SetMouseCursor(MOUSE_CURSOR_DEFAULT);
-
-  int draggingIdx = -1;
-  int resizingIdx = -1;
-  UpdateDragAndResize(s, mPos, mDelta, &draggingIdx, &resizingIdx);
-
-  for (int i = 0; i < s->numElements; i++) {
-    UpdateElement(s, i, mPos, draggingIdx, resizingIdx);
-  }
-}
-
-void UpdateDrawFrame(State *s) {
+// Global keyboard shortcuts that apply regardless of which element (if any)
+// is focused: debug toggle, reset, edit-mode toggle, voice recording
+// toggle, and the push-to-remote shortcut.
+static void UpdateGlobalShortcuts(State *s) {
   if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_D)) {
     s->debug = !s->debug;
   }
@@ -1243,11 +1230,29 @@ void UpdateDrawFrame(State *s) {
   if (IsKeyDown(KEY_LEFT_SUPER) && IsKeyPressed(KEY_S)) {
     system("./scripts/db-push.sh");
   }
+}
 
-  Update(s);
+void Update(State *s) {
+  UpdateGlobalShortcuts(s);
+  UpdateVoiceInput(s);
+
   Vector2 mPos = GetMousePosition();
+  Vector2 mDelta = GetMouseDelta();
+  SetMouseCursor(MOUSE_CURSOR_DEFAULT);
 
-  // Pre render on texture areas or any other requirements for first pass:
+  int draggingIdx = -1;
+  int resizingIdx = -1;
+  UpdateDragAndResize(s, mPos, mDelta, &draggingIdx, &resizingIdx);
+
+  for (int i = 0; i < s->numElements; i++) {
+    UpdateElement(s, i, mPos, draggingIdx, resizingIdx);
+  }
+}
+
+// Renders any elements that draw into an offscreen texture (currently just
+// spheres) before the main draw pass, since that texture is what the main
+// pass samples from.
+static void PreRenderElements(State *s) {
   for (int i = 0; i < s->numElements; i++) {
     Element *e = &s->elements[i];
     if (e->kind == ELEM_NOTHING)
@@ -1278,350 +1283,360 @@ void UpdateDrawFrame(State *s) {
       break;
     }
   }
+}
 
-  BeginDrawing();
-  ClearBackground(BLACK);
-
-  if (IsKeyDown(KEY_LEFT_SHIFT)) {
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-      s->selection_rec.x = mPos.x;
-      s->selection_rec.y = mPos.y;
-      s->selection_rec.width = 0;
-      s->selection_rec.height = 0;
-    } else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-      // This only works when selecting from top-left to bottom-right. Need to
-      // handle other directions.
-      s->selection_rec.width = mPos.x - s->selection_rec.x;
-      s->selection_rec.height = mPos.y - s->selection_rec.y;
-      DrawRectangleLinesEx(s->selection_rec, 1, LCARS_GREEN);
-    } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-      s->selection_rec.width = 0;
-      s->selection_rec.height = 0;
-    }
+// Updates the Shift+drag rubber-band selection rectangle and draws it (only
+// meaningful while Shift is held; the rect collapses to zero size once
+// released). Only works dragging from top-left to bottom-right.
+static void UpdateAndDrawSelectionRect(State *s, Vector2 mPos) {
+  if (!IsKeyDown(KEY_LEFT_SHIFT)) {
+    return;
   }
+  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    s->selection_rec.x = mPos.x;
+    s->selection_rec.y = mPos.y;
+    s->selection_rec.width = 0;
+    s->selection_rec.height = 0;
+  } else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+    s->selection_rec.width = mPos.x - s->selection_rec.x;
+    s->selection_rec.height = mPos.y - s->selection_rec.y;
+    DrawRectangleLinesEx(s->selection_rec, 1, LCARS_GREEN);
+  } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+    s->selection_rec.width = 0;
+    s->selection_rec.height = 0;
+  }
+}
 
-  for (int i = 0; i < s->numElements; i++) {
-    Element *e = &s->elements[i];
-    if (e->kind == ELEM_NOTHING)
-      continue; // Skip uninitialized elements
-    switch (e->kind) {
-    case ELEM_RECTANGLE:
-      DrawRectangle(e->position.x, e->position.y, *e->width, *e->height,
-                    e->color);
-      break;
-    case ELEM_ELBOW:
-      DrawElbow(e->position.x, e->position.y, *e->width, *e->height,
-                s->barWidth, s->barHeight, s->innerRadius, e->color,
-                e->elbowOrientation, s->debug);
-      break;
-    case ELEM_BUTTON:
-      // printf("Drawing button element %d at (%.2d, %.2d) with size (%.2f,
-      // %.2f)\n", i, e->position.x, e->position.y, *e->width, *e->height);
-      DrawRectangleRounded((Rectangle){.x = e->position.x,
-                                       .y = e->position.y,
-                                       .width = *e->width,
-                                       .height = *e->height},
-                           0.9f, 4, e->color);
-      break;
-    case ELEM_TEXT:
-      DrawText(e->text.data ? e->text.data : "", e->position.x, e->position.y,
-               e->textSize, e->color);
-      break;
-    case ELEM_TEXT_EDITOR:
-    case ELEM_ENTRY_LIST: {
-      float listWidth = 0.0f;
-      Color listBorderColor = LCARS_ORANGE;
-      Color editorBorderColor = LCARS_BLUE;
-      bool isMouseOverList = false;
+// Draws a single element according to its kind: shape/text rendering,
+// the text-editor/entry-list panel (including its scrollbar and kind
+// selector), sphere texture blit and debug overlay, and the shared
+// on-element label text drawn for kinds other than TEXT/TEXT_EDITOR/
+// ENTRY_LIST.
+static void DrawElement(State *s, int i, Vector2 mPos) {
+  Element *e = &s->elements[i];
+  if (e->kind == ELEM_NOTHING)
+    return; // Skip uninitialized elements
+  switch (e->kind) {
+  case ELEM_RECTANGLE:
+    DrawRectangle(e->position.x, e->position.y, *e->width, *e->height,
+                  e->color);
+    break;
+  case ELEM_ELBOW:
+    DrawElbow(e->position.x, e->position.y, *e->width, *e->height,
+              s->barWidth, s->barHeight, s->innerRadius, e->color,
+              e->elbowOrientation, s->debug);
+    break;
+  case ELEM_BUTTON:
+    // printf("Drawing button element %d at (%.2d, %.2d) with size (%.2f,
+    // %.2f)\n", i, e->position.x, e->position.y, *e->width, *e->height);
+    DrawRectangleRounded((Rectangle){.x = e->position.x,
+                                     .y = e->position.y,
+                                     .width = *e->width,
+                                     .height = *e->height},
+                         0.9f, 4, e->color);
+    break;
+  case ELEM_TEXT:
+    DrawText(e->text.data ? e->text.data : "", e->position.x, e->position.y,
+             e->textSize, e->color);
+    break;
+  case ELEM_TEXT_EDITOR:
+  case ELEM_ENTRY_LIST: {
+    float listWidth = 0.0f;
+    Color listBorderColor = LCARS_ORANGE;
+    Color editorBorderColor = LCARS_BLUE;
+    bool isMouseOverList = false;
 
-      if (e->kind == ELEM_ENTRY_LIST) {
-        listWidth = e->listCollapsed ? 30.0f : 350.0f;
-        Rectangle listRec =
-            (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
-        isMouseOverList = CheckCollisionPointRec(mPos, listRec);
+    if (e->kind == ELEM_ENTRY_LIST) {
+      listWidth = e->listCollapsed ? 30.0f : 350.0f;
+      Rectangle listRec =
+          (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
+      isMouseOverList = CheckCollisionPointRec(mPos, listRec);
 
-        if (isMouseOverList) {
-          editorBorderColor = ColorAlpha(LCARS_BLUE, 0.4f);
-        } else {
-          listBorderColor = ColorAlpha(LCARS_ORANGE, 0.4f);
-        }
-
-        // Draw list panel background
-        DrawRectangle(e->position.x, e->position.y, listWidth - 5.0f,
-                      *e->height, (Color){15, 15, 15, 255});
-        DrawRectangleLines(e->position.x, e->position.y, listWidth - 5.0f,
-                           *e->height, listBorderColor);
-
-        // Draw toggle button
-        Rectangle toggleBtn =
-            (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
-        DrawRectangleRounded(toggleBtn, 0.3f, 4, LCARS_BLUE);
-        DrawText(e->listCollapsed ? ">" : "<",
-                 toggleBtn.x + (toggleBtn.width -
-                                MeasureText(e->listCollapsed ? ">" : "<", 20)) /
-                                   2,
-                 toggleBtn.y + (toggleBtn.height - 20) / 2, 20, BLACK);
-
-        if (!e->listCollapsed) {
-          // Draw "+ New Entry" button
-          Rectangle newEntryBtn = (Rectangle){
-              e->position.x + 35.0f, e->position.y, listWidth - 50.0f, 30.0f};
-          DrawRectangleRounded(newEntryBtn, 0.3f, 4, LCARS_GREEN);
-          DrawText("+ NEW ENTRY",
-                   newEntryBtn.x +
-                       (newEntryBtn.width - MeasureText("+ NEW ENTRY", 20)) / 2,
-                   newEntryBtn.y + (newEntryBtn.height - 20) / 2, 20, BLACK);
-
-          // Draw entries
-          EntryListItem items[32];
-          int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
-          float viewportHeight = *e->height - 45.0f;
-          float maxItemWidth = listWidth - 15.0f;
-          bool isScrollable = (count * 90.0f > viewportHeight);
-          float itemWidth = maxItemWidth;
-          if (isScrollable) {
-            itemWidth = maxItemWidth - 10.0f;
-          }
-
-          float itemY = e->position.y + 45.0f - e->listScrollY;
-          Rectangle listClipRec =
-              (Rectangle){e->position.x, e->position.y + 45.0f,
-                          listWidth - 5.0f, viewportHeight};
-
-          BeginScissorMode((int)listClipRec.x, (int)listClipRec.y,
-                           (int)listClipRec.width, (int)listClipRec.height);
-          for (int j = 0; j < count; j++) {
-            Rectangle itemRec =
-                (Rectangle){e->position.x + 5.0f, itemY, itemWidth, 80.0f};
-            Color itemColor = (items[j].id == e->selectedEntryId)
-                                  ? LCARS_YELLOW
-                                  : (Color){40, 40, 40, 255};
-            Color textColor =
-                (items[j].id == e->selectedEntryId) ? BLACK : WHITE;
-            Color subtextColor = (items[j].id == e->selectedEntryId)
-                                     ? (Color){80, 80, 80, 255}
-                                     : (Color){180, 180, 180, 255};
-
-            DrawRectangleRounded(itemRec, 0.2f, 4, itemColor);
-
-            // Draw entry title/id
-            char label[256];
-            snprintf(label, sizeof(label), "Entry #%d (%s)", items[j].id,
-                     items[j].title);
-            DrawText(label, itemRec.x + 10, itemRec.y + 7, 20, textColor);
-
-            // Draw created and updated dates
-            char dates[64];
-            snprintf(dates, sizeof(dates), "U: %s",
-                     items[j].last_modified[0] ? items[j].last_modified
-                                               : items[j].created_at);
-            DrawText(dates, itemRec.x + 10, itemRec.y + 31, 20, subtextColor);
-            char createdDate[64];
-            snprintf(createdDate, sizeof(createdDate), "C: %s",
-                     items[j].created_at);
-            DrawText(createdDate, itemRec.x + 10, itemRec.y + 55, 20,
-                     subtextColor);
-
-            itemY += 90.0f;
-          }
-          EndScissorMode();
-
-          // Draw scrollbar if scrollable
-          if (isScrollable) {
-            float trackX = e->position.x + listWidth - 15.0f;
-            float trackY = e->position.y + 45.0f;
-            float trackWidth = 6.0f;
-            float trackHeight = *e->height - 50.0f;
-
-            float handleHeight =
-                (viewportHeight / (count * 90.0f)) * trackHeight;
-            if (handleHeight < 15.0f)
-              handleHeight = 15.0f;
-
-            float scrollRange = count * 90.0f - viewportHeight;
-            float handleY = trackY;
-            if (scrollRange > 0.0f) {
-              handleY +=
-                  (e->listScrollY / scrollRange) * (trackHeight - handleHeight);
-            }
-
-            // Draw track
-            DrawRectangleRounded(
-                (Rectangle){trackX, trackY, trackWidth, trackHeight}, 0.5f, 4,
-                (Color){30, 30, 30, 255});
-            // Draw handle
-            Color handleColor =
-                isMouseOverList ? LCARS_ORANGE : ColorAlpha(LCARS_ORANGE, 0.5f);
-            DrawRectangleRounded(
-                (Rectangle){trackX, handleY, trackWidth, handleHeight}, 0.5f, 4,
-                handleColor);
-          }
-        }
-      }
-
-      float editorX = e->position.x + listWidth;
-      float editorWidth = *e->width - listWidth;
-
-      DrawRectangleLines(editorX, e->position.y, editorWidth + 10, *e->height,
-                         editorBorderColor);
-
-      if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
-        float btnSize = 18.0f;
-        Rectangle deleteBtn =
-            (Rectangle){editorX + editorWidth + 10.0f - btnSize - 8.0f,
-                        e->position.y - btnSize - 4.0f, btnSize, btnSize};
-
-        bool isHovered = CheckCollisionPointRec(mPos, deleteBtn);
-        Color btnColor = isHovered ? RED : LCARS_RED_ORANGE;
-        DrawRectangleRounded(deleteBtn, 0.3f, 4, btnColor);
-
-        int fontSize = 14;
-        const char *btnText = "x";
-        int textWidth = MeasureText(btnText, fontSize);
-        DrawText(btnText, deleteBtn.x + (deleteBtn.width - textWidth) / 2.0f,
-                 deleteBtn.y + (deleteBtn.height - fontSize) / 2.0f, fontSize,
-                 BLACK);
-        if (e->kindList.count > 0) {
-          for (int k = 0; k < e->kindList.count; k++) {
-            DrawText(e->kindList.kinds[k].data,
-                     e->position.x + 50.0f + k * 200.0f + 12.0f,
-                     e->position.y - 20.0f, 20, WHITE);
-            if (StringEq(e->kindList.kinds[k], e->selectedKind)) {
-              DrawRectangle(e->position.x + 50.0f + k * 200.0f,
-                            e->position.y - 20.0f, 180.0f, 20.0f,
-                            ColorAlpha(LCARS_BLUE, 0.5f));
-            }
-            if (CheckCollisionPointRec(
-                    mPos, (Rectangle){e->position.x + 50.0f + k * 200.0f,
-                                      e->position.y - 20.0f, 180.0f, 20.0f})) {
-              DrawRectangle(e->position.x + 50.0f + k * 200.0f,
-                            e->position.y - 20.0f, 180.0f, 20.0f,
-                            ColorAlpha(LCARS_BLUE, 0.3f));
-              if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                e->selectedKind = e->kindList.kinds[k];
-              }
-            }
-          }
-        }
-      }
-
-      Rectangle r =
-          (Rectangle){editorX + 5, e->position.y + 5, editorWidth, *e->height};
-      BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
-      DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false,
-                    e->color, &e->textHeight, &e->cursorY, e->gapStart);
-      EndScissorMode();
-
-      // Render scrollbar
-      float scrollbarX = editorX + editorWidth + 25;
-      float scrollbarY = e->position.y;
-      float scrollbarWidth = 24.0f;
-      float scrollbarHeight = *e->height;
-
-      Rectangle upButton =
-          (Rectangle){scrollbarX, scrollbarY, scrollbarWidth, scrollbarWidth};
-      Rectangle downButton =
-          (Rectangle){scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth,
-                      scrollbarWidth, scrollbarWidth};
-      Rectangle track = (Rectangle){scrollbarX, scrollbarY + scrollbarWidth + 5,
-                                    scrollbarWidth,
-                                    scrollbarHeight - 2 * scrollbarWidth - 10};
-
-      // Draw up/down buttons
-      DrawRectangleRounded(upButton, 0.5f, 4, e->color);
-      DrawRectangleRounded(downButton, 0.5f, 4, e->color);
-
-      // Draw Up/Down arrow indicators
-      DrawText("^", upButton.x + (upButton.width - MeasureText("^", 20)) / 2,
-               upButton.y + (upButton.height - 20) / 2, 20, BLACK);
-      DrawText("v",
-               downButton.x + (downButton.width - MeasureText("v", 20)) / 2,
-               downButton.y + (downButton.height - 20) / 2, 20, BLACK);
-
-      // Draw track background
-      DrawRectangleRounded(track, 0.5f, 4, (Color){30, 30, 30, 255});
-
-      // Calculate and draw handle
-      float visibleRatio = *e->height / e->textHeight;
-      if (visibleRatio > 1.0f)
-        visibleRatio = 1.0f;
-      float handleHeight = visibleRatio * track.height;
-      if (handleHeight < 20.0f)
-        handleHeight = 20.0f;
-
-      float scrollRange = e->textHeight - *e->height;
-      float handleY = track.y;
-      if (scrollRange > 0.0f) {
-        handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
-      }
-      Rectangle handle =
-          (Rectangle){scrollbarX, handleY, scrollbarWidth, handleHeight};
-
-      bool hoverHandle = CheckCollisionPointRec(GetMousePosition(), handle);
-      Color handleColor =
-          (hoverHandle || e->draggingScrollbar) ? LCARS_YELLOW : LCARS_ORANGE;
-      DrawRectangleRounded(handle, 0.5f, 4, handleColor);
-
-      break;
-    }
-    case ELEM_SPHERE: {
-      DrawTextureRec(e->renderTexture.texture,
-                     (Rectangle){0, 0, *e->width, *e->height},
-                     (Vector2){e->position.x, e->position.y}, WHITE);
-
-      if (s->debug) {
-        Vector2 screenPos = {e->position.x, e->position.y};
-
-        // Draw Text - position, rotation
-        DrawText(TextFormat("Pos: (%.2f, %.2f, %.2f)", e->position3.x,
-                            e->position3.y, e->position3.z),
-                 screenPos.x, screenPos.y, 10, WHITE);
-        DrawText(TextFormat("Rot: (%.2f)", e->rotation), screenPos.x,
-                 screenPos.y + 20, 10, WHITE);
-
-        // Camera
-        DrawText(TextFormat("Camera Pos: (%.2f, %.2f, %.2f)",
-                            e->camera.position.x, e->camera.position.y,
-                            e->camera.position.z),
-                 screenPos.x, screenPos.y + 40, 10, WHITE);
-        DrawText(TextFormat("Camera Target: (%.2f, %.2f, %.2f)",
-                            e->camera.target.x, e->camera.target.y,
-                            e->camera.target.z),
-                 screenPos.x, screenPos.y + 60, 10, WHITE);
-        DrawText(TextFormat("Camera Up: (%.2f, %.2f, %.2f)", e->camera.up.x,
-                            e->camera.up.y, e->camera.up.z),
-                 screenPos.x, screenPos.y + 80, 10, WHITE);
-        DrawText(TextFormat("Camera FOV: %.2f", e->camera.fovy), screenPos.x,
-                 screenPos.y + 100, 10, WHITE);
-        DrawText(TextFormat("Camera Projection: %s",
-                            e->camera.projection == CAMERA_PERSPECTIVE
-                                ? "Perspective"
-                                : "Orthographic"),
-                 screenPos.x, screenPos.y + 120, 10, WHITE);
-      }
-      break;
-    }
-    case ELEM_NOTHING:
-    case ELEM_TOTAL_KINDS:
-      break;
-    }
-
-    if (e->text.data && e->kind != ELEM_TEXT && e->kind != ELEM_TEXT_EDITOR &&
-        e->kind != ELEM_ENTRY_LIST) {
-      int textWidth = MeasureText(e->text.data, e->textSize);
-      if (e->kind == ELEM_ELBOW) {
-        DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
-                 e->position.y + s->barHeight + s->innerRadius +
-                     (*e->height - e->textSize) / 2,
-                 e->textSize, BLACK);
+      if (isMouseOverList) {
+        editorBorderColor = ColorAlpha(LCARS_BLUE, 0.4f);
       } else {
-        DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
-                 e->position.y + (*e->height - e->textSize) / 2 + 10,
-                 e->textSize, BLACK);
+        listBorderColor = ColorAlpha(LCARS_ORANGE, 0.4f);
+      }
+
+      // Draw list panel background
+      DrawRectangle(e->position.x, e->position.y, listWidth - 5.0f,
+                    *e->height, (Color){15, 15, 15, 255});
+      DrawRectangleLines(e->position.x, e->position.y, listWidth - 5.0f,
+                         *e->height, listBorderColor);
+
+      // Draw toggle button
+      Rectangle toggleBtn =
+          (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
+      DrawRectangleRounded(toggleBtn, 0.3f, 4, LCARS_BLUE);
+      DrawText(e->listCollapsed ? ">" : "<",
+               toggleBtn.x + (toggleBtn.width -
+                              MeasureText(e->listCollapsed ? ">" : "<", 20)) /
+                                 2,
+               toggleBtn.y + (toggleBtn.height - 20) / 2, 20, BLACK);
+
+      if (!e->listCollapsed) {
+        // Draw "+ New Entry" button
+        Rectangle newEntryBtn = (Rectangle){
+            e->position.x + 35.0f, e->position.y, listWidth - 50.0f, 30.0f};
+        DrawRectangleRounded(newEntryBtn, 0.3f, 4, LCARS_GREEN);
+        DrawText("+ NEW ENTRY",
+                 newEntryBtn.x +
+                     (newEntryBtn.width - MeasureText("+ NEW ENTRY", 20)) / 2,
+                 newEntryBtn.y + (newEntryBtn.height - 20) / 2, 20, BLACK);
+
+        // Draw entries
+        EntryListItem items[32];
+        int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
+        float viewportHeight = *e->height - 45.0f;
+        float maxItemWidth = listWidth - 15.0f;
+        bool isScrollable = (count * 90.0f > viewportHeight);
+        float itemWidth = maxItemWidth;
+        if (isScrollable) {
+          itemWidth = maxItemWidth - 10.0f;
+        }
+
+        float itemY = e->position.y + 45.0f - e->listScrollY;
+        Rectangle listClipRec =
+            (Rectangle){e->position.x, e->position.y + 45.0f,
+                        listWidth - 5.0f, viewportHeight};
+
+        BeginScissorMode((int)listClipRec.x, (int)listClipRec.y,
+                         (int)listClipRec.width, (int)listClipRec.height);
+        for (int j = 0; j < count; j++) {
+          Rectangle itemRec =
+              (Rectangle){e->position.x + 5.0f, itemY, itemWidth, 80.0f};
+          Color itemColor = (items[j].id == e->selectedEntryId)
+                                ? LCARS_YELLOW
+                                : (Color){40, 40, 40, 255};
+          Color textColor =
+              (items[j].id == e->selectedEntryId) ? BLACK : WHITE;
+          Color subtextColor = (items[j].id == e->selectedEntryId)
+                                   ? (Color){80, 80, 80, 255}
+                                   : (Color){180, 180, 180, 255};
+
+          DrawRectangleRounded(itemRec, 0.2f, 4, itemColor);
+
+          // Draw entry title/id
+          char label[256];
+          snprintf(label, sizeof(label), "Entry #%d (%s)", items[j].id,
+                   items[j].title);
+          DrawText(label, itemRec.x + 10, itemRec.y + 7, 20, textColor);
+
+          // Draw created and updated dates
+          char dates[64];
+          snprintf(dates, sizeof(dates), "U: %s",
+                   items[j].last_modified[0] ? items[j].last_modified
+                                             : items[j].created_at);
+          DrawText(dates, itemRec.x + 10, itemRec.y + 31, 20, subtextColor);
+          char createdDate[64];
+          snprintf(createdDate, sizeof(createdDate), "C: %s",
+                   items[j].created_at);
+          DrawText(createdDate, itemRec.x + 10, itemRec.y + 55, 20,
+                   subtextColor);
+
+          itemY += 90.0f;
+        }
+        EndScissorMode();
+
+        // Draw scrollbar if scrollable
+        if (isScrollable) {
+          float trackX = e->position.x + listWidth - 15.0f;
+          float trackY = e->position.y + 45.0f;
+          float trackWidth = 6.0f;
+          float trackHeight = *e->height - 50.0f;
+
+          float handleHeight =
+              (viewportHeight / (count * 90.0f)) * trackHeight;
+          if (handleHeight < 15.0f)
+            handleHeight = 15.0f;
+
+          float scrollRange = count * 90.0f - viewportHeight;
+          float handleY = trackY;
+          if (scrollRange > 0.0f) {
+            handleY +=
+                (e->listScrollY / scrollRange) * (trackHeight - handleHeight);
+          }
+
+          // Draw track
+          DrawRectangleRounded(
+              (Rectangle){trackX, trackY, trackWidth, trackHeight}, 0.5f, 4,
+              (Color){30, 30, 30, 255});
+          // Draw handle
+          Color handleColor =
+              isMouseOverList ? LCARS_ORANGE : ColorAlpha(LCARS_ORANGE, 0.5f);
+          DrawRectangleRounded(
+              (Rectangle){trackX, handleY, trackWidth, handleHeight}, 0.5f, 4,
+              handleColor);
+        }
       }
     }
+
+    float editorX = e->position.x + listWidth;
+    float editorWidth = *e->width - listWidth;
+
+    DrawRectangleLines(editorX, e->position.y, editorWidth + 10, *e->height,
+                       editorBorderColor);
+
+    if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
+      float btnSize = 18.0f;
+      Rectangle deleteBtn =
+          (Rectangle){editorX + editorWidth + 10.0f - btnSize - 8.0f,
+                      e->position.y - btnSize - 4.0f, btnSize, btnSize};
+
+      bool isHovered = CheckCollisionPointRec(mPos, deleteBtn);
+      Color btnColor = isHovered ? RED : LCARS_RED_ORANGE;
+      DrawRectangleRounded(deleteBtn, 0.3f, 4, btnColor);
+
+      int fontSize = 14;
+      const char *btnText = "x";
+      int textWidth = MeasureText(btnText, fontSize);
+      DrawText(btnText, deleteBtn.x + (deleteBtn.width - textWidth) / 2.0f,
+               deleteBtn.y + (deleteBtn.height - fontSize) / 2.0f, fontSize,
+               BLACK);
+      if (e->kindList.count > 0) {
+        for (int k = 0; k < e->kindList.count; k++) {
+          DrawText(e->kindList.kinds[k].data,
+                   e->position.x + 50.0f + k * 200.0f + 12.0f,
+                   e->position.y - 20.0f, 20, WHITE);
+          if (StringEq(e->kindList.kinds[k], e->selectedKind)) {
+            DrawRectangle(e->position.x + 50.0f + k * 200.0f,
+                          e->position.y - 20.0f, 180.0f, 20.0f,
+                          ColorAlpha(LCARS_BLUE, 0.5f));
+          }
+          if (CheckCollisionPointRec(
+                  mPos, (Rectangle){e->position.x + 50.0f + k * 200.0f,
+                                    e->position.y - 20.0f, 180.0f, 20.0f})) {
+            DrawRectangle(e->position.x + 50.0f + k * 200.0f,
+                          e->position.y - 20.0f, 180.0f, 20.0f,
+                          ColorAlpha(LCARS_BLUE, 0.3f));
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+              e->selectedKind = e->kindList.kinds[k];
+            }
+          }
+        }
+      }
+    }
+
+    Rectangle r =
+        (Rectangle){editorX + 5, e->position.y + 5, editorWidth, *e->height};
+    BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
+    DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false,
+                  e->color, &e->textHeight, &e->cursorY, e->gapStart);
+    EndScissorMode();
+
+    // Render scrollbar
+    float scrollbarX = editorX + editorWidth + 25;
+    float scrollbarY = e->position.y;
+    float scrollbarWidth = 24.0f;
+    float scrollbarHeight = *e->height;
+
+    Rectangle upButton =
+        (Rectangle){scrollbarX, scrollbarY, scrollbarWidth, scrollbarWidth};
+    Rectangle downButton =
+        (Rectangle){scrollbarX, scrollbarY + scrollbarHeight - scrollbarWidth,
+                    scrollbarWidth, scrollbarWidth};
+    Rectangle track = (Rectangle){scrollbarX, scrollbarY + scrollbarWidth + 5,
+                                  scrollbarWidth,
+                                  scrollbarHeight - 2 * scrollbarWidth - 10};
+
+    // Draw up/down buttons
+    DrawRectangleRounded(upButton, 0.5f, 4, e->color);
+    DrawRectangleRounded(downButton, 0.5f, 4, e->color);
+
+    // Draw Up/Down arrow indicators
+    DrawText("^", upButton.x + (upButton.width - MeasureText("^", 20)) / 2,
+             upButton.y + (upButton.height - 20) / 2, 20, BLACK);
+    DrawText("v",
+             downButton.x + (downButton.width - MeasureText("v", 20)) / 2,
+             downButton.y + (downButton.height - 20) / 2, 20, BLACK);
+
+    // Draw track background
+    DrawRectangleRounded(track, 0.5f, 4, (Color){30, 30, 30, 255});
+
+    // Calculate and draw handle
+    float visibleRatio = *e->height / e->textHeight;
+    if (visibleRatio > 1.0f)
+      visibleRatio = 1.0f;
+    float handleHeight = visibleRatio * track.height;
+    if (handleHeight < 20.0f)
+      handleHeight = 20.0f;
+
+    float scrollRange = e->textHeight - *e->height;
+    float handleY = track.y;
+    if (scrollRange > 0.0f) {
+      handleY += (e->scrollY / scrollRange) * (track.height - handleHeight);
+    }
+    Rectangle handle =
+        (Rectangle){scrollbarX, handleY, scrollbarWidth, handleHeight};
+
+    bool hoverHandle = CheckCollisionPointRec(GetMousePosition(), handle);
+    Color handleColor =
+        (hoverHandle || e->draggingScrollbar) ? LCARS_YELLOW : LCARS_ORANGE;
+    DrawRectangleRounded(handle, 0.5f, 4, handleColor);
+
+    break;
+  }
+  case ELEM_SPHERE: {
+    DrawTextureRec(e->renderTexture.texture,
+                   (Rectangle){0, 0, *e->width, *e->height},
+                   (Vector2){e->position.x, e->position.y}, WHITE);
+
+    if (s->debug) {
+      Vector2 screenPos = {e->position.x, e->position.y};
+
+      // Draw Text - position, rotation
+      DrawText(TextFormat("Pos: (%.2f, %.2f, %.2f)", e->position3.x,
+                          e->position3.y, e->position3.z),
+               screenPos.x, screenPos.y, 10, WHITE);
+      DrawText(TextFormat("Rot: (%.2f)", e->rotation), screenPos.x,
+               screenPos.y + 20, 10, WHITE);
+
+      // Camera
+      DrawText(TextFormat("Camera Pos: (%.2f, %.2f, %.2f)",
+                          e->camera.position.x, e->camera.position.y,
+                          e->camera.position.z),
+               screenPos.x, screenPos.y + 40, 10, WHITE);
+      DrawText(TextFormat("Camera Target: (%.2f, %.2f, %.2f)",
+                          e->camera.target.x, e->camera.target.y,
+                          e->camera.target.z),
+               screenPos.x, screenPos.y + 60, 10, WHITE);
+      DrawText(TextFormat("Camera Up: (%.2f, %.2f, %.2f)", e->camera.up.x,
+                          e->camera.up.y, e->camera.up.z),
+               screenPos.x, screenPos.y + 80, 10, WHITE);
+      DrawText(TextFormat("Camera FOV: %.2f", e->camera.fovy), screenPos.x,
+               screenPos.y + 100, 10, WHITE);
+      DrawText(TextFormat("Camera Projection: %s",
+                          e->camera.projection == CAMERA_PERSPECTIVE
+                              ? "Perspective"
+                              : "Orthographic"),
+               screenPos.x, screenPos.y + 120, 10, WHITE);
+    }
+    break;
+  }
+  case ELEM_NOTHING:
+  case ELEM_TOTAL_KINDS:
+    break;
   }
 
+  if (e->text.data && e->kind != ELEM_TEXT && e->kind != ELEM_TEXT_EDITOR &&
+      e->kind != ELEM_ENTRY_LIST) {
+    int textWidth = MeasureText(e->text.data, e->textSize);
+    if (e->kind == ELEM_ELBOW) {
+      DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
+               e->position.y + s->barHeight + s->innerRadius +
+                   (*e->height - e->textSize) / 2,
+               e->textSize, BLACK);
+    } else {
+      DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
+               e->position.y + (*e->height - e->textSize) / 2 + 10,
+               e->textSize, BLACK);
+    }
+  }
+}
+
+// Draws (and ages out) the transient notification banner, when debug mode
+// is on to actually make it visible.
+static void DrawNotification(State *s) {
   if (s->notification.data && s->notificationTimer > 0.0f) {
     s->notificationTimer -= GetFrameTime();
     if (s->debug) {
@@ -1631,58 +1646,85 @@ void UpdateDrawFrame(State *s) {
   } else {
     s->notificationOnElemIdx = -1;
   }
+}
 
-  if (s->debug) {
-    DrawFPS(10, 10);
-    DrawText(TextFormat("x:%.2f, y:%.2f", mPos.x, mPos.y), mPos.x + 20, mPos.y,
-             20, GREEN);
-    DrawLine(0, mPos.y, WINDOW_WIDTH, mPos.y, GREEN);
-    DrawLine(mPos.x, 0, mPos.x, WINDOW_HEIGHT, GREEN);
+static void DrawDebugOverlay(State *s, Vector2 mPos) {
+  if (!s->debug) {
+    return;
   }
+  DrawFPS(10, 10);
+  DrawText(TextFormat("x:%.2f, y:%.2f", mPos.x, mPos.y), mPos.x + 20, mPos.y,
+           20, GREEN);
+  DrawLine(0, mPos.y, WINDOW_WIDTH, mPos.y, GREEN);
+  DrawLine(mPos.x, 0, mPos.x, WINDOW_HEIGHT, GREEN);
+}
 
-  // Draw interactive handles on top of all elements
-  if (s->is_editing) {
-    Vector2 mousePos = GetMousePosition();
-    for (int i = 0; i < s->numElements; i++) {
-      Element *e = &s->elements[i];
-      if (e->kind == ELEM_NOTHING)
-        break;
+// Draws the drag/resize handles on top of every element while in edit mode,
+// highlighted when hovered or actively being dragged/resized.
+static void DrawEditHandles(State *s) {
+  if (!s->is_editing) {
+    return;
+  }
+  Vector2 mousePos = GetMousePosition();
+  for (int i = 0; i < s->numElements; i++) {
+    Element *e = &s->elements[i];
+    if (e->kind == ELEM_NOTHING)
+      break;
 
-      Rectangle r = GetElementBoundingBox(s, e);
-      bool isElementHovered = IsHoveringElement(s, e);
-      // Drag handle at top-left
-      Rectangle dragHandle = {r.x - 8, r.y - 8, 16, 16};
-      // Resize handle at bottom-right
-      Rectangle resizeHandle = {r.x + r.width - 8, r.y + r.height - 8, 16, 16};
+    Rectangle r = GetElementBoundingBox(s, e);
+    bool isElementHovered = IsHoveringElement(s, e);
+    // Drag handle at top-left
+    Rectangle dragHandle = {r.x - 8, r.y - 8, 16, 16};
+    // Resize handle at bottom-right
+    Rectangle resizeHandle = {r.x + r.width - 8, r.y + r.height - 8, 16, 16};
 
-      bool isHoveredDrag = CheckCollisionPointRec(mousePos, dragHandle);
-      bool isHoveredResize = CheckCollisionPointRec(mousePos, resizeHandle);
+    bool isHoveredDrag = CheckCollisionPointRec(mousePos, dragHandle);
+    bool isHoveredResize = CheckCollisionPointRec(mousePos, resizeHandle);
 
-      // Show handles if hovering the element, or if dragging/resizing it
-      if (isElementHovered || e->isDragging || e->isResizing || isHoveredDrag ||
-          isHoveredResize) {
-        // Draw outline around element
-        DrawRectangleLinesEx(
-            (Rectangle){r.x - 2, r.y - 2, r.width + 4, r.height + 4}, 1.0f,
-            (Color){255, 255, 255, 128});
+    // Show handles if hovering the element, or if dragging/resizing it
+    if (isElementHovered || e->isDragging || e->isResizing || isHoveredDrag ||
+        isHoveredResize) {
+      // Draw outline around element
+      DrawRectangleLinesEx(
+          (Rectangle){r.x - 2, r.y - 2, r.width + 4, r.height + 4}, 1.0f,
+          (Color){255, 255, 255, 128});
 
-        // Draw drag handle (top-left circle)
-        DrawCircle(r.x, r.y, 6,
-                   (e->isDragging || isHoveredDrag)
+      // Draw drag handle (top-left circle)
+      DrawCircle(r.x, r.y, 6,
+                 (e->isDragging || isHoveredDrag)
+                     ? LCARS_YELLOW
+                     : (Color){155, 155, 255, 200});
+      DrawCircleLines(r.x, r.y, 6, BLACK);
+
+      // Draw resize handle (bottom-right triangle)
+      DrawTriangle((Vector2){r.x + r.width - 10, r.y + r.height},
+                   (Vector2){r.x + r.width, r.y + r.height},
+                   (Vector2){r.x + r.width, r.y + r.height - 10},
+                   (e->isResizing || isHoveredResize)
                        ? LCARS_YELLOW
-                       : (Color){155, 155, 255, 200});
-        DrawCircleLines(r.x, r.y, 6, BLACK);
-
-        // Draw resize handle (bottom-right triangle)
-        DrawTriangle((Vector2){r.x + r.width - 10, r.y + r.height},
-                     (Vector2){r.x + r.width, r.y + r.height},
-                     (Vector2){r.x + r.width, r.y + r.height - 10},
-                     (e->isResizing || isHoveredResize)
-                         ? LCARS_YELLOW
-                         : (Color){255, 154, 102, 200});
-      }
+                       : (Color){255, 154, 102, 200});
     }
   }
+}
+
+void UpdateDrawFrame(State *s) {
+  Update(s);
+  Vector2 mPos = GetMousePosition();
+
+  PreRenderElements(s);
+
+  BeginDrawing();
+  ClearBackground(BLACK);
+
+  UpdateAndDrawSelectionRect(s, mPos);
+
+  for (int i = 0; i < s->numElements; i++) {
+    DrawElement(s, i, mPos);
+  }
+
+  DrawNotification(s);
+  DrawDebugOverlay(s, mPos);
+  DrawEditHandles(s);
 
   EndDrawing();
   arena_reset(&s->scratch_arena);
