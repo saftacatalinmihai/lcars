@@ -307,7 +307,8 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
   if (e->kind == ELEM_ENTRY_LIST) {
     float listWidth = e->listCollapsed ? 30.0f : 220.0f;
     Vector2 mPos = GetMousePosition();
-    Rectangle listRec = (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
+    Rectangle listRec =
+        (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
     isMouseOverList = CheckCollisionPointRec(mPos, listRec);
   }
   if (e->isFocused && !isMouseOverList) {

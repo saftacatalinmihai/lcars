@@ -34,7 +34,9 @@
 #define LCARS_YELLOW (Color){255, 205, 154, 255}
 #define LCARS_BLUE (Color){155, 155, 255, 255}
 #define LCARS_GREEN (Color){153, 204, 153, 255}
-#define TODO printf("Exiting %s:%d", __FILE__, __LINE__); exit(1)
+#define TODO                                                                   \
+  printf("Exiting %s:%d", __FILE__, __LINE__);                                 \
+  exit(1)
 
 #define WINDOW_WIDTH 1600
 #define WINDOW_HEIGHT 900
@@ -57,8 +59,8 @@ typedef enum ButtonAction {
 } ButtonAction;
 
 typedef struct KindList {
-    String kinds[MAX_KINDS];
-    int count;
+  String kinds[MAX_KINDS];
+  int count;
 } KindList;
 
 typedef enum ElemKind {
@@ -84,7 +86,7 @@ typedef struct Element {
   int elbowOrientation; // Only used if kind == ELBOW
   String text;          // Text on button or just text elem
   int textLen;          // text lenght of chars.
-  int textSize; // Only used if kind == TEXT / TEXTBOX for display size
+  int textSize;         // Only used if kind == TEXT / TEXTBOX for display size
   Model model;
   float rotation;
   RenderTexture renderTexture;
@@ -149,7 +151,7 @@ typedef struct State {
   double time_window_init;
   Arena doc_arena;
   Arena scratch_arena;
-    Rectangle selection_rec;
+  Rectangle selection_rec;
 } State;
 
 #define NOTIFICATION_DURATION 3.0f
@@ -267,9 +269,9 @@ static inline void make_text(Element *e) {
 static inline void make_text_editor(Arena *doc_arena, Element *e,
                                     String initText) {
   e->kind = ELEM_TEXT_EDITOR;
-if (initText.len == 0 && e->text.len > 0 ) {
+  if (initText.len == 0 && e->text.len > 0) {
     initText = e->text;
-}
+  }
 
   int textLen = initText.data ? (int)strlen(initText.data) : 0;
   int textCapacity = 4096;
@@ -562,7 +564,7 @@ void Update(State *s) {
           if (editor->kind == ELEM_ENTRY_LIST) {
             UpdateEntryContentInDB(s, editor->selectedEntryId, editor->text);
           } else {
-                        
+
             UpdateLogInDB(s, editor->text);
           }
           editor->snapToCursor = 2;
@@ -572,7 +574,6 @@ void Update(State *s) {
   } else {
     updateNotification(s, StringStatic("VOICE ERROR"));
   }
-
 
   Vector2 mPos = GetMousePosition();
   Vector2 mDelta = GetMouseDelta();
@@ -602,7 +603,8 @@ void Update(State *s) {
   } else if (resizingIdx != -1) {
     Element *e = &s->elements[resizingIdx];
     SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) ||
+        IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
       float newWidth = mPos.x - e->position.x - e->dragOffsetX;
       float newHeight = mPos.y - e->position.y - e->dragOffsetY;
       if (newWidth < 20.0f)
@@ -657,42 +659,40 @@ void Update(State *s) {
         }
       }
     }
-        if (IsKeyDown(KEY_LEFT_SUPER) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-            if (mDelta.x != 0.0f || mDelta.y != 0.0f) {
-                for (int i = 0; i < s->numElements; i++) {
-                    Element *e = &s->elements[i];
-                    e->position.x += mDelta.x;
-                    e->position.y += mDelta.y;
-                }
-            }
+    if (IsKeyDown(KEY_LEFT_SUPER) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+      if (mDelta.x != 0.0f || mDelta.y != 0.0f) {
+        for (int i = 0; i < s->numElements; i++) {
+          Element *e = &s->elements[i];
+          e->position.x += mDelta.x;
+          e->position.y += mDelta.y;
         }
-
+      }
+    }
   }
 
-    if (IsKeyDown(KEY_LEFT_SUPER)) {
-        for (int i = s->numElements - 1; i >= 0; i--) {
-            Element *e = &s->elements[i];
-            if (e->kind == ELEM_NOTHING)
-                continue;
+  if (IsKeyDown(KEY_LEFT_SUPER)) {
+    for (int i = s->numElements - 1; i >= 0; i--) {
+      Element *e = &s->elements[i];
+      if (e->kind == ELEM_NOTHING)
+        continue;
 
-            Rectangle r = GetElementBoundingBox(s, e);
-            if (CheckCollisionPointRec(mPos, r)) {
-                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    e->isDragging = true;
-                    e->dragOffsetX = mPos.x - e->position.x;
-                    e->dragOffsetY = mPos.y - e->position.y;
-                    break;
-                }
-                if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-                    e->isResizing = true;
-                    e->dragOffsetX = mPos.x - (e->position.x + *e->width);
-                    e->dragOffsetY = mPos.y - (e->position.y + *e->height);
-                    break;
-                }
-            }
+      Rectangle r = GetElementBoundingBox(s, e);
+      if (CheckCollisionPointRec(mPos, r)) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+          e->isDragging = true;
+          e->dragOffsetX = mPos.x - e->position.x;
+          e->dragOffsetY = mPos.y - e->position.y;
+          break;
         }
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+          e->isResizing = true;
+          e->dragOffsetX = mPos.x - (e->position.x + *e->width);
+          e->dragOffsetY = mPos.y - (e->position.y + *e->height);
+          break;
+        }
+      }
     }
-   
+  }
 
   for (int i = 0; i < s->numElements; i++) {
     Element *e = &s->elements[i];
@@ -718,19 +718,20 @@ void Update(State *s) {
                   StringStatic("Done"));
           break;
         case ACTION_LOAD_HYPERMEDIA: {
-          // Hack to make the first element used as the URL input for loading hypermedia documents
-          // Element *url_input = e;
+          // Hack to make the first element used as the URL input for loading
+          // hypermedia documents Element *url_input = e;
           Element *url_input = &s->elements[0];
-          if (url_input->text.data && (strncmp(url_input->text.data, "http://", 7) == 0 ||
-                               strncmp(url_input->text.data, "https://", 8) == 0 ||
-                               strncmp(url_input->text.data, "file://", 7) == 0 ||
-                               strstr(url_input->text.data, ".html") != NULL)) {
+          if (url_input->text.data &&
+              (strncmp(url_input->text.data, "http://", 7) == 0 ||
+               strncmp(url_input->text.data, "https://", 8) == 0 ||
+               strncmp(url_input->text.data, "file://", 7) == 0 ||
+               strstr(url_input->text.data, ".html") != NULL)) {
             LoadHypermediaDocument(s, url_input->text);
           } else {
             LoadHypermediaDocument(s, StringStatic("file://document.html"));
           }
           break;
-                    }
+        }
         default:
           break;
         }
@@ -738,19 +739,19 @@ void Update(State *s) {
     }
 
     if (e->isDragging) {
-            continue; // Skip hover effect if dragging
-        }
+      continue; // Skip hover effect if dragging
+    }
     switch (s->elements[i].kind) {
     case ELEM_RECTANGLE:
     case ELEM_ELBOW:
-        if (isHovering) {
-            s->elements[i].color =
-                ColorBrightness(s->elements[i].originalColor, 0.2f);
-            clickOrHoverNotification(s, i, StringStatic("elbow element"));
-        }  else {
-            s->elements[i].color = s->elements[i].originalColor;
-        }
-        break;
+      if (isHovering) {
+        s->elements[i].color =
+            ColorBrightness(s->elements[i].originalColor, 0.2f);
+        clickOrHoverNotification(s, i, StringStatic("elbow element"));
+      } else {
+        s->elements[i].color = s->elements[i].originalColor;
+      }
+      break;
     case ELEM_BUTTON: {
       VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
       bool isRecording =
@@ -832,7 +833,8 @@ void Update(State *s) {
                 EntryListItem items[32];
 
                 e->kindList = GetAllKindsFromDB(s);
-                int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
+                int count =
+                    GetEntriesByKind(s, e->selectedKind.data, items, 32);
                 float viewportHeight = *e->height - 45.0f;
                 float maxItemWidth = listWidth - 15.0f;
                 bool isScrollable = (count * 90.0f > viewportHeight);
@@ -1499,23 +1501,24 @@ void UpdateDrawFrame(State *s) {
   BeginDrawing();
   ClearBackground(BLACK);
 
-    // static Rectangle selectionRec = (Rectangle){0, 0, 0, 0};
-    if (IsKeyDown(KEY_LEFT_SHIFT)) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            s->selection_rec.x = mPos.x;
-            s->selection_rec.y = mPos.y;
-            s->selection_rec.width = 0;
-            s->selection_rec.height = 0;
-        }else if  (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-            // This only works when selecting from top-left to bottom-right. Need to handle other directions.
-            s->selection_rec.width = mPos.x - s->selection_rec.x;
-            s->selection_rec.height = mPos.y - s->selection_rec.y;
-            DrawRectangleLinesEx(s->selection_rec, 1, LCARS_GREEN);
-        } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-            s->selection_rec.width = 0;
-            s->selection_rec.height = 0;
-        }
+  // static Rectangle selectionRec = (Rectangle){0, 0, 0, 0};
+  if (IsKeyDown(KEY_LEFT_SHIFT)) {
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+      s->selection_rec.x = mPos.x;
+      s->selection_rec.y = mPos.y;
+      s->selection_rec.width = 0;
+      s->selection_rec.height = 0;
+    } else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+      // This only works when selecting from top-left to bottom-right. Need to
+      // handle other directions.
+      s->selection_rec.width = mPos.x - s->selection_rec.x;
+      s->selection_rec.height = mPos.y - s->selection_rec.y;
+      DrawRectangleLinesEx(s->selection_rec, 1, LCARS_GREEN);
+    } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+      s->selection_rec.width = 0;
+      s->selection_rec.height = 0;
     }
+  }
 
   for (int i = 0; i < s->numElements; i++) {
     Element *e = &s->elements[i];
@@ -1700,20 +1703,27 @@ void UpdateDrawFrame(State *s) {
         DrawText(btnText, deleteBtn.x + (deleteBtn.width - textWidth) / 2.0f,
                  deleteBtn.y + (deleteBtn.height - fontSize) / 2.0f, fontSize,
                  BLACK);
-         if (e->kindList.count > 0) {
-            for (int i=0; i<e->kindList.count; i++) {
-                DrawText(e->kindList.kinds[i].data, e->position.x + 50.0f + i * 200.0f + 12.0f, 
-                            e->position.y - 20.0f, 20, WHITE);
-                if (StringEq(e->kindList.kinds[i], e->selectedKind)) {
-                    DrawRectangle(e->position.x + 50.0f + i * 200.0f, e->position.y - 20.0f, 180.0f, 20.0f, ColorAlpha(LCARS_BLUE, 0.5f));
-                }
-                if (CheckCollisionPointRec(mPos, (Rectangle){e->position.x + 50.0f + i * 200.0f, e->position.y - 20.0f, 180.0f, 20.0f})) {
-                    DrawRectangle(e->position.x + 50.0f + i * 200.0f, e->position.y - 20.0f, 180.0f, 20.0f, ColorAlpha(LCARS_BLUE, 0.3f));
-                    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                        e->selectedKind = e->kindList.kinds[i];
-                    }
-                }
+        if (e->kindList.count > 0) {
+          for (int i = 0; i < e->kindList.count; i++) {
+            DrawText(e->kindList.kinds[i].data,
+                     e->position.x + 50.0f + i * 200.0f + 12.0f,
+                     e->position.y - 20.0f, 20, WHITE);
+            if (StringEq(e->kindList.kinds[i], e->selectedKind)) {
+              DrawRectangle(e->position.x + 50.0f + i * 200.0f,
+                            e->position.y - 20.0f, 180.0f, 20.0f,
+                            ColorAlpha(LCARS_BLUE, 0.5f));
             }
+            if (CheckCollisionPointRec(
+                    mPos, (Rectangle){e->position.x + 50.0f + i * 200.0f,
+                                      e->position.y - 20.0f, 180.0f, 20.0f})) {
+              DrawRectangle(e->position.x + 50.0f + i * 200.0f,
+                            e->position.y - 20.0f, 180.0f, 20.0f,
+                            ColorAlpha(LCARS_BLUE, 0.3f));
+              if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                e->selectedKind = e->kindList.kinds[i];
+              }
+            }
+          }
         }
       }
 
@@ -1837,8 +1847,8 @@ void UpdateDrawFrame(State *s) {
   if (s->notification.data && s->notificationTimer > 0.0f) {
     s->notificationTimer -= GetFrameTime();
     if (s->debug) {
-        DrawText(s->notification.data, s->posX + s->columnWidth + s->innerRadius,
-                s->posY - 2 * s->columnHeight - s->barHeight, 20, YELLOW);
+      DrawText(s->notification.data, s->posX + s->columnWidth + s->innerRadius,
+               s->posY - 2 * s->columnHeight - s->barHeight, 20, YELLOW);
     }
   } else {
     s->notificationOnElemIdx = -1;
@@ -1861,7 +1871,7 @@ void UpdateDrawFrame(State *s) {
         break;
 
       Rectangle r = GetElementBoundingBox(s, e);
-      bool isElementHovered =  IsHoveringElement(s, e);
+      bool isElementHovered = IsHoveringElement(s, e);
       // Drag handle at top-left
       Rectangle dragHandle = {r.x - 8, r.y - 8, 16, 16};
       // Resize handle at bottom-right

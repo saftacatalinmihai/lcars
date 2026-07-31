@@ -124,8 +124,9 @@ static KindList GetAllKindsFromDB(State *s) {
   KindList kindList = {0};
   sqlite3_stmt *stmt;
   int rc = sqlite3_prepare_v2(
-      s->db, "SELECT DISTINCT kind FROM entries WHERE deleted IS NULL OR "
-              "deleted = 0 ORDER BY kind ASC",
+      s->db,
+      "SELECT DISTINCT kind FROM entries WHERE deleted IS NULL OR "
+      "deleted = 0 ORDER BY kind ASC",
       -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     fprintf(stderr, "SQL error failure fetching kinds: %s\n",
@@ -234,7 +235,8 @@ static inline void make_entry_list(Arena *doc_arena, Element *e, State *s) {
   e->listCollapsed = false;
   e->selectedEntryId = GetFirstPersonalLogId(s);
   e->kindList = GetAllKindsFromDB(s);
-  e->selectedKind = e->kindList.count > 0 ? e->kindList.kinds[0] : StringStatic("architect_log");
+  e->selectedKind = e->kindList.count > 0 ? e->kindList.kinds[0]
+                                          : StringStatic("architect_log");
 
   String content = GetEntryContentFromDB(s, e->selectedEntryId);
   make_text_editor(doc_arena, e, content);

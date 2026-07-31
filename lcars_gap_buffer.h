@@ -39,7 +39,8 @@ static void GapInsertChar(Arena *arena, Element *e, char c) {
     int newGapEnd = newCapacity - afterGapLen;
     memcpy(newBuf + newGapEnd, e->gapBuffer + e->gapEnd, afterGapLen);
 
-    // Old e->gapBuffer was allocated in the arena and is reclaimed when the arena is reset
+    // Old e->gapBuffer was allocated in the arena and is reclaimed when the
+    // arena is reset
     e->gapBuffer = newBuf;
     e->gapEnd = newGapEnd;
     e->textCapacity = newCapacity;

@@ -176,7 +176,7 @@ static String LoadDocumentContent(String source, State *s) {
 void LoadHypermediaDocument(State *s, String source) {
   // Reset the document arena to reclaim all memory from the previous document
   arena_reset(&s->doc_arena);
-    s->numElements = 0;
+  s->numElements = 0;
 
   String buf = LoadDocumentContent(source, s);
   if (!buf.data) {

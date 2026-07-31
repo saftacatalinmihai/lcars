@@ -13,4 +13,3 @@ static inline double GetTimeSeconds(void) {
 }
 
 #endif // LCARS_BASE_H
-

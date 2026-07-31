@@ -249,4 +249,3 @@ int main(int argc, char **argv) {
 
 #include "lcars_resources_download.c"
 #include "lcars_voice_rec.c"
-

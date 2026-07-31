@@ -84,7 +84,8 @@ static inline void StringAssign(Arena *arena, String *dest, String src) {
   *dest = StringDup(arena, src);
 }
 
-static inline void StringAssignC(Arena *arena, String *dest, const char *c_str) {
+static inline void StringAssignC(Arena *arena, String *dest,
+                                 const char *c_str) {
   StringFree(dest);
   *dest = StringInit(arena, c_str);
 }
@@ -112,7 +113,8 @@ static inline void StringConcat(Arena *arena, String *dest, String src) {
   dest->is_static = false;
 }
 
-static inline void StringConcatC(Arena *arena, String *dest, const char *c_str) {
+static inline void StringConcatC(Arena *arena, String *dest,
+                                 const char *c_str) {
   if (!c_str)
     return;
   String s = StringStatic(c_str);
@@ -137,7 +139,8 @@ static inline bool StringEqC(String s, const char *c_str) {
   return strcmp(s.data, c_str) == 0;
 }
 
-static inline void StringFormat(Arena *arena, String *dest, const char *fmt, ...) {
+static inline void StringFormat(Arena *arena, String *dest, const char *fmt,
+                                ...) {
   va_list args;
   va_start(args, fmt);
   va_list args_copy;
