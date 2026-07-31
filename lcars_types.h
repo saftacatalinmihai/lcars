@@ -27,12 +27,29 @@
 #define MAX_ELEMENTS 10000
 #define MAX_INPUT_CHARS 1024
 #define MAX_KINDS 32
+#define MAX_LIST_ITEMS 32
 
 #define TEXT_VOICE_INPUT "Voice Input"
 #define TEXT_RECORDING "RECORDING..."
 
 #define NOTIFICATION_DURATION 3.0f
 #define NOTIFICATION_MAX_LEN 48
+
+// Text editor / entry-list tuning constants
+#define SCROLL_SPEED_PX 30.0f
+#define CURSOR_MOVE_REPEAT_DELAY 0.4f
+#define DELETE_REPEAT_DELAY 0.5f
+#define GAP_BUFFER_INITIAL_CAPACITY 4096
+#define GAP_BUFFER_MIN_GROWN_CAPACITY 1024
+#define LINE_STARTS_MAX 1024
+#define EDITOR_TEXT_PADDING 5.0f
+#define SCROLLBAR_MIN_HANDLE_HEIGHT 20.0f
+#define LIST_SCROLLBAR_MIN_HANDLE_HEIGHT 15.0f
+
+// Drag/resize edit-mode handle hit-box: a HANDLE_SIZE square offset by
+// HANDLE_OFFSET from the element's corner.
+#define EDIT_HANDLE_SIZE 16.0f
+#define EDIT_HANDLE_OFFSET 8.0f
 
 typedef enum ButtonAction {
   ACTION_NONE = 0,
@@ -83,14 +100,14 @@ typedef struct ScrollbarLayout {
 // lcars_text.h so they can't disagree about the panel's width. See
 // ComputeEntryListLayout() in lcars_ui.h.
 typedef struct EntryListLayout {
-  float width;          // 30 collapsed, 350 expanded
-  Rectangle panelRec;   // whole panel: {pos.x, pos.y, width, *height}
-  Rectangle toggleBtn;  // top-left collapse/expand button
+  float width;           // 30 collapsed, 350 expanded
+  Rectangle panelRec;    // whole panel: {pos.x, pos.y, width, *height}
+  Rectangle toggleBtn;   // top-left collapse/expand button
   Rectangle newEntryBtn; // "+ NEW ENTRY" button (only meaningful when expanded)
-  float headerHeight;   // vertical offset from panel top to the first item row
-  float itemStride;     // vertical spacing between item rows
-  float itemHeight;     // height of each item row
-  float viewportHeight; // *height - headerHeight
+  float headerHeight;    // vertical offset from panel top to the first item row
+  float itemStride;      // vertical spacing between item rows
+  float itemHeight;      // height of each item row
+  float viewportHeight;  // *height - headerHeight
 } EntryListLayout;
 
 typedef struct Element {

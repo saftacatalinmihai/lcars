@@ -23,23 +23,23 @@ static EntryListLayout ComputeEntryListLayout(Element *e);
 static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
                                               float editorWidth) {
   ScrollbarLayout sb = {0};
-  sb.bounds = (Rectangle){editorX + editorWidth + 25, e->position.y, 24.0f,
-                          *e->height};
+  sb.bounds =
+      (Rectangle){editorX + editorWidth + 25, e->position.y, 24.0f, *e->height};
   sb.upButton =
       (Rectangle){sb.bounds.x, sb.bounds.y, sb.bounds.width, sb.bounds.width};
-  sb.downButton = (Rectangle){sb.bounds.x,
-                              sb.bounds.y + sb.bounds.height - sb.bounds.width,
-                              sb.bounds.width, sb.bounds.width};
-  sb.track = (Rectangle){sb.bounds.x, sb.bounds.y + sb.bounds.width + 5,
-                         sb.bounds.width,
-                         sb.bounds.height - 2 * sb.bounds.width - 10};
+  sb.downButton =
+      (Rectangle){sb.bounds.x, sb.bounds.y + sb.bounds.height - sb.bounds.width,
+                  sb.bounds.width, sb.bounds.width};
+  sb.track =
+      (Rectangle){sb.bounds.x, sb.bounds.y + sb.bounds.width + 5,
+                  sb.bounds.width, sb.bounds.height - 2 * sb.bounds.width - 10};
 
   float visibleRatio = *e->height / e->textHeight;
   if (visibleRatio > 1.0f)
     visibleRatio = 1.0f;
   float handleHeight = visibleRatio * sb.track.height;
-  if (handleHeight < 20.0f)
-    handleHeight = 20.0f;
+  if (handleHeight < SCROLLBAR_MIN_HANDLE_HEIGHT)
+    handleHeight = SCROLLBAR_MIN_HANDLE_HEIGHT;
 
   sb.scrollRange = e->textHeight - *e->height;
   float handleY = sb.track.y;

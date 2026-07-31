@@ -77,8 +77,8 @@ static void MoveGap(Element *e, int index) {
 static void GapInsertChar(Arena *arena, Element *e, char c) {
   if (e->gapStart == e->gapEnd) {
     int newCapacity = e->textCapacity * 2;
-    if (newCapacity < 1024)
-      newCapacity = 1024;
+    if (newCapacity < GAP_BUFFER_MIN_GROWN_CAPACITY)
+      newCapacity = GAP_BUFFER_MIN_GROWN_CAPACITY;
     char *newBuf = arena_alloc(arena, newCapacity + 1);
 
     memcpy(newBuf, e->gapBuffer, e->gapStart);

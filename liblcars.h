@@ -111,7 +111,7 @@ static inline void make_text_editor(Arena *doc_arena, Element *e,
   }
 
   int textLen = initText.data ? (int)strlen(initText.data) : 0;
-  int textCapacity = 4096;
+  int textCapacity = GAP_BUFFER_INITIAL_CAPACITY;
   char *gapBuffer = (char *)arena_alloc(doc_arena, textCapacity + 1);
   if (gapBuffer && initText.data) {
     memcpy(gapBuffer, initText.data, textLen);
@@ -259,8 +259,8 @@ static void ClampScrollY(Element *e) {
 }
 
 static void NavigateEntryList(State *s, Element *e, int direction) {
-  EntryListItem items[32];
-  int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
+  EntryListItem items[MAX_LIST_ITEMS];
+  int count = GetEntriesByKind(s, e->selectedKind.data, items, MAX_LIST_ITEMS);
   int selectedIdx = -1;
   for (int j = 0; j < count; j++) {
     if (items[j].id == e->selectedEntryId) {
@@ -376,8 +376,7 @@ static void UpdateVoiceInput(State *s) {
     if (vapi->PollPartial(partialBuf, sizeof(partialBuf))) {
       if (strlen(partialBuf) > 0) {
         char fullNotify[300];
-        snprintf(fullNotify, sizeof(fullNotify), "[Voice: \"%s\"]",
-                 partialBuf);
+        snprintf(fullNotify, sizeof(fullNotify), "[Voice: \"%s\"]", partialBuf);
         updateNotification(s, StringStatic(fullNotify));
       }
     }
@@ -516,10 +515,13 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
         Rectangle r = GetElementBoundingBox(s, e);
 
         // Drag handle at top-left
-        Rectangle dragHandle = {r.x - 8, r.y - 8, 16, 16};
+        Rectangle dragHandle = {r.x - EDIT_HANDLE_OFFSET,
+                                r.y - EDIT_HANDLE_OFFSET, EDIT_HANDLE_SIZE,
+                                EDIT_HANDLE_SIZE};
         // Resize handle at bottom-right
-        Rectangle resizeHandle = {r.x + r.width - 8, r.y + r.height - 8, 16,
-                                  16};
+        Rectangle resizeHandle = {r.x + r.width - EDIT_HANDLE_OFFSET,
+                                  r.y + r.height - EDIT_HANDLE_OFFSET,
+                                  EDIT_HANDLE_SIZE, EDIT_HANDLE_SIZE};
 
         if (CheckCollisionPointRec(mPos, resizeHandle)) {
           SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
@@ -584,7 +586,7 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
 // (rectangle/elbow highlight, button recording indicator, text editor and
 // entry-list panel input, sphere camera/rotation).
 static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
-                         int resizingIdx) {
+                          int resizingIdx) {
   VoiceRecApi *vapi = s->voiceApi;
   Element *e = &s->elements[i];
   bool isHovering = IsHoveringElement(s, e);
@@ -642,9 +644,10 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         // Mouse wheel scrolling for list
         float wheelMove = GetMouseWheelMove();
         if (wheelMove != 0.0f) {
-          EntryListItem items[32];
-          int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
-          e->listScrollY -= wheelMove * 30.0f;
+          EntryListItem items[MAX_LIST_ITEMS];
+          int count =
+              GetEntriesByKind(s, e->selectedKind.data, items, MAX_LIST_ITEMS);
+          e->listScrollY -= wheelMove * SCROLL_SPEED_PX;
           e->listScrollY = ClampScrollOffset(
               e->listScrollY, count * el.itemStride, el.viewportHeight);
         }
@@ -677,23 +680,21 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
               LoadEntryIntoEditor(e, newText);
               StringFree(&newText);
             } else {
-              EntryListItem items[32];
+              EntryListItem items[MAX_LIST_ITEMS];
 
               e->kindList = GetAllKindsFromDB(s);
-              int count =
-                  GetEntriesByKind(s, e->selectedKind.data, items, 32);
+              int count = GetEntriesByKind(s, e->selectedKind.data, items,
+                                           MAX_LIST_ITEMS);
               float maxItemWidth = el.width - 15.0f;
               bool isScrollable = (count * el.itemStride > el.viewportHeight);
               float itemWidth = maxItemWidth;
               if (isScrollable) {
                 itemWidth = maxItemWidth - 10.0f;
               }
-              float itemY =
-                  e->position.y + el.headerHeight - e->listScrollY;
+              float itemY = e->position.y + el.headerHeight - e->listScrollY;
               Rectangle scrollableListRec =
-                  (Rectangle){e->position.x,
-                              e->position.y + el.headerHeight, el.width - 5.0f,
-                              el.viewportHeight};
+                  (Rectangle){e->position.x, e->position.y + el.headerHeight,
+                              el.width - 5.0f, el.viewportHeight};
               if (CheckCollisionPointRec(mPos, scrollableListRec)) {
                 for (int j = 0; j < count; j++) {
                   Rectangle itemRec = (Rectangle){e->position.x + 5.0f, itemY,
@@ -742,8 +743,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       // Mouse wheel scrolling
       float wheelMove = GetMouseWheelMove();
       if (wheelMove != 0.0f) {
-        e->scrollY -=
-            wheelMove * 30.0f; // Scroll speed: 30 pixels per wheel tick
+        e->scrollY -= wheelMove * SCROLL_SPEED_PX;
         ClampScrollY(e);
       }
 
@@ -757,8 +757,9 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                           e->position.y - btnSize - 4.0f, btnSize, btnSize};
           if (CheckCollisionPointRec(mPos, deleteBtn)) {
             DeleteEntryFromDB(s, e->selectedEntryId);
-            EntryListItem remItems[32];
-            int remCount = GetEntriesByKind(s, "personal_log", remItems, 32);
+            EntryListItem remItems[MAX_LIST_ITEMS];
+            int remCount =
+                GetEntriesByKind(s, "personal_log", remItems, MAX_LIST_ITEMS);
             if (remCount > 0) {
               e->selectedEntryId = remItems[0].id;
             } else {
@@ -788,10 +789,10 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
 
         if (!deleteClicked) {
           if (CheckCollisionPointRec(mPos, sb.upButton)) {
-            e->scrollY -= 30.0f;
+            e->scrollY -= SCROLL_SPEED_PX;
             ClampScrollY(e);
           } else if (CheckCollisionPointRec(mPos, sb.downButton)) {
-            e->scrollY += 30.0f;
+            e->scrollY += SCROLL_SPEED_PX;
             ClampScrollY(e);
           } else if (CheckCollisionPointRec(mPos, sb.track)) {
             if (CheckCollisionPointRec(mPos, sb.handle)) {
@@ -801,8 +802,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             } else {
               // Jump scroll handle to clicked position
               float clickY = mPos.y;
-              float relativeY =
-                  clickY - sb.track.y - sb.handle.height / 2.0f;
+              float relativeY = clickY - sb.track.y - sb.handle.height / 2.0f;
               float pct = relativeY / (sb.track.height - sb.handle.height);
               if (pct < 0.0f)
                 pct = 0.0f;
@@ -862,8 +862,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         isMouseOverList = CheckCollisionPointRec(mPos, listRec);
       }
 
-      bool shiftDown =
-          IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+      bool shiftDown = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
 
       // Get char pressed (unicode character) on the queue
       int key = GetCharPressed();
@@ -895,8 +894,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             IsKeyPressed(KEY_C)) {
           if (e->selectTextLength <= 0) {
             SetClipboardText(e->text.data ? e->text.data : "");
-            updateNotification(s,
-                               StringStatic("All text copied to clipboard"));
+            updateNotification(s, StringStatic("All text copied to clipboard"));
           } else {
             int selStart = e->selectTextLength > 0
                                ? e->selectTextStart
@@ -939,28 +937,28 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         }
 
         // Cursor movements
-        if (KeyRepeatFired(&e->moveLeftRepeat, KEY_LEFT, 0.4f,
+        if (KeyRepeatFired(&e->moveLeftRepeat, KEY_LEFT,
+                           CURSOR_MOVE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 2)) {
           StartTextSelection(e, shiftDown);
           bool isWordJump =
               IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
               IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-          int target = isWordJump
-                           ? FindWordBoundary(e->text, e->gapStart, -1)
-                           : e->gapStart - 1;
+          int target = isWordJump ? FindWordBoundary(e->text, e->gapStart, -1)
+                                  : e->gapStart - 1;
           MoveGap(e, target);
           EndTextSelection(e, shiftDown);
         }
 
-        if (KeyRepeatFired(&e->moveRightRepeat, KEY_RIGHT, 0.4f,
+        if (KeyRepeatFired(&e->moveRightRepeat, KEY_RIGHT,
+                           CURSOR_MOVE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 2)) {
           StartTextSelection(e, shiftDown);
           bool isWordJump =
               IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
               IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-          int target = isWordJump
-                           ? FindWordBoundary(e->text, e->gapStart, 1)
-                           : e->gapStart + 1;
+          int target = isWordJump ? FindWordBoundary(e->text, e->gapStart, 1)
+                                  : e->gapStart + 1;
           MoveGap(e, target);
           EndTextSelection(e, shiftDown);
         }
@@ -970,12 +968,12 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       }
       bool triggerMoveUp = false;
       if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
-        if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, 0.4f,
+        if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, CURSOR_MOVE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 10)) {
           NavigateEntryList(s, e, -1);
         }
       } else {
-        if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, 0.4f,
+        if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, CURSOR_MOVE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 2)) {
           triggerMoveUp = true;
         }
@@ -983,20 +981,22 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
 
       bool triggerMoveDown = false;
       if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
-        if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN, 0.4f,
+        if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN,
+                           CURSOR_MOVE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 10)) {
           NavigateEntryList(s, e, 1);
         }
       } else {
-        if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN, 0.4f,
+        if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN,
+                           CURSOR_MOVE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 2)) {
           triggerMoveDown = true;
         }
       }
 
       if (triggerMoveUp || triggerMoveDown) {
-        int lineStarts[1024];
-        int numLines = GetLines(e->text, lineStarts, 1024);
+        int lineStarts[LINE_STARTS_MAX];
+        int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
         int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
         int col = e->gapStart - lineStarts[currLine];
 
@@ -1027,16 +1027,16 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       }
       if (IsKeyPressed(KEY_HOME)) {
         StartTextSelection(e, shiftDown);
-        int lineStarts[1024];
-        int numLines = GetLines(e->text, lineStarts, 1024);
+        int lineStarts[LINE_STARTS_MAX];
+        int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
         int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
         MoveGap(e, lineStarts[currLine]);
         EndTextSelection(e, shiftDown);
       }
       if (IsKeyPressed(KEY_END)) {
         StartTextSelection(e, shiftDown);
-        int lineStarts[1024];
-        int numLines = GetLines(e->text, lineStarts, 1024);
+        int lineStarts[LINE_STARTS_MAX];
+        int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
         int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
         int targetIndex = (currLine < numLines - 1)
                               ? lineStarts[currLine + 1] - 1
@@ -1050,7 +1050,8 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         e->selectingText = true;
         int clickedIndex = GetCharIndexAtMouse(
             s, s->font, e->text,
-            (Vector2){editorX + 5, e->position.y + 5 - e->scrollY},
+            (Vector2){editorX + EDITOR_TEXT_PADDING,
+                      e->position.y + EDITOR_TEXT_PADDING - e->scrollY},
             e->textSize, 2.0, mPos, editorWidth);
         if (shiftDown) {
           if (e->selectTextStart == -1) {
@@ -1075,7 +1076,8 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       if (e->selectingText) {
         int textEnd = GetCharIndexAtMouse(
             s, s->font, e->text,
-            (Vector2){editorX + 5, e->position.y + 5 - e->scrollY},
+            (Vector2){editorX + EDITOR_TEXT_PADDING,
+                      e->position.y + EDITOR_TEXT_PADDING - e->scrollY},
             e->textSize, 2.0, mPos, editorWidth);
         e->selectTextEnd = textEnd;
         e->selectTextLength = e->selectTextEnd - e->selectTextStart;
@@ -1091,14 +1093,14 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         textChanged = true;
         e->snapToCursor = 2;
       } else if (IsKeyDown(KEY_BACKSPACE)) {
-        if (KeyRepeatFired(&e->deleteRepeat, KEY_BACKSPACE, 0.5f,
+        if (KeyRepeatFired(&e->deleteRepeat, KEY_BACKSPACE, DELETE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 10)) {
           GapDeleteBack(e);
           textChanged = true;
           e->snapToCursor = 2;
         }
       } else if (IsKeyDown(KEY_DELETE)) {
-        if (KeyRepeatFired(&e->deleteRepeat, KEY_DELETE, 0.5f,
+        if (KeyRepeatFired(&e->deleteRepeat, KEY_DELETE, DELETE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 10)) {
           GapDeleteForward(e);
           textChanged = true;
@@ -1277,9 +1279,9 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
                   e->color);
     break;
   case ELEM_ELBOW:
-    DrawElbow(e->position.x, e->position.y, *e->width, *e->height,
-              s->barWidth, s->barHeight, s->innerRadius, e->color,
-              e->elbowOrientation, s->debug);
+    DrawElbow(e->position.x, e->position.y, *e->width, *e->height, s->barWidth,
+              s->barHeight, s->innerRadius, e->color, e->elbowOrientation,
+              s->debug);
     break;
   case ELEM_BUTTON:
     // printf("Drawing button element %d at (%.2d, %.2d) with size (%.2f,
@@ -1313,32 +1315,33 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
       }
 
       // Draw list panel background
-      DrawRectangle(e->position.x, e->position.y, listWidth - 5.0f,
-                    *e->height, (Color){15, 15, 15, 255});
+      DrawRectangle(e->position.x, e->position.y, listWidth - 5.0f, *e->height,
+                    (Color){15, 15, 15, 255});
       DrawRectangleLines(e->position.x, e->position.y, listWidth - 5.0f,
                          *e->height, listBorderColor);
 
       // Draw toggle button
       DrawRectangleRounded(el.toggleBtn, 0.3f, 4, LCARS_BLUE);
       DrawText(e->listCollapsed ? ">" : "<",
-               el.toggleBtn.x + (el.toggleBtn.width -
-                                 MeasureText(e->listCollapsed ? ">" : "<", 20)) /
-                                    2,
+               el.toggleBtn.x +
+                   (el.toggleBtn.width -
+                    MeasureText(e->listCollapsed ? ">" : "<", 20)) /
+                       2,
                el.toggleBtn.y + (el.toggleBtn.height - 20) / 2, 20, BLACK);
 
       if (!e->listCollapsed) {
         // Draw "+ New Entry" button
         DrawRectangleRounded(el.newEntryBtn, 0.3f, 4, LCARS_GREEN);
-        DrawText("+ NEW ENTRY",
-                 el.newEntryBtn.x + (el.newEntryBtn.width -
-                                     MeasureText("+ NEW ENTRY", 20)) /
-                                        2,
-                 el.newEntryBtn.y + (el.newEntryBtn.height - 20) / 2, 20,
-                 BLACK);
+        DrawText(
+            "+ NEW ENTRY",
+            el.newEntryBtn.x +
+                (el.newEntryBtn.width - MeasureText("+ NEW ENTRY", 20)) / 2,
+            el.newEntryBtn.y + (el.newEntryBtn.height - 20) / 2, 20, BLACK);
 
         // Draw entries
-        EntryListItem items[32];
-        int count = GetEntriesByKind(s, e->selectedKind.data, items, 32);
+        EntryListItem items[MAX_LIST_ITEMS];
+        int count =
+            GetEntriesByKind(s, e->selectedKind.data, items, MAX_LIST_ITEMS);
         float maxItemWidth = el.width - 15.0f;
         bool isScrollable = (count * el.itemStride > el.viewportHeight);
         float itemWidth = maxItemWidth;
@@ -1359,8 +1362,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
           Color itemColor = (items[j].id == e->selectedEntryId)
                                 ? LCARS_YELLOW
                                 : (Color){40, 40, 40, 255};
-          Color textColor =
-              (items[j].id == e->selectedEntryId) ? BLACK : WHITE;
+          Color textColor = (items[j].id == e->selectedEntryId) ? BLACK : WHITE;
           Color subtextColor = (items[j].id == e->selectedEntryId)
                                    ? (Color){80, 80, 80, 255}
                                    : (Color){180, 180, 180, 255};
@@ -1398,8 +1400,8 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
 
           float handleHeight =
               (el.viewportHeight / (count * el.itemStride)) * trackHeight;
-          if (handleHeight < 15.0f)
-            handleHeight = 15.0f;
+          if (handleHeight < LIST_SCROLLBAR_MIN_HANDLE_HEIGHT)
+            handleHeight = LIST_SCROLLBAR_MIN_HANDLE_HEIGHT;
 
           float scrollRange = count * el.itemStride - el.viewportHeight;
           float handleY = trackY;
@@ -1468,11 +1470,12 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
       }
     }
 
-    Rectangle r =
-        (Rectangle){editorX + 5, e->position.y + 5, editorWidth, *e->height};
+    Rectangle r = (Rectangle){editorX + EDITOR_TEXT_PADDING,
+                              e->position.y + EDITOR_TEXT_PADDING, editorWidth,
+                              *e->height};
     BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
-    DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false,
-                  e->color, &e->textHeight, &e->cursorY, e->gapStart);
+    DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false, e->color,
+                  &e->textHeight, &e->cursorY, e->gapStart);
     EndScissorMode();
 
     // Render scrollbar
@@ -1487,8 +1490,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
              sb.upButton.x + (sb.upButton.width - MeasureText("^", 20)) / 2,
              sb.upButton.y + (sb.upButton.height - 20) / 2, 20, BLACK);
     DrawText("v",
-             sb.downButton.x +
-                 (sb.downButton.width - MeasureText("v", 20)) / 2,
+             sb.downButton.x + (sb.downButton.width - MeasureText("v", 20)) / 2,
              sb.downButton.y + (sb.downButton.height - 20) / 2, 20, BLACK);
 
     // Draw track background
@@ -1554,8 +1556,8 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
                e->textSize, BLACK);
     } else {
       DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
-               e->position.y + (*e->height - e->textSize) / 2 + 10,
-               e->textSize, BLACK);
+               e->position.y + (*e->height - e->textSize) / 2 + 10, e->textSize,
+               BLACK);
     }
   }
 }
@@ -1600,9 +1602,12 @@ static void DrawEditHandles(State *s) {
     Rectangle r = GetElementBoundingBox(s, e);
     bool isElementHovered = IsHoveringElement(s, e);
     // Drag handle at top-left
-    Rectangle dragHandle = {r.x - 8, r.y - 8, 16, 16};
+    Rectangle dragHandle = {r.x - EDIT_HANDLE_OFFSET, r.y - EDIT_HANDLE_OFFSET,
+                            EDIT_HANDLE_SIZE, EDIT_HANDLE_SIZE};
     // Resize handle at bottom-right
-    Rectangle resizeHandle = {r.x + r.width - 8, r.y + r.height - 8, 16, 16};
+    Rectangle resizeHandle = {r.x + r.width - EDIT_HANDLE_OFFSET,
+                              r.y + r.height - EDIT_HANDLE_OFFSET,
+                              EDIT_HANDLE_SIZE, EDIT_HANDLE_SIZE};
 
     bool isHoveredDrag = CheckCollisionPointRec(mousePos, dragHandle);
     bool isHoveredResize = CheckCollisionPointRec(mousePos, resizeHandle);
