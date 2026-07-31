@@ -61,6 +61,11 @@ typedef enum ElemKind {
   ELEM_TOTAL_KINDS
 } ElemKind;
 
+typedef struct KeyRepeat {
+  bool isHeld;
+  float startTime;
+} KeyRepeat;
+
 typedef struct Element {
   ElemKind kind;
   ButtonAction on_click;
@@ -92,16 +97,11 @@ typedef struct Element {
   int selectTextStart;
   int selectTextLength;
   int selectTextEnd;
-  bool isDeletingText;
-  float deletingTextStartTime;
-  bool isMovingCursorLeft;
-  float moveCursorLeftStartTime;
-  bool isMovingCursorRight;
-  float moveCursorRightStartTime;
-  bool isMovingCursorUp;
-  float moveCursorUpStartTime;
-  bool isMovingCursorDown;
-  float moveCursorDownStartTime;
+  KeyRepeat deleteRepeat;
+  KeyRepeat moveLeftRepeat;
+  KeyRepeat moveRightRepeat;
+  KeyRepeat moveUpRepeat;
+  KeyRepeat moveDownRepeat;
   bool selectingText;
   bool draggingScrollbar;
   float dragStartY;

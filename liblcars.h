@@ -43,6 +43,8 @@ void LoadHypermediaDocument(State *s, String filename);
 // Inline Utility Function Declarations
 // -----------------------------------------------------------------------------
 static inline void updateNotification(State *s, String notificationText);
+static inline bool KeyRepeatFired(KeyRepeat *repeat, int key, float delay,
+                                  int frameCounter, int frameModulo);
 
 #ifdef LCARS_IMPLEMENTATION
 static void ToggleVoiceRecording(State *s);
@@ -56,6 +58,23 @@ static void NavigateEntryList(State *s, Element *e, int direction);
 static inline void updateNotification(State *s, String notificationText) {
   StringAssign(&s->doc_arena, &s->notification, notificationText);
   s->notificationTimer = NOTIFICATION_DURATION;
+}
+
+// Tracks a held key and reports whether its action should fire this frame,
+// covering both the initial press and the auto-repeat while held down.
+// `frameModulo` throttles the repeat rate once `delay` seconds have passed.
+static inline bool KeyRepeatFired(KeyRepeat *repeat, int key, float delay,
+                                  int frameCounter, int frameModulo) {
+  if (!IsKeyDown(key)) {
+    repeat->isHeld = false;
+    return false;
+  }
+  if (!repeat->isHeld) {
+    repeat->startTime = GetTime();
+  }
+  repeat->isHeld = true;
+  return IsKeyPressed(key) || (GetTime() - repeat->startTime > delay &&
+                               frameCounter % frameModulo == 0);
 }
 // 1
 // -----------------------------------------------------------------------------
@@ -946,132 +965,92 @@ void Update(State *s) {
           }
 
           // Cursor movements
-          if (IsKeyDown(KEY_LEFT)) {
-            if (!e->isMovingCursorLeft)
-              e->moveCursorLeftStartTime = GetTime();
-            e->isMovingCursorLeft = true;
-            if (IsKeyPressed(KEY_LEFT) ||
-                (GetTime() - e->moveCursorLeftStartTime > 0.4f &&
-                 e->textSelectedFramesCounter % 2 == 0)) {
-              StartTextSelection(e, shiftDown);
-              bool isWordJump =
-                  IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
-                  IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-              if (isWordJump) {
-                int target = e->gapStart;
-                if (target > 0) {
-                  if (e->text.data[target - 1] == '\n') {
+          if (KeyRepeatFired(&e->moveLeftRepeat, KEY_LEFT, 0.4f,
+                             e->textSelectedFramesCounter, 2)) {
+            StartTextSelection(e, shiftDown);
+            bool isWordJump =
+                IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
+                IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
+            if (isWordJump) {
+              int target = e->gapStart;
+              if (target > 0) {
+                if (e->text.data[target - 1] == '\n') {
+                  target--;
+                } else {
+                  while (target > 0 &&
+                         !IsWordChar(e->text.data[target - 1]) &&
+                         e->text.data[target - 1] != '\n') {
                     target--;
-                  } else {
-                    while (target > 0 &&
-                           !IsWordChar(e->text.data[target - 1]) &&
-                           e->text.data[target - 1] != '\n') {
-                      target--;
-                    }
-                    while (target > 0 && IsWordChar(e->text.data[target - 1])) {
-                      target--;
-                    }
+                  }
+                  while (target > 0 && IsWordChar(e->text.data[target - 1])) {
+                    target--;
                   }
                 }
-                MoveGap(e, target);
-              } else {
-                MoveGap(e, e->gapStart - 1);
               }
-              EndTextSelection(e, shiftDown);
+              MoveGap(e, target);
+            } else {
+              MoveGap(e, e->gapStart - 1);
             }
-          } else {
-            e->isMovingCursorLeft = false;
+            EndTextSelection(e, shiftDown);
           }
 
-          if (IsKeyDown(KEY_RIGHT)) {
-            if (!e->isMovingCursorRight)
-              e->moveCursorRightStartTime = GetTime();
-            e->isMovingCursorRight = true;
-            if (IsKeyPressed(KEY_RIGHT) ||
-                (GetTime() - e->moveCursorRightStartTime > 0.4f &&
-                 e->textSelectedFramesCounter % 2 == 0)) {
-              StartTextSelection(e, shiftDown);
-              bool isWordJump =
-                  IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
-                  IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-              if (isWordJump) {
-                int target = e->gapStart;
-                if (target < e->textLen) {
-                  if (e->text.data[target] == '\n') {
+          if (KeyRepeatFired(&e->moveRightRepeat, KEY_RIGHT, 0.4f,
+                             e->textSelectedFramesCounter, 2)) {
+            StartTextSelection(e, shiftDown);
+            bool isWordJump =
+                IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
+                IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
+            if (isWordJump) {
+              int target = e->gapStart;
+              if (target < e->textLen) {
+                if (e->text.data[target] == '\n') {
+                  target++;
+                } else {
+                  while (target < e->textLen &&
+                         !IsWordChar(e->text.data[target]) &&
+                         e->text.data[target] != '\n') {
                     target++;
-                  } else {
-                    while (target < e->textLen &&
-                           !IsWordChar(e->text.data[target]) &&
-                           e->text.data[target] != '\n') {
-                      target++;
-                    }
-                    while (target < e->textLen &&
-                           IsWordChar(e->text.data[target])) {
-                      target++;
-                    }
+                  }
+                  while (target < e->textLen &&
+                         IsWordChar(e->text.data[target])) {
+                    target++;
                   }
                 }
-                MoveGap(e, target);
-              } else {
-                MoveGap(e, e->gapStart + 1);
               }
-              EndTextSelection(e, shiftDown);
+              MoveGap(e, target);
+            } else {
+              MoveGap(e, e->gapStart + 1);
             }
-          } else {
-            e->isMovingCursorRight = false;
+            EndTextSelection(e, shiftDown);
           }
         } else {
-          e->isMovingCursorLeft = false;
-          e->isMovingCursorRight = false;
+          e->moveLeftRepeat.isHeld = false;
+          e->moveRightRepeat.isHeld = false;
         }
         bool triggerMoveUp = false;
-        if (IsKeyDown(KEY_UP)) {
-          if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
-            if (!e->isMovingCursorUp)
-              e->moveCursorUpStartTime = GetTime();
-            e->isMovingCursorUp = true;
-            if (IsKeyPressed(KEY_UP) ||
-                (GetTime() - e->moveCursorUpStartTime > 0.4f &&
-                 e->textSelectedFramesCounter % 10 == 0)) {
-              NavigateEntryList(s, e, -1);
-            }
-          } else {
-            if (!e->isMovingCursorUp)
-              e->moveCursorUpStartTime = GetTime();
-            e->isMovingCursorUp = true;
-            if (IsKeyPressed(KEY_UP) ||
-                (GetTime() - e->moveCursorUpStartTime > 0.4f &&
-                 e->textSelectedFramesCounter % 2 == 0)) {
-              triggerMoveUp = true;
-            }
+        if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
+          if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, 0.4f,
+                             e->textSelectedFramesCounter, 10)) {
+            NavigateEntryList(s, e, -1);
           }
         } else {
-          e->isMovingCursorUp = false;
+          if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, 0.4f,
+                             e->textSelectedFramesCounter, 2)) {
+            triggerMoveUp = true;
+          }
         }
 
         bool triggerMoveDown = false;
-        if (IsKeyDown(KEY_DOWN)) {
-          if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
-            if (!e->isMovingCursorDown)
-              e->moveCursorDownStartTime = GetTime();
-            e->isMovingCursorDown = true;
-            if (IsKeyPressed(KEY_DOWN) ||
-                (GetTime() - e->moveCursorDownStartTime > 0.4f &&
-                 e->textSelectedFramesCounter % 10 == 0)) {
-              NavigateEntryList(s, e, 1);
-            }
-          } else {
-            if (!e->isMovingCursorDown)
-              e->moveCursorDownStartTime = GetTime();
-            e->isMovingCursorDown = true;
-            if (IsKeyPressed(KEY_DOWN) ||
-                (GetTime() - e->moveCursorDownStartTime > 0.4f &&
-                 e->textSelectedFramesCounter % 2 == 0)) {
-              triggerMoveDown = true;
-            }
+        if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
+          if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN, 0.4f,
+                             e->textSelectedFramesCounter, 10)) {
+            NavigateEntryList(s, e, 1);
           }
         } else {
-          e->isMovingCursorDown = false;
+          if (KeyRepeatFired(&e->moveDownRepeat, KEY_DOWN, 0.4f,
+                             e->textSelectedFramesCounter, 2)) {
+            triggerMoveDown = true;
+          }
         }
 
         if (triggerMoveUp || triggerMoveDown) {
@@ -1171,23 +1150,15 @@ void Update(State *s) {
           textChanged = true;
           e->snapToCursor = 2;
         } else if (IsKeyDown(KEY_BACKSPACE)) {
-          if (!e->isDeletingText)
-            e->deletingTextStartTime = GetTime();
-          e->isDeletingText = true;
-          if (IsKeyPressed(KEY_BACKSPACE) ||
-              (GetTime() - e->deletingTextStartTime > 0.5f &&
-               e->textSelectedFramesCounter % 10 == 0)) {
+          if (KeyRepeatFired(&e->deleteRepeat, KEY_BACKSPACE, 0.5f,
+                             e->textSelectedFramesCounter, 10)) {
             GapDeleteBack(e);
             textChanged = true;
             e->snapToCursor = 2;
           }
         } else if (IsKeyDown(KEY_DELETE)) {
-          if (!e->isDeletingText)
-            e->deletingTextStartTime = GetTime();
-          e->isDeletingText = true;
-          if (IsKeyPressed(KEY_DELETE) ||
-              (GetTime() - e->deletingTextStartTime > 0.5f &&
-               e->textSelectedFramesCounter % 10 == 0)) {
+          if (KeyRepeatFired(&e->deleteRepeat, KEY_DELETE, 0.5f,
+                             e->textSelectedFramesCounter, 10)) {
             GapDeleteForward(e);
             textChanged = true;
             e->snapToCursor = 2;
@@ -1195,8 +1166,8 @@ void Update(State *s) {
         }
 
         if (IsKeyUp(KEY_BACKSPACE) && IsKeyUp(KEY_DELETE)) {
-          e->isDeletingText = false;
-          e->deletingTextStartTime = 0;
+          e->deleteRepeat.isHeld = false;
+          e->deleteRepeat.startTime = 0;
         }
 
         if (textChanged) {
