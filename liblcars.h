@@ -753,7 +753,6 @@ void Update(State *s) {
       }
       break;
     case ELEM_BUTTON: {
-      VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
       bool isRecording =
           (vapi && vapi->IsRecording() && e->on_click == ACTION_VOICE_INPUT);
       if (isHovering) {
@@ -782,7 +781,6 @@ void Update(State *s) {
         listWidth = e->listCollapsed ? 30.0f : 350.0f;
 
         // Handle list selection panel interactions
-        Vector2 mPos = GetMousePosition();
         Rectangle listRec =
             (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
         if (CheckCollisionPointRec(mPos, listRec)) {
@@ -905,7 +903,6 @@ void Update(State *s) {
 
         // Click handling
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-          Vector2 mPos = GetMousePosition();
           bool deleteClicked = false;
           if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
             float btnSize = 18.0f;
@@ -1049,7 +1046,6 @@ void Update(State *s) {
 
         bool isMouseOverList = false;
         if (e->kind == ELEM_ENTRY_LIST) {
-          Vector2 mPos = GetMousePosition();
           Rectangle listRec =
               (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
           isMouseOverList = CheckCollisionPointRec(mPos, listRec);
@@ -1556,7 +1552,6 @@ void UpdateDrawFrame(State *s) {
 
       if (e->kind == ELEM_ENTRY_LIST) {
         listWidth = e->listCollapsed ? 30.0f : 350.0f;
-        Vector2 mPos = GetMousePosition();
         Rectangle listRec =
             (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
         isMouseOverList = CheckCollisionPointRec(mPos, listRec);
@@ -1692,7 +1687,6 @@ void UpdateDrawFrame(State *s) {
             (Rectangle){editorX + editorWidth + 10.0f - btnSize - 8.0f,
                         e->position.y - btnSize - 4.0f, btnSize, btnSize};
 
-        Vector2 mPos = GetMousePosition();
         bool isHovered = CheckCollisionPointRec(mPos, deleteBtn);
         Color btnColor = isHovered ? RED : LCARS_RED_ORANGE;
         DrawRectangleRounded(deleteBtn, 0.3f, 4, btnColor);
@@ -1704,23 +1698,23 @@ void UpdateDrawFrame(State *s) {
                  deleteBtn.y + (deleteBtn.height - fontSize) / 2.0f, fontSize,
                  BLACK);
         if (e->kindList.count > 0) {
-          for (int i = 0; i < e->kindList.count; i++) {
-            DrawText(e->kindList.kinds[i].data,
-                     e->position.x + 50.0f + i * 200.0f + 12.0f,
+          for (int k = 0; k < e->kindList.count; k++) {
+            DrawText(e->kindList.kinds[k].data,
+                     e->position.x + 50.0f + k * 200.0f + 12.0f,
                      e->position.y - 20.0f, 20, WHITE);
-            if (StringEq(e->kindList.kinds[i], e->selectedKind)) {
-              DrawRectangle(e->position.x + 50.0f + i * 200.0f,
+            if (StringEq(e->kindList.kinds[k], e->selectedKind)) {
+              DrawRectangle(e->position.x + 50.0f + k * 200.0f,
                             e->position.y - 20.0f, 180.0f, 20.0f,
                             ColorAlpha(LCARS_BLUE, 0.5f));
             }
             if (CheckCollisionPointRec(
-                    mPos, (Rectangle){e->position.x + 50.0f + i * 200.0f,
+                    mPos, (Rectangle){e->position.x + 50.0f + k * 200.0f,
                                       e->position.y - 20.0f, 180.0f, 20.0f})) {
-              DrawRectangle(e->position.x + 50.0f + i * 200.0f,
+              DrawRectangle(e->position.x + 50.0f + k * 200.0f,
                             e->position.y - 20.0f, 180.0f, 20.0f,
                             ColorAlpha(LCARS_BLUE, 0.3f));
               if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                e->selectedKind = e->kindList.kinds[i];
+                e->selectedKind = e->kindList.kinds[k];
               }
             }
           }

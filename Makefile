@@ -25,7 +25,7 @@ else
 endif
 
 # Base CFLAGS (excluding RAYLIB_LIBS and LDFLAGS to avoid dynamic linking in static target)
-BASE_CFLAGS = -std=c11 -Wall -Wextra -pedantic -DHYPERMEDIA -Ivendor -Ivendor/raylib-web/src $(RAYLIB_CFLAGS)
+BASE_CFLAGS = -std=c11 -Wall -Wextra -pedantic -Wshadow -DHYPERMEDIA -Ivendor -Ivendor/raylib-web/src $(RAYLIB_CFLAGS)
 CFLAGS_DEBUG = $(BASE_CFLAGS) -ggdb -g -fsanitize=address
 CFLAGS_RELEASE = $(BASE_CFLAGS) -O3
 
