@@ -318,7 +318,6 @@ void LoadHypermediaDocument(State *s, String source) {
       } else if (kind == ELEM_TEXT_EDITOR) {
         make_text_editor(&s->doc_arena, &e, StringStatic(""));
       } else if (kind == ELEM_ENTRY_LIST) {
-        printf("Make entry list element\n");
         make_entry_list(&s->doc_arena, &e, s);
       } else if (kind == ELEM_SPHERE) {
         char src_path[256] = {0};

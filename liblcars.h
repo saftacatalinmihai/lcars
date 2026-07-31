@@ -718,8 +718,8 @@ void Update(State *s) {
                   StringStatic("Done"));
           break;
         case ACTION_LOAD_HYPERMEDIA: {
-          // Hack to make the first element used as the URL input for loading
-          // hypermedia documents Element *url_input = e;
+          // Hack: the first element doubles as the URL input for loading
+          // hypermedia documents.
           Element *url_input = &s->elements[0];
           if (url_input->text.data &&
               (strncmp(url_input->text.data, "http://", 7) == 0 ||
@@ -1086,8 +1086,6 @@ void Update(State *s) {
               SetClipboardText(e->text.data ? e->text.data : "");
               updateNotification(s,
                                  StringStatic("All text copied to clipboard"));
-              printf("Copied all text to clipboard: |%s|\n",
-                     e->text.data ? e->text.data : "");
             } else {
               int selStart = e->selectTextLength > 0
                                  ? e->selectTextStart
@@ -1099,7 +1097,6 @@ void Update(State *s) {
               memcpy(selectedText, e->text.data + selStart, selLength);
               selectedText[selLength] = '\0';
               SetClipboardText(selectedText);
-              printf("Copied to clipboard: |%s|\n", selectedText);
               updateNotification(
                   s, StringStatic("Selected text copied to clipboard"));
             }
@@ -1112,13 +1109,11 @@ void Update(State *s) {
                 textChanged = true;
               }
               int clipboardTextLen = strlen(clipboardText);
-              printf("Clipboard text length: %d\n", clipboardTextLen);
               for (int j = 0; j < clipboardTextLen; j++) {
                 GapInsertChar(&s->doc_arena, e, clipboardText[j]);
               }
               textChanged = true;
               e->snapToCursor = 2;
-              printf("Pasted from clipboard: |%s|\n", clipboardText);
               updateNotification(s, StringStatic("Clipboard text pasted"));
             }
           }
@@ -1497,7 +1492,6 @@ void UpdateDrawFrame(State *s) {
   BeginDrawing();
   ClearBackground(BLACK);
 
-  // static Rectangle selectionRec = (Rectangle){0, 0, 0, 0};
   if (IsKeyDown(KEY_LEFT_SHIFT)) {
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
       s->selection_rec.x = mPos.x;
