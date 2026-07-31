@@ -26,7 +26,6 @@
 #include "lcars_base.h"
 #include "lcars_string.h"
 
-#define _ISOC99_SOURCE
 #include <math.h>
 
 #define LCARS_PURPLE (Color){206, 153, 205, 255}
