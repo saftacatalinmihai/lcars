@@ -1,7 +1,7 @@
 #ifndef LCARS_UI_H
 #define LCARS_UI_H
 
-#include "liblcars.h"
+#include "lcars_types.h"
 
 static void clickOrHoverNotification(State *s, int i, String elem_pretty_name) {
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ||

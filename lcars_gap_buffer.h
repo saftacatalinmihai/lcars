@@ -1,7 +1,7 @@
 #ifndef LCARS_GAP_BUFFER_H
 #define LCARS_GAP_BUFFER_H
 
-#include "liblcars.h"
+#include "lcars_types.h"
 
 static bool IsWordChar(char c) {
   return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||

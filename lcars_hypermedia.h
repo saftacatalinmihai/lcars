@@ -1,7 +1,7 @@
 #ifndef LCARS_HYPERMEDIA_H
 #define LCARS_HYPERMEDIA_H
 
-#include "liblcars.h"
+#include "lcars_types.h"
 #include "raylib.h"
 
 #include <curl/curl.h>

@@ -3,7 +3,7 @@
 
 #include "lcars_arena.h"
 #include "lcars_string.h"
-#include "liblcars.h"
+#include "lcars_types.h"
 #include "vendor/sqlite3.h"
 
 static inline int sqlite_callback(void *state, int argc, char **argv,
