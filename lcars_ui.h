@@ -3,6 +3,15 @@
 
 #include "lcars_types.h"
 
+static void clickOrHoverNotification(State *s, int i, String elem_pretty_name);
+static Rectangle GetElementBoundingBox(State *s, Element *e);
+static bool IsHoveringElement(State *s, Element *e);
+static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
+                      int barWidth, int barHeight, int innerRadius, Color color,
+                      int orientation, bool debug);
+
+#ifdef LCARS_IMPLEMENTATION
+
 static void clickOrHoverNotification(State *s, int i, String elem_pretty_name) {
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ||
       s->notificationOnElemIdx != i) {
@@ -176,5 +185,7 @@ static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
     break;
   }
 }
+
+#endif // LCARS_IMPLEMENTATION
 
 #endif // LCARS_UI_H

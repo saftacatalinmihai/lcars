@@ -5,6 +5,25 @@
 #include "lcars_string.h"
 #include "lcars_types.h"
 #include "vendor/sqlite3.h"
+#include <time.h>
+
+static inline int sqlite_callback(void *state, int argc, char **argv,
+                                  char **azColName);
+static inline int ExecSQL(State *s, String sql, String successMsg);
+static void InitDB(State *s, bool firstInit);
+static inline String GetEntryContentFromDB(State *s, int id);
+static inline void UpdateEntryContentInDB(State *s, int id, String content);
+static inline void DeleteEntryFromDB(State *s, int id);
+static KindList GetAllKindsFromDB(State *s);
+static inline int GetEntriesByKind(State *s, const char *kind,
+                                   EntryListItem *items, int maxItems);
+static inline int GetFirstPersonalLogId(State *s);
+static inline String GetLogFromDB(State *s);
+static inline void UpdateLogInDB(State *s, String newLog);
+static inline void LoadEntryIntoEditor(Element *e, String dbLog);
+static inline void make_entry_list(Arena *doc_arena, Element *e, State *s);
+
+#ifdef LCARS_IMPLEMENTATION
 
 static inline int sqlite_callback(void *state, int argc, char **argv,
                                   char **azColName) {
@@ -34,7 +53,7 @@ static inline int ExecSQL(State *s, String sql, String successMsg) {
   return rc;
 }
 
-void InitDB(State *s, bool firstInit) {
+static void InitDB(State *s, bool firstInit) {
   (void)firstInit;
   const char *sql_entry_create =
       "CREATE TABLE IF NOT EXISTS entries ("
@@ -243,5 +262,7 @@ static inline void make_entry_list(Arena *doc_arena, Element *e, State *s) {
   e->kind = ELEM_ENTRY_LIST;
   StringFree(&content);
 }
+
+#endif // LCARS_IMPLEMENTATION
 
 #endif // LCARS_DB_H

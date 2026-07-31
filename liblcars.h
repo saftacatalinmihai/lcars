@@ -45,57 +45,9 @@ void LoadHypermediaDocument(State *s, String filename);
 static inline void updateNotification(State *s, String notificationText);
 
 #ifdef LCARS_IMPLEMENTATION
-
-// -----------------------------------------------------------------------------
-// Internal Helper Declarations
-// -----------------------------------------------------------------------------
 static void ToggleVoiceRecording(State *s);
-
-static inline int sqlite_callback(void *state, int argc, char **argv,
-                                  char **azColName);
-static inline int ExecSQL(State *s, String sql, String successMsg);
-static void InitDB(State *s, bool firstInit);
-static inline String GetLogFromDB(State *s);
-static inline void UpdateLogInDB(State *s, String newLog);
-static inline String GetEntryContentFromDB(State *s, int id);
-static inline void UpdateEntryContentInDB(State *s, int id, String content);
-static inline int GetEntriesByKind(State *s, const char *kind,
-                                   EntryListItem *items, int maxItems);
-static inline void make_entry_list(Arena *doc_arena, Element *e, State *s);
-static inline void LoadEntryIntoEditor(Element *e, String dbLog);
-static bool IsWordChar(char c);
-static void MoveGap(Element *e, int index);
-static void GapInsertChar(Arena *arena, Element *e, char c);
-static void GapDeleteBack(Element *e);
-static void GapDeleteForward(Element *e);
-static void ReconstructText(Arena *arena, Element *e);
-static bool DeleteSelection(Element *e);
-static void StartTextSelection(Element *e, bool shiftDown);
-static void EndTextSelection(Element *e, bool shiftDown);
 static void ClampScrollY(Element *e);
 static void NavigateEntryList(State *s, Element *e, int direction);
-static int GetLines(String text, int *lineStarts, int maxLines);
-static int GetLineForIndex(int index, const int *lineStarts, int numLines);
-static void clickOrHoverNotification(State *s, int i, String elem_pretty_name);
-static Rectangle GetElementBoundingBox(State *s, Element *e);
-static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
-                                    String text, Rectangle rec, float fontSize,
-                                    float spacing, bool wordWrap, Color tint,
-                                    int selectStart, int selectLength,
-                                    Color selectTint, Color selectBackTint,
-                                    float *outTextHeight, float *outCursorY,
-                                    int cursorIndex);
-static void DrawTextBoxed(State *s, Element *e, Font font, String text,
-                          Rectangle rec, float fontSize, float spacing,
-                          bool wordWrap, Color tint, float *outTextHeight,
-                          float *outCursorY, int cursorIndex);
-static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
-                      int barWidth, int barHeight, int innerRadius, Color color,
-                      int orientation, bool debug);
-static int GetCharIndexAtMouse(const State *s, Font font, String text,
-                               Vector2 textPos, float fontSize, float spacing,
-                               Vector2 mousePos, float recWidth);
-
 #endif // LCARS_IMPLEMENTATION
 
 // -----------------------------------------------------------------------------

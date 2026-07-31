@@ -6,6 +6,23 @@
 
 #include <curl/curl.h>
 
+struct CurlMemoryBuffer {
+  char *data;
+  size_t size;
+  Arena *arena;
+};
+
+static const char *GetAttributeValue(const char *tag, const char *attr,
+                                     char *dest, int max_len);
+static Color ParseColor(String colorStr);
+static ButtonAction ParseAction(String actionStr);
+static size_t CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb,
+                                      void *userp);
+static String LoadDocumentContent(String source, State *s);
+void LoadHypermediaDocument(State *s, String source);
+
+#ifdef LCARS_IMPLEMENTATION
+
 static const char *GetAttributeValue(const char *tag, const char *attr,
                                      char *dest, int max_len) {
   char pattern[128];
@@ -70,12 +87,6 @@ static ButtonAction ParseAction(String actionStr) {
     return ACTION_LOAD_HYPERMEDIA;
   return ACTION_NONE;
 }
-
-struct CurlMemoryBuffer {
-  char *data;
-  size_t size;
-  Arena *arena;
-};
 
 static size_t CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb,
                                       void *userp) {
@@ -337,5 +348,7 @@ void LoadHypermediaDocument(State *s, String source) {
   // Reset scratch arena immediately after loading is complete
   arena_reset(&s->scratch_arena);
 }
+
+#endif // LCARS_IMPLEMENTATION
 
 #endif // LCARS_HYPERMEDIA_H

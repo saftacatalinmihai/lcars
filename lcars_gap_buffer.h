@@ -3,6 +3,18 @@
 
 #include "lcars_types.h"
 
+static bool IsWordChar(char c);
+static void MoveGap(Element *e, int index);
+static void GapInsertChar(Arena *arena, Element *e, char c);
+static void GapDeleteBack(Element *e);
+static void GapDeleteForward(Element *e);
+static void ReconstructText(Arena *arena, Element *e);
+static bool DeleteSelection(Element *e);
+static void StartTextSelection(Element *e, bool shiftDown);
+static void EndTextSelection(Element *e, bool shiftDown);
+
+#ifdef LCARS_IMPLEMENTATION
+
 static bool IsWordChar(char c) {
   return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
           (c >= '0' && c <= '9') || c == '_');
@@ -116,5 +128,7 @@ static void EndTextSelection(Element *e, bool shiftDown) {
   }
   e->snapToCursor = 2;
 }
+
+#endif // LCARS_IMPLEMENTATION
 
 #endif // LCARS_GAP_BUFFER_H

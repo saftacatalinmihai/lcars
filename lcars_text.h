@@ -2,6 +2,26 @@
 #define LCARS_TEXT_H
 
 #include "lcars_types.h"
+#include <math.h>
+
+static int GetLines(String text, int *lineStarts, int maxLines);
+static int GetLineForIndex(int index, const int *lineStarts, int numLines);
+static int GetCharIndexAtMouse(const State *s, Font font, String text,
+                               Vector2 textPos, float fontSize, float spacing,
+                               Vector2 mousePos, float recWidth);
+static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
+                                    String text, Rectangle rec, float fontSize,
+                                    float spacing, bool wordWrap, Color tint,
+                                    int selectStart, int selectLength,
+                                    Color selectTint, Color selectBackTint,
+                                    float *outTextHeight, float *outCursorY,
+                                    int cursorIndex);
+static void DrawTextBoxed(State *s, Element *e, Font font, String text,
+                          Rectangle rec, float fontSize, float spacing,
+                          bool wordWrap, Color tint, float *outTextHeight,
+                          float *outCursorY, int cursorIndex);
+
+#ifdef LCARS_IMPLEMENTATION
 
 static int GetLines(String text, int *lineStarts, int maxLines) {
   int count = 0;
@@ -344,5 +364,7 @@ static void DrawTextBoxed(State *s, Element *e, Font font, String text,
                           tint, selStart, selLength, BLACK, LCARS_RED_ORANGE,
                           outTextHeight, outCursorY, cursorIndex);
 }
+
+#endif // LCARS_IMPLEMENTATION
 
 #endif // LCARS_TEXT_H
