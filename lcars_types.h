@@ -32,6 +32,10 @@
 #define TEXT_VOICE_INPUT "Voice Input"
 #define TEXT_RECORDING "RECORDING..."
 
+// The entry "kind" used to seed the DB on first run and to fall back to
+// when nothing else (a selected kind, an existing entry) is available.
+#define DEFAULT_ENTRY_KIND "architect_log"
+
 #define NOTIFICATION_DURATION 3.0f
 #define NOTIFICATION_MAX_LEN 48
 

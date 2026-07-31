@@ -20,7 +20,7 @@ static inline void DeleteEntryFromDB(State *s, int id);
 static KindList GetAllKindsFromDB(State *s);
 static inline int GetEntriesByKind(State *s, const char *kind,
                                    EntryListItem *items, int maxItems);
-static inline int GetFirstPersonalLogId(State *s);
+static inline int GetDefaultEntryId(State *s);
 static inline String GetLogFromDB(State *s);
 static inline void UpdateLogInDB(State *s, String newLog);
 static inline void LoadEntryIntoEditor(Element *e, String dbLog);
@@ -110,9 +110,9 @@ static void InitDB(State *s, bool firstInit) {
 
   char *sql_insert_full = sqlite3_mprintf(
       "INSERT INTO entries (kind, title, content) "
-      "SELECT 'architect_log', 'Captain Log', '%q Captain log' "
-      "WHERE NOT EXISTS (SELECT 1 FROM entries WHERE kind = 'architect_log');",
-      datename);
+      "SELECT '%q', 'Captain Log', '%q Captain log' "
+      "WHERE NOT EXISTS (SELECT 1 FROM entries WHERE kind = '%q');",
+      DEFAULT_ENTRY_KIND, datename, DEFAULT_ENTRY_KIND);
   if (sql_insert_full) {
     ExecSQL(s, StringStatic(sql_insert_full),
             StringStatic("Data inserted successfully"));
@@ -229,14 +229,15 @@ static inline int GetEntriesByKind(State *s, const char *kind,
   return count;
 }
 
-static inline int GetFirstPersonalLogId(State *s) {
+static inline int GetDefaultEntryId(State *s) {
   sqlite3_stmt *stmt;
   int id = 1;
   if (sqlite3_prepare_v2(
           s->db,
-          "SELECT id FROM entries WHERE kind='architect_log' AND (deleted IS "
+          "SELECT id FROM entries WHERE kind=?1 AND (deleted IS "
           "NULL OR deleted = 0) ORDER BY ID DESC LIMIT 1",
           -1, &stmt, NULL) == SQLITE_OK) {
+    sqlite3_bind_text(stmt, 1, DEFAULT_ENTRY_KIND, -1, SQLITE_STATIC);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
       id = sqlite3_column_int(stmt, 0);
     }
@@ -246,12 +247,12 @@ static inline int GetFirstPersonalLogId(State *s) {
 }
 
 static inline String GetLogFromDB(State *s) {
-  int id = GetFirstPersonalLogId(s);
+  int id = GetDefaultEntryId(s);
   return GetEntryContentFromDB(s, id);
 }
 
 static inline void UpdateLogInDB(State *s, String newLog) {
-  int id = GetFirstPersonalLogId(s);
+  int id = GetDefaultEntryId(s);
   UpdateEntryContentInDB(s, id, newLog);
 }
 
@@ -293,10 +294,10 @@ static inline void SwitchToEntry(State *s, Element *e, int newEntryId) {
 static inline void make_entry_list(Arena *doc_arena, Element *e, State *s) {
   e->kind = ELEM_ENTRY_LIST;
   e->listCollapsed = false;
-  e->selectedEntryId = GetFirstPersonalLogId(s);
+  e->selectedEntryId = GetDefaultEntryId(s);
   e->kindList = GetAllKindsFromDB(s);
   e->selectedKind = e->kindList.count > 0 ? e->kindList.kinds[0]
-                                          : StringStatic("architect_log");
+                                          : StringStatic(DEFAULT_ENTRY_KIND);
 
   String content = GetEntryContentFromDB(s, e->selectedEntryId);
   make_text_editor(doc_arena, e, content);

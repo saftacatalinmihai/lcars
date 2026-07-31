@@ -737,19 +737,17 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
           if (CheckCollisionPointRec(mPos, deleteBtn)) {
             DeleteEntryFromDB(s, e->selectedEntryId);
             EntryListItem remItems[MAX_LIST_ITEMS];
-            int remCount =
-                GetEntriesByKind(s, "personal_log", remItems, MAX_LIST_ITEMS);
+            int remCount = GetEntriesByKind(s, e->selectedKind.data, remItems,
+                                            MAX_LIST_ITEMS);
             int nextEntryId;
             if (remCount > 0) {
               nextEntryId = remItems[0].id;
             } else {
               char datename[32];
               GetTodayDateString(datename, sizeof(datename));
-              String content = {0};
-              StringFormat(&s->scratch_arena, &content, "%s Captain log",
-                          datename);
               nextEntryId =
-                  CreateNewEntry(s, "personal_log", "Captain Log", content);
+                  CreateNewEntry(s, e->selectedKind.data, e->selectedKind.data,
+                                 StringStatic(datename));
             }
             SwitchToEntry(s, e, nextEntryId);
             deleteClicked = true;
