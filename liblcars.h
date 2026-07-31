@@ -184,7 +184,7 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 static void ToggleVoiceRecording(State *s) {
-  VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
+  VoiceRecApi *vapi = s->voiceApi;
   if (!vapi) {
     updateNotification(s, StringStatic("VOICE ERROR"));
     return;
@@ -344,7 +344,7 @@ void Reload(State *s, bool reset) {
 
 void Update(State *s) {
   // Voice recognition updates
-  VoiceRecApi *vapi = (VoiceRecApi *)s->voiceApi;
+  VoiceRecApi *vapi = s->voiceApi;
   if (vapi) {
     if (vapi->IsRecording()) {
       char partialBuf[256];

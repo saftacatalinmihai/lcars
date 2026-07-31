@@ -17,7 +17,7 @@ Independently executable tasks, grouped by theme. Within each group, tasks are r
 
 - [x] **B1. Extract shared types into `lcars_types.h`.** `Element`, `State`, `ElemKind`, `ButtonAction`, `KindList`, `EntryListItem`, the color/limit macros. Today lcars_db.h/lcars_gap_buffer.h/lcars_text.h/lcars_ui.h/lcars_hypermedia.h all `#include "liblcars.h"` which includes them back — the circular includes only work because of guard ordering. After this task each module includes `lcars_types.h` (+ what it actually uses) and is order-independent.
 - [x] **B2. Give each `lcars_*.h` the single-header shape AGENTS.md prescribes:** declarations always visible, function bodies under `#ifdef LCARS_IMPLEMENTATION`. Today lcars_db.h, lcars_gap_buffer.h, lcars_text.h, lcars_ui.h, lcars_hypermedia.h have bare definitions that only link because they're included exactly once from inside liblcars.h's implementation section. This also makes the big forward-declaration block in liblcars.h:192-249 unnecessary — each module declares its own API.
-- [ ] **B3. Type `State.voiceApi` as `VoiceRecApi *` instead of `void *`.** lcars_voice_rec.h is already included by liblcars.h; the cast is repeated at every use site (liblcars.h:386, 619, 847; lcars_ui.h:183).
+- [x] **B3. Type `State.voiceApi` as `VoiceRecApi *` instead of `void *`.** lcars_voice_rec.h is already included by liblcars.h; the cast is repeated at every use site (liblcars.h:386, 619, 847; lcars_ui.h:183).
 
 ## C. Break up the god-functions
 

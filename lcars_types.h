@@ -9,6 +9,7 @@
 
 #include "lcars_arena.h"
 #include "lcars_string.h"
+#include "lcars_voice_rec.h"
 
 #define LCARS_PURPLE (Color){206, 153, 205, 255}
 #define LCARS_RED_ORANGE (Color){204, 102, 102, 255}
@@ -130,7 +131,7 @@ typedef struct State {
   int notificationOnElemIdx;
   float notificationTimer;
   sqlite3 *db;
-  void *voiceApi;
+  VoiceRecApi *voiceApi;
   double time_resource_download;
   double time_voice_init;
   double time_window_init;
