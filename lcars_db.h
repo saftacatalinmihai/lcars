@@ -10,6 +10,8 @@
 static inline int sqlite_callback(void *state, int argc, char **argv,
                                   char **azColName);
 static inline int ExecSQL(State *s, String sql, String successMsg);
+static inline bool StepAndFinalize(State *s, sqlite3_stmt *stmt,
+                                   String successMsg);
 static void InitDB(State *s, bool firstInit);
 static inline void GetTodayDateString(char *buf, size_t bufSize);
 static inline int CreateNewEntry(State *s, const char *kind,
@@ -67,21 +69,43 @@ static inline void GetTodayDateString(char *buf, size_t bufSize) {
   strftime(buf, bufSize, "%Y-%m-%d", to);
 }
 
+// Steps a prepared statement expected to produce no result rows (INSERT/
+// UPDATE/DELETE), reports any error via notification, and finalizes it
+// either way. Returns true on success. Callers prepare the statement and
+// bind its parameters before calling this.
+static inline bool StepAndFinalize(State *s, sqlite3_stmt *stmt,
+                                   String successMsg) {
+  int rc = sqlite3_step(stmt);
+  bool ok = (rc == SQLITE_DONE);
+  if (!ok) {
+    fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(s->db));
+    updateNotification(s, StringStatic("SQL error"));
+  } else if (successMsg.data && successMsg.len > 0) {
+    updateNotification(s, successMsg);
+  }
+  sqlite3_finalize(stmt);
+  return ok;
+}
+
 // Inserts a new entry with the given kind/title/content and returns its id
-// (0 if the insert failed). All three fields are %q-escaped, so callers
-// don't need to worry about quote characters in user-supplied kind/title
-// values breaking the SQL.
+// (0 if the insert failed).
 static inline int CreateNewEntry(State *s, const char *kind,
                                  const char *title, String content) {
-  char *sql = sqlite3_mprintf(
-      "INSERT INTO entries (kind, title, content) VALUES ('%q', '%q', '%q');",
-      kind, title, content.data ? content.data : "");
-  if (!sql) {
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(
+      s->db, "INSERT INTO entries (kind, title, content) VALUES (?1, ?2, ?3);",
+      -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
     updateNotification(s, StringStatic("SQL error"));
     return 0;
   }
-  ExecSQL(s, StringStatic(sql), StringStatic("New entry created"));
-  sqlite3_free(sql);
+  sqlite3_bind_text(stmt, 1, kind, -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(stmt, 2, title, -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(stmt, 3, content.data ? content.data : "", -1,
+                    SQLITE_TRANSIENT);
+  if (!StepAndFinalize(s, stmt, StringStatic("New entry created"))) {
+    return 0;
+  }
   return (int)sqlite3_last_insert_rowid(s->db);
 }
 
@@ -107,20 +131,19 @@ static void InitDB(State *s, bool firstInit) {
           StringStatic("Table Entry created successfully"));
 
   char datename[32];
-  struct tm *to;
-  time_t t = time(NULL);
-  to = localtime(&t);
-  strftime(datename, sizeof(datename), "%Y-%m-%d", to);
+  GetTodayDateString(datename, sizeof(datename));
 
-  char *sql_insert_full = sqlite3_mprintf(
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(
+      s->db,
       "INSERT INTO entries (kind, title, content) "
-      "SELECT '%q', 'Captain Log', '%q Captain log' "
-      "WHERE NOT EXISTS (SELECT 1 FROM entries WHERE kind = '%q');",
-      DEFAULT_ENTRY_KIND, datename, DEFAULT_ENTRY_KIND);
-  if (sql_insert_full) {
-    ExecSQL(s, StringStatic(sql_insert_full),
-            StringStatic("Data inserted successfully"));
-    sqlite3_free(sql_insert_full);
+      "SELECT ?1, 'Captain Log', ?2 || ' Captain log' "
+      "WHERE NOT EXISTS (SELECT 1 FROM entries WHERE kind = ?1);",
+      -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    sqlite3_bind_text(stmt, 1, DEFAULT_ENTRY_KIND, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, datename, -1, SQLITE_STATIC);
+    StepAndFinalize(s, stmt, StringStatic("Data inserted successfully"));
   }
 }
 
@@ -148,27 +171,32 @@ static inline String GetEntryContentFromDB(State *s, int id) {
 }
 
 static inline void UpdateEntryContentInDB(State *s, int id, String content) {
-  char *sql_update_full = sqlite3_mprintf(
-      "UPDATE entries SET content = (%Q), last_modified_at_utc = "
-      "strftime('%%Y-%%m-%%d %%H:%%M:%%S', 'now', 'utc') WHERE id = %d;",
-      content.data, id);
-  if (!sql_update_full) {
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(
+      s->db,
+      "UPDATE entries SET content = ?1, last_modified_at_utc = "
+      "strftime('%Y-%m-%d %H:%M:%S', 'now', 'utc') WHERE id = ?2;",
+      -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
     updateNotification(s, StringStatic("SQL error"));
     return;
   }
-  ExecSQL(s, StringStatic(sql_update_full), StringStatic(""));
-  sqlite3_free(sql_update_full);
+  sqlite3_bind_text(stmt, 1, content.data ? content.data : "", -1,
+                    SQLITE_TRANSIENT);
+  sqlite3_bind_int(stmt, 2, id);
+  StepAndFinalize(s, stmt, StringStatic(""));
 }
 
 static inline void DeleteEntryFromDB(State *s, int id) {
-  char *sql_delete =
-      sqlite3_mprintf("UPDATE entries SET deleted = 1 WHERE id = %d;", id);
-  if (!sql_delete) {
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(
+      s->db, "UPDATE entries SET deleted = 1 WHERE id = ?1;", -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
     updateNotification(s, StringStatic("SQL error"));
     return;
   }
-  ExecSQL(s, StringStatic(sql_delete), StringStatic("Entry deleted"));
-  sqlite3_free(sql_delete);
+  sqlite3_bind_int(stmt, 1, id);
+  StepAndFinalize(s, stmt, StringStatic("Entry deleted"));
 }
 
 static KindList GetAllKindsFromDB(State *s) {
