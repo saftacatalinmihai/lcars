@@ -140,6 +140,7 @@ static inline void make_text_editor(Arena *doc_arena, Element *e,
 
 static inline void make_sphere(State *s, Element *e, const char *imagePath) {
   e->kind = ELEM_SPHERE;
+  e->sphere = arena_alloc(&s->doc_arena, sizeof(SphereState));
 
   Image image = {0};
   if (imagePath && FileExists(imagePath)) {
@@ -176,7 +177,7 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
       Model model = LoadModelFromMesh(GenMeshSphere(3.0f, 32, 32));
       model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture;
       model.transform = MatrixRotateX(DEG2RAD * 90.0f);
-      e->model = model;
+      e->sphere->model = model;
     }
   } else {
     TraceLog(LOG_WARNING, "Texture not ready yet!");
@@ -193,10 +194,11 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
   camera.up = (Vector3){0.0f, 1.0f, -0.23f};
   camera.fovy = 45.0f;
   camera.projection = CAMERA_PERSPECTIVE;
-  e->camera = camera;
+  e->sphere->camera = camera;
 
   if (e->width && e->height) {
-    e->renderTexture = LoadRenderTexture((int)*e->width, (int)*e->height);
+    e->sphere->renderTexture =
+        LoadRenderTexture((int)*e->width, (int)*e->height);
   }
 }
 
@@ -265,11 +267,11 @@ static void ClampScrollY(Element *e) {
 
 static void NavigateEntryList(State *s, Element *e, int direction) {
   EnsureEntryListCache(s, e);
-  EntryListItem *items = e->cachedEntries;
-  int count = e->cachedEntryCount;
+  EntryListItem *items = e->entryList->cachedEntries;
+  int count = e->entryList->cachedEntryCount;
   int selectedIdx = -1;
   for (int j = 0; j < count; j++) {
-    if (items[j].id == e->selectedEntryId) {
+    if (items[j].id == e->entryList->selectedEntryId) {
       selectedIdx = j;
       break;
     }
@@ -282,17 +284,17 @@ static void NavigateEntryList(State *s, Element *e, int direction) {
     float viewportHeight = *e->height - 45.0f;
     if (direction < 0) { // Up
       float itemTop = newIdx * 90.0f;
-      if (itemTop < e->listScrollY) {
-        e->listScrollY = itemTop;
+      if (itemTop < e->entryList->listScrollY) {
+        e->entryList->listScrollY = itemTop;
       }
     } else { // Down
       float itemBottom = newIdx * 90.0f + 80.0f;
-      if (itemBottom > e->listScrollY + viewportHeight) {
-        e->listScrollY = itemBottom - viewportHeight;
+      if (itemBottom > e->entryList->listScrollY + viewportHeight) {
+        e->entryList->listScrollY = itemBottom - viewportHeight;
       }
     }
-    e->listScrollY =
-        ClampScrollOffset(e->listScrollY, count * 90.0f, viewportHeight);
+    e->entryList->listScrollY = ClampScrollOffset(
+        e->entryList->listScrollY, count * 90.0f, viewportHeight);
   }
 }
 
@@ -494,8 +496,9 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
       // Recreate render texture for sphere if dimensions changed
       if (e->kind == ELEM_SPHERE && ((int)newWidth != (int)*e->width ||
                                      (int)newHeight != (int)*e->height)) {
-        UnloadRenderTexture(e->renderTexture);
-        e->renderTexture = LoadRenderTexture((int)newWidth, (int)newHeight);
+        UnloadRenderTexture(e->sphere->renderTexture);
+        e->sphere->renderTexture =
+            LoadRenderTexture((int)newWidth, (int)newHeight);
       }
 
       *e->width = newWidth;
@@ -652,24 +655,24 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         float wheelMove = GetMouseWheelMove();
         if (wheelMove != 0.0f) {
           EnsureEntryListCache(s, e);
-          e->listScrollY -= wheelMove * SCROLL_SPEED_PX;
-          e->listScrollY =
-              ClampScrollOffset(e->listScrollY,
-                                e->cachedEntryCount * el.itemStride,
+          e->entryList->listScrollY -= wheelMove * SCROLL_SPEED_PX;
+          e->entryList->listScrollY =
+              ClampScrollOffset(e->entryList->listScrollY,
+                                e->entryList->cachedEntryCount * el.itemStride,
                                 el.viewportHeight);
         }
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
           if (CheckCollisionPointRec(mPos, el.toggleBtn)) {
-            e->listCollapsed = !e->listCollapsed;
-          } else if (!e->listCollapsed) {
+            e->entryList->listCollapsed = !e->entryList->listCollapsed;
+          } else if (!e->entryList->listCollapsed) {
             if (CheckCollisionPointRec(mPos, el.newEntryBtn)) {
               FlushEntryContent(s, e);
 
               char datename[32];
               GetTodayDateString(datename, sizeof(datename));
-              int newId = CreateNewEntry(s, e->selectedKind.data,
-                                         e->selectedKind.data,
+              int newId = CreateNewEntry(s, e->entryList->selectedKind.data,
+                                         e->entryList->selectedKind.data,
                                          StringStatic(datename));
               InvalidateEntryListCache(e);
               InvalidateKindListCache(e);
@@ -677,15 +680,16 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             } else {
               EnsureKindListCache(s, e);
               EnsureEntryListCache(s, e);
-              EntryListItem *items = e->cachedEntries;
-              int count = e->cachedEntryCount;
+              EntryListItem *items = e->entryList->cachedEntries;
+              int count = e->entryList->cachedEntryCount;
               float maxItemWidth = el.width - 15.0f;
               bool isScrollable = (count * el.itemStride > el.viewportHeight);
               float itemWidth = maxItemWidth;
               if (isScrollable) {
                 itemWidth = maxItemWidth - 10.0f;
               }
-              float itemY = e->position.y + el.headerHeight - e->listScrollY;
+              float itemY = e->position.y + el.headerHeight -
+                           e->entryList->listScrollY;
               Rectangle scrollableListRec =
                   (Rectangle){e->position.x, e->position.y + el.headerHeight,
                               el.width - 5.0f, el.viewportHeight};
@@ -694,7 +698,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                   Rectangle itemRec = (Rectangle){e->position.x + 5.0f, itemY,
                                                   itemWidth, el.itemHeight};
                   if (CheckCollisionPointRec(mPos, itemRec)) {
-                    if (e->selectedEntryId != items[j].id) {
+                    if (e->entryList->selectedEntryId != items[j].id) {
                       FlushEntryContent(s, e);
                       SwitchToEntry(s, e, items[j].id);
                     }
@@ -740,13 +744,13 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       // Click handling
       if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         bool deleteClicked = false;
-        if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
+        if (e->kind == ELEM_ENTRY_LIST && e->entryList->selectedEntryId != 0) {
           float btnSize = 18.0f;
           Rectangle deleteBtn =
               (Rectangle){editorX + editorWidth + 10.0f - btnSize - 8.0f,
                           e->position.y - btnSize - 4.0f, btnSize, btnSize};
           if (CheckCollisionPointRec(mPos, deleteBtn)) {
-            DeleteEntryFromDB(s, e->selectedEntryId);
+            DeleteEntryFromDB(s, e->entryList->selectedEntryId);
             // Discard (don't flush) any unsaved edits to the entry we just
             // deleted.
             e->contentDirty = false;
@@ -754,14 +758,14 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             InvalidateKindListCache(e);
             EnsureEntryListCache(s, e);
             int nextEntryId;
-            if (e->cachedEntryCount > 0) {
-              nextEntryId = e->cachedEntries[0].id;
+            if (e->entryList->cachedEntryCount > 0) {
+              nextEntryId = e->entryList->cachedEntries[0].id;
             } else {
               char datename[32];
               GetTodayDateString(datename, sizeof(datename));
-              nextEntryId =
-                  CreateNewEntry(s, e->selectedKind.data, e->selectedKind.data,
-                                 StringStatic(datename));
+              nextEntryId = CreateNewEntry(
+                  s, e->entryList->selectedKind.data,
+                  e->entryList->selectedKind.data, StringStatic(datename));
               InvalidateEntryListCache(e);
             }
             SwitchToEntry(s, e, nextEntryId);
@@ -1124,15 +1128,15 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       e->color = ColorBrightness(GREEN, 0.8f);
       clickOrHoverNotification(s, i, StringStatic("sphere element"));
       if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        UpdateCamera(&e->camera, CAMERA_THIRD_PERSON);
+        UpdateCamera(&e->sphere->camera, CAMERA_THIRD_PERSON);
       } else {
-        e->rotation += 0.05f;
+        e->sphere->rotation += 0.05f;
       }
     } else {
       e->color = e->originalColor;
-      e->rotation += 0.1f;
+      e->sphere->rotation += 0.1f;
     }
-    e->rotation = fmodf(e->rotation, 360.0f);
+    e->sphere->rotation = fmodf(e->sphere->rotation, 360.0f);
     break;
   }
   case ELEM_NOTHING:
@@ -1203,11 +1207,11 @@ static void PreRenderElements(State *s) {
       continue; // Skip uninitialized elements
     switch (e->kind) {
     case ELEM_SPHERE: {
-      BeginTextureMode(e->renderTexture);
+      BeginTextureMode(e->sphere->renderTexture);
       ClearBackground(BLACK);
-      BeginMode3D(e->camera);
-      DrawModelEx(e->model, e->position3, (Vector3){0.0f, 1.0f, 0.0f},
-                  e->rotation, (Vector3){2.0f, 2.0f, 2.0f}, e->color);
+      BeginMode3D(e->sphere->camera);
+      DrawModelEx(e->sphere->model, e->position3, (Vector3){0.0f, 1.0f, 0.0f},
+                  e->sphere->rotation, (Vector3){2.0f, 2.0f, 2.0f}, e->color);
 
       if (s->debug) {
         DrawGrid(10, 2.0f);
@@ -1309,14 +1313,14 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
 
       // Draw toggle button
       DrawRectangleRounded(el.toggleBtn, 0.3f, 4, LCARS_BLUE);
-      DrawText(e->listCollapsed ? ">" : "<",
+      DrawText(e->entryList->listCollapsed ? ">" : "<",
                el.toggleBtn.x +
                    (el.toggleBtn.width -
-                    MeasureText(e->listCollapsed ? ">" : "<", 20)) /
+                    MeasureText(e->entryList->listCollapsed ? ">" : "<", 20)) /
                        2,
                el.toggleBtn.y + (el.toggleBtn.height - 20) / 2, 20, BLACK);
 
-      if (!e->listCollapsed) {
+      if (!e->entryList->listCollapsed) {
         // Draw "+ New Entry" button
         DrawRectangleRounded(el.newEntryBtn, 0.3f, 4, LCARS_GREEN);
         DrawText(
@@ -1327,8 +1331,8 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
 
         // Draw entries
         EnsureEntryListCache(s, e);
-        EntryListItem *items = e->cachedEntries;
-        int count = e->cachedEntryCount;
+        EntryListItem *items = e->entryList->cachedEntries;
+        int count = e->entryList->cachedEntryCount;
         float maxItemWidth = el.width - 15.0f;
         bool isScrollable = (count * el.itemStride > el.viewportHeight);
         float itemWidth = maxItemWidth;
@@ -1336,7 +1340,8 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
           itemWidth = maxItemWidth - 10.0f;
         }
 
-        float itemY = e->position.y + el.headerHeight - e->listScrollY;
+        float itemY =
+            e->position.y + el.headerHeight - e->entryList->listScrollY;
         Rectangle listClipRec =
             (Rectangle){e->position.x, e->position.y + el.headerHeight,
                         el.width - 5.0f, el.viewportHeight};
@@ -1346,11 +1351,12 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
         for (int j = 0; j < count; j++) {
           Rectangle itemRec = (Rectangle){e->position.x + 5.0f, itemY,
                                           itemWidth, el.itemHeight};
-          Color itemColor = (items[j].id == e->selectedEntryId)
+          Color itemColor = (items[j].id == e->entryList->selectedEntryId)
                                 ? LCARS_YELLOW
                                 : (Color){40, 40, 40, 255};
-          Color textColor = (items[j].id == e->selectedEntryId) ? BLACK : WHITE;
-          Color subtextColor = (items[j].id == e->selectedEntryId)
+          Color textColor =
+              (items[j].id == e->entryList->selectedEntryId) ? BLACK : WHITE;
+          Color subtextColor = (items[j].id == e->entryList->selectedEntryId)
                                    ? (Color){80, 80, 80, 255}
                                    : (Color){180, 180, 180, 255};
 
@@ -1393,8 +1399,8 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
           float scrollRange = count * el.itemStride - el.viewportHeight;
           float handleY = trackY;
           if (scrollRange > 0.0f) {
-            handleY +=
-                (e->listScrollY / scrollRange) * (trackHeight - handleHeight);
+            handleY += (e->entryList->listScrollY / scrollRange) *
+                      (trackHeight - handleHeight);
           }
 
           // Draw track
@@ -1417,7 +1423,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
     DrawRectangleLines(editorX, e->position.y, editorWidth + 10, *e->height,
                        editorBorderColor);
 
-    if (e->kind == ELEM_ENTRY_LIST && e->selectedEntryId != 0) {
+    if (e->kind == ELEM_ENTRY_LIST && e->entryList->selectedEntryId != 0) {
       float btnSize = 18.0f;
       Rectangle deleteBtn =
           (Rectangle){editorX + editorWidth + 10.0f - btnSize - 8.0f,
@@ -1433,12 +1439,13 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
       DrawText(btnText, deleteBtn.x + (deleteBtn.width - textWidth) / 2.0f,
                deleteBtn.y + (deleteBtn.height - fontSize) / 2.0f, fontSize,
                BLACK);
-      if (e->kindList.count > 0) {
-        for (int k = 0; k < e->kindList.count; k++) {
-          DrawText(e->kindList.kinds[k].data,
+      if (e->entryList->kindList.count > 0) {
+        for (int k = 0; k < e->entryList->kindList.count; k++) {
+          DrawText(e->entryList->kindList.kinds[k].data,
                    e->position.x + 50.0f + k * 200.0f + 12.0f,
                    e->position.y - 20.0f, 20, WHITE);
-          if (StringEq(e->kindList.kinds[k], e->selectedKind)) {
+          if (StringEq(e->entryList->kindList.kinds[k],
+                      e->entryList->selectedKind)) {
             DrawRectangle(e->position.x + 50.0f + k * 200.0f,
                           e->position.y - 20.0f, 180.0f, 20.0f,
                           ColorAlpha(LCARS_BLUE, 0.5f));
@@ -1450,7 +1457,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
                           e->position.y - 20.0f, 180.0f, 20.0f,
                           ColorAlpha(LCARS_BLUE, 0.3f));
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-              e->selectedKind = e->kindList.kinds[k];
+              e->entryList->selectedKind = e->entryList->kindList.kinds[k];
               InvalidateEntryListCache(e);
             }
           }
@@ -1493,7 +1500,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
     break;
   }
   case ELEM_SPHERE: {
-    DrawTextureRec(e->renderTexture.texture,
+    DrawTextureRec(e->sphere->renderTexture.texture,
                    (Rectangle){0, 0, *e->width, *e->height},
                    (Vector2){e->position.x, e->position.y}, WHITE);
 
@@ -1504,25 +1511,28 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
       DrawText(TextFormat("Pos: (%.2f, %.2f, %.2f)", e->position3.x,
                           e->position3.y, e->position3.z),
                screenPos.x, screenPos.y, 10, WHITE);
-      DrawText(TextFormat("Rot: (%.2f)", e->rotation), screenPos.x,
+      DrawText(TextFormat("Rot: (%.2f)", e->sphere->rotation), screenPos.x,
                screenPos.y + 20, 10, WHITE);
 
       // Camera
       DrawText(TextFormat("Camera Pos: (%.2f, %.2f, %.2f)",
-                          e->camera.position.x, e->camera.position.y,
-                          e->camera.position.z),
+                          e->sphere->camera.position.x,
+                          e->sphere->camera.position.y,
+                          e->sphere->camera.position.z),
                screenPos.x, screenPos.y + 40, 10, WHITE);
       DrawText(TextFormat("Camera Target: (%.2f, %.2f, %.2f)",
-                          e->camera.target.x, e->camera.target.y,
-                          e->camera.target.z),
+                          e->sphere->camera.target.x,
+                          e->sphere->camera.target.y,
+                          e->sphere->camera.target.z),
                screenPos.x, screenPos.y + 60, 10, WHITE);
-      DrawText(TextFormat("Camera Up: (%.2f, %.2f, %.2f)", e->camera.up.x,
-                          e->camera.up.y, e->camera.up.z),
+      DrawText(TextFormat("Camera Up: (%.2f, %.2f, %.2f)",
+                          e->sphere->camera.up.x, e->sphere->camera.up.y,
+                          e->sphere->camera.up.z),
                screenPos.x, screenPos.y + 80, 10, WHITE);
-      DrawText(TextFormat("Camera FOV: %.2f", e->camera.fovy), screenPos.x,
-               screenPos.y + 100, 10, WHITE);
+      DrawText(TextFormat("Camera FOV: %.2f", e->sphere->camera.fovy),
+               screenPos.x, screenPos.y + 100, 10, WHITE);
       DrawText(TextFormat("Camera Projection: %s",
-                          e->camera.projection == CAMERA_PERSPECTIVE
+                          e->sphere->camera.projection == CAMERA_PERSPECTIVE
                               ? "Perspective"
                               : "Orthographic"),
                screenPos.x, screenPos.y + 120, 10, WHITE);

@@ -60,7 +60,7 @@ static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
 // where everywhere else used 350px).
 static EntryListLayout ComputeEntryListLayout(Element *e) {
   EntryListLayout el = {0};
-  el.width = e->listCollapsed ? 30.0f : 350.0f;
+  el.width = e->entryList->listCollapsed ? 30.0f : 350.0f;
   el.panelRec = (Rectangle){e->position.x, e->position.y, el.width, *e->height};
   el.toggleBtn = (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
   el.newEntryBtn = (Rectangle){e->position.x + 35.0f, e->position.y,

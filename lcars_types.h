@@ -82,6 +82,42 @@ typedef struct EntryListItem {
   char last_modified[32];
 } EntryListItem;
 
+// State only meaningful for kind == ELEM_ENTRY_LIST. Allocated on demand by
+// make_entry_list() into doc_arena and referenced via Element.entryList — a
+// flat embed would put ~7KB of list-only state (dominated by cachedEntries)
+// on every one of MAX_ELEMENTS elements, even though at most one is ever an
+// entry list.
+typedef struct EntryListState {
+  bool listCollapsed;
+  float listScrollY;
+  int selectedEntryId;
+
+  KindList kindList;
+  String selectedKind;
+  // kindList is only re-fetched when this is false — see
+  // EnsureKindListCache()/InvalidateKindListCache() in lcars_db.h. Avoids
+  // re-querying (and re-allocating a fresh KindList into doc_arena) on
+  // every click in the list panel.
+  bool kindListCacheValid;
+
+  // Cache of GetEntriesByKind(selectedKind) — see EnsureEntryListCache() /
+  // InvalidateEntryListCache() in lcars_db.h. Avoids re-querying the DB
+  // every frame just to draw the list.
+  EntryListItem cachedEntries[MAX_LIST_ITEMS];
+  int cachedEntryCount;
+  bool entryListCacheValid;
+} EntryListState;
+
+// State only meaningful for kind == ELEM_SPHERE. Allocated on demand by
+// make_sphere() into doc_arena and referenced via Element.sphere, for the
+// same reason as EntryListState above.
+typedef struct SphereState {
+  Model model;
+  float rotation;
+  RenderTexture renderTexture;
+  Camera camera;
+} SphereState;
+
 typedef enum ElemKind {
   ELEM_NOTHING = 0,
   ELEM_RECTANGLE,
@@ -138,10 +174,10 @@ typedef struct Element {
   String text;          // Text on button or just text elem
   int textLen;          // text lenght of chars.
   int textSize;         // Only used if kind == TEXT / TEXTBOX for display size
-  Model model;
-  float rotation;
-  RenderTexture renderTexture;
-  Camera camera;
+
+  // Only non-NULL if kind == ELEM_SPHERE — see SphereState.
+  SphereState *sphere;
+
   float scrollY;
   float textHeight;
   float cursorY;
@@ -170,24 +206,9 @@ typedef struct Element {
   bool isResizing;
   float dragOffsetX;
   float dragOffsetY;
-  bool listCollapsed;
-  float listScrollY;
-  int selectedEntryId;
 
-  KindList kindList;
-  String selectedKind;
-  // kindList is only re-fetched when this is false — see
-  // EnsureKindListCache()/InvalidateKindListCache() in lcars_db.h. Avoids
-  // re-querying (and re-allocating a fresh KindList into doc_arena) on
-  // every click in the list panel.
-  bool kindListCacheValid;
-
-  // Cache of GetEntriesByKind(selectedKind) — see EnsureEntryListCache() /
-  // InvalidateEntryListCache() in lcars_db.h. Avoids re-querying the DB
-  // every frame just to draw the list.
-  EntryListItem cachedEntries[MAX_LIST_ITEMS];
-  int cachedEntryCount;
-  bool entryListCacheValid;
+  // Only non-NULL if kind == ELEM_ENTRY_LIST — see EntryListState.
+  EntryListState *entryList;
 
   // Debounced content save — see MarkContentDirty()/FlushEntryContent() in
   // lcars_db.h. contentDirty means the in-memory text differs from what's

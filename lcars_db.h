@@ -225,24 +225,24 @@ static KindList GetAllKindsFromDB(State *s) {
   return kindList;
 }
 
-// Populates e->kindList from the DB if the cache isn't already valid.
-// Callers read e->kindList after calling this instead of calling
-// GetAllKindsFromDB() directly, so the distinct-kinds list (and the
+// Populates e->entryList->kindList from the DB if the cache isn't already
+// valid. Callers read e->entryList->kindList after calling this instead of
+// calling GetAllKindsFromDB() directly, so the distinct-kinds list (and the
 // doc_arena allocation it makes for each kind's String) is only refetched
 // when something actually changed, not on every click in the list panel.
 static inline void EnsureKindListCache(State *s, Element *e) {
-  if (e->kindListCacheValid) {
+  if (e->entryList->kindListCacheValid) {
     return;
   }
-  e->kindList = GetAllKindsFromDB(s);
-  e->kindListCacheValid = true;
+  e->entryList->kindList = GetAllKindsFromDB(s);
+  e->entryList->kindListCacheValid = true;
 }
 
 // Marks the cached kind list stale. Call after anything that could add or
 // remove a distinct kind: creating an entry (possibly in a new kind) or
 // deleting one (possibly the last entry of its kind).
 static inline void InvalidateKindListCache(Element *e) {
-  e->kindListCacheValid = false;
+  e->entryList->kindListCacheValid = false;
 }
 
 static inline int GetEntriesByKind(State *s, const char *kind,
@@ -283,20 +283,21 @@ static inline int GetEntriesByKind(State *s, const char *kind,
   return count;
 }
 
-// Populates e->cachedEntries/cachedEntryCount from the DB if the cache
-// isn't already valid (fresh element, or invalidated by
+// Populates e->entryList->cachedEntries/cachedEntryCount from the DB if the
+// cache isn't already valid (fresh element, or invalidated by
 // InvalidateEntryListCache since the last call). Callers read
-// e->cachedEntries/cachedEntryCount after calling this instead of calling
-// GetEntriesByKind() directly, so the list of entries for the currently
-// selected kind is only re-queried when something actually changed rather
-// than on every frame.
+// e->entryList->cachedEntries/cachedEntryCount after calling this instead of
+// calling GetEntriesByKind() directly, so the list of entries for the
+// currently selected kind is only re-queried when something actually
+// changed rather than on every frame.
 static inline void EnsureEntryListCache(State *s, Element *e) {
-  if (e->entryListCacheValid) {
+  if (e->entryList->entryListCacheValid) {
     return;
   }
-  e->cachedEntryCount = GetEntriesByKind(s, e->selectedKind.data,
-                                         e->cachedEntries, MAX_LIST_ITEMS);
-  e->entryListCacheValid = true;
+  e->entryList->cachedEntryCount =
+      GetEntriesByKind(s, e->entryList->selectedKind.data,
+                       e->entryList->cachedEntries, MAX_LIST_ITEMS);
+  e->entryList->entryListCacheValid = true;
 }
 
 // Marks the cached entry list stale. Call after anything that changes
@@ -304,7 +305,7 @@ static inline void EnsureEntryListCache(State *s, Element *e) {
 // creating/deleting an entry, editing the displayed entry's content (which
 // updates last_modified_at_utc), or switching selectedKind.
 static inline void InvalidateEntryListCache(Element *e) {
-  e->entryListCacheValid = false;
+  e->entryList->entryListCacheValid = false;
 }
 
 static inline int GetDefaultEntryId(State *s) {
@@ -374,7 +375,7 @@ static inline void FlushEntryContent(State *s, Element *e) {
     return;
   }
   if (e->kind == ELEM_ENTRY_LIST) {
-    UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+    UpdateEntryContentInDB(s, e->entryList->selectedEntryId, e->text);
     InvalidateEntryListCache(e);
   } else {
     UpdateLogInDB(s, e->text);
@@ -389,7 +390,7 @@ static inline void FlushEntryContent(State *s, Element *e) {
 // FlushEntryContent() themselves before this, since callers that are
 // switching away from an entry that's being deleted must not save it.
 static inline void SwitchToEntry(State *s, Element *e, int newEntryId) {
-  e->selectedEntryId = newEntryId;
+  e->entryList->selectedEntryId = newEntryId;
   String newText = GetEntryContentFromDB(s, newEntryId);
   LoadEntryIntoEditor(e, newText);
   StringFree(&newText);
@@ -397,13 +398,15 @@ static inline void SwitchToEntry(State *s, Element *e, int newEntryId) {
 
 static inline void make_entry_list(Arena *doc_arena, Element *e, State *s) {
   e->kind = ELEM_ENTRY_LIST;
-  e->listCollapsed = false;
-  e->selectedEntryId = GetDefaultEntryId(s);
+  e->entryList = arena_alloc(doc_arena, sizeof(EntryListState));
+  e->entryList->listCollapsed = false;
+  e->entryList->selectedEntryId = GetDefaultEntryId(s);
   EnsureKindListCache(s, e);
-  e->selectedKind = e->kindList.count > 0 ? e->kindList.kinds[0]
-                                          : StringStatic(DEFAULT_ENTRY_KIND);
+  e->entryList->selectedKind = e->entryList->kindList.count > 0
+                                   ? e->entryList->kindList.kinds[0]
+                                   : StringStatic(DEFAULT_ENTRY_KIND);
 
-  String content = GetEntryContentFromDB(s, e->selectedEntryId);
+  String content = GetEntryContentFromDB(s, e->entryList->selectedEntryId);
   make_text_editor(doc_arena, e, content);
   e->kind = ELEM_ENTRY_LIST;
   StringFree(&content);
