@@ -7,6 +7,20 @@
 
 static int GetLines(String text, int *lineStarts, int maxLines);
 static int GetLineForIndex(int index, const int *lineStarts, int numLines);
+
+// One glyph's decoded metrics: codepoint, its UTF-8 byte length, and its
+// advance width (including inter-glyph spacing unless it's the last glyph
+// in `text`).
+typedef struct GlyphMetrics {
+  int codepoint;
+  int codepointByteCount;
+  float glyphWidth;
+} GlyphMetrics;
+
+static GlyphMetrics DecodeGlyphMetrics(Font font, String text, int byteIndex,
+                                       float scaleFactor, float spacing);
+static void ApplyCharWrap(float *x, float *y, float lineHeight,
+                          float wrapWidth, GlyphMetrics m);
 static int GetCharIndexAtMouse(const State *s, Font font, String text,
                                Vector2 textPos, float fontSize, float spacing,
                                Vector2 mousePos, float recWidth);
@@ -45,6 +59,49 @@ static int GetLineForIndex(int index, const int *lineStarts, int numLines) {
     }
   }
   return numLines - 1;
+}
+
+// Decodes the codepoint at text.data[byteIndex] and computes its advance
+// width. Shared by GetCharIndexAtMouse (hit-testing) and
+// DrawTextBoxedSelectable (rendering) so a glyph-width or wrap-rule change
+// can't make the two disagree about where a character sits on screen.
+static GlyphMetrics DecodeGlyphMetrics(Font font, String text, int byteIndex,
+                                       float scaleFactor, float spacing) {
+  GlyphMetrics m = {0};
+  m.codepoint = text.data ? GetCodepoint(&text.data[byteIndex],
+                                         &m.codepointByteCount)
+                          : 0;
+  int index = GetGlyphIndex(font, m.codepoint);
+
+  // NOTE: Normally we'd exit the decoding sequence as soon as a bad byte is
+  // found (and return 0x3f), but we need to draw all of the bad bytes using
+  // the '?' symbol, moving one byte at a time.
+  if (m.codepoint == 0x3f)
+    m.codepointByteCount = 1;
+
+  if (m.codepoint != '\n') {
+    m.glyphWidth = (font.glyphs[index].advanceX == 0)
+                       ? font.recs[index].width * scaleFactor
+                       : font.glyphs[index].advanceX * scaleFactor;
+    if (byteIndex + m.codepointByteCount < text.len)
+      m.glyphWidth += spacing;
+  }
+  return m;
+}
+
+// Applies the (non-word-wrap) character-wrap decision for one glyph: a
+// newline, or a glyph that would overflow wrapWidth, starts a new line
+// first. Mutates *x/*y in place to the position where the glyph should be
+// measured/drawn.
+static void ApplyCharWrap(float *x, float *y, float lineHeight,
+                          float wrapWidth, GlyphMetrics m) {
+  if (m.codepoint == '\n') {
+    *y += lineHeight;
+    *x = 0.0f;
+  } else if ((*x + m.glyphWidth) > wrapWidth) {
+    *y += lineHeight;
+    *x = 0.0f;
+  }
 }
 
 static int GetCharIndexAtMouse(const State *s, Font font, String text,
@@ -86,36 +143,13 @@ static int GetCharIndexAtMouse(const State *s, Font font, String text,
   }
 
   for (int i = 0; i < length;) {
-    int codepointByteCount = 0;
-    int codepoint = GetCodepoint(&text.data[i], &codepointByteCount);
-    int index = GetGlyphIndex(font, codepoint);
-
-    if (codepoint == 0x3f)
-      codepointByteCount = 1;
-
-    float glyphWidth = 0.0f;
-    if (codepoint != '\n') {
-      glyphWidth = (font.glyphs[index].advanceX == 0)
-                       ? font.recs[index].width * scaleFactor
-                       : font.glyphs[index].advanceX * scaleFactor;
-      if (i + codepointByteCount < length)
-        glyphWidth = glyphWidth + spacing;
+    GlyphMetrics m = DecodeGlyphMetrics(font, text, i, scaleFactor, spacing);
+    ApplyCharWrap(&textOffsetX, &textOffsetY, lineHeight, recWidth, m);
+    if ((textOffsetX != 0.0f) || (m.codepoint != ' ')) {
+      textOffsetX += m.glyphWidth;
     }
 
-    if (codepoint == '\n') {
-      textOffsetY += lineHeight;
-      textOffsetX = 0.0f;
-    } else {
-      if ((textOffsetX + glyphWidth) > recWidth) {
-        textOffsetY += lineHeight;
-        textOffsetX = 0.0f;
-      }
-      if ((textOffsetX != 0.0f) || (codepoint != ' ')) {
-        textOffsetX += glyphWidth;
-      }
-    }
-
-    i += codepointByteCount;
+    i += m.codepointByteCount;
 
     // Evaluate candidate boundary position after the current codepoint
     {
@@ -191,28 +225,12 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
       cursorPositionFound = true;
     }
 
-    // Get next codepoint from byte string and glyph index in font
-    int codepointByteCount = 0;
-    int codepoint =
-        text.data ? GetCodepoint(&text.data[i], &codepointByteCount) : 0;
-    int index = GetGlyphIndex(font, codepoint);
-
-    // NOTE: Normally we exit the decoding sequence as soon as a bad byte is
-    // found (and return 0x3f) but we need to draw all of the bad bytes using
-    // the '?' symbol moving one byte
-    if (codepoint == 0x3f)
-      codepointByteCount = 1;
+    // Get next codepoint from byte string and its advance width
+    GlyphMetrics m = DecodeGlyphMetrics(font, text, i, scaleFactor, spacing);
+    int codepoint = m.codepoint;
+    int codepointByteCount = m.codepointByteCount;
     i += (codepointByteCount - 1);
-
-    float glyphWidth = 0;
-    if (codepoint != '\n') {
-      glyphWidth = (font.glyphs[index].advanceX == 0)
-                       ? font.recs[index].width * scaleFactor
-                       : font.glyphs[index].advanceX * scaleFactor;
-
-      if (i + 1 < length)
-        glyphWidth = glyphWidth + spacing;
-    }
+    float glyphWidth = m.glyphWidth;
 
     // NOTE: When wordWrap is ON we first measure how much of the text we can
     // draw before going outside of the rec container We store this info in
@@ -253,17 +271,10 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
         k = tmp;
       }
     } else {
-      if (codepoint == '\n') {
-        if (!wordWrap) {
-          textOffsetY += lineHeight;
-          textOffsetX = 0;
-        }
-      } else {
-        if (!wordWrap && ((textOffsetX + glyphWidth) > rec.width)) {
-          textOffsetY += lineHeight;
-          textOffsetX = 0;
-        }
-
+      if (!wordWrap) {
+        ApplyCharWrap(&textOffsetX, &textOffsetY, lineHeight, rec.width, m);
+      }
+      if (codepoint != '\n') {
         if (textOffsetY > maxTextOffsetY)
           maxTextOffsetY = textOffsetY;
 
