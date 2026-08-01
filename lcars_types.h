@@ -70,6 +70,13 @@ typedef struct KindList {
   int count;
 } KindList;
 
+typedef struct EntryListItem {
+  int id;
+  char title[128];
+  char created_at[32];
+  char last_modified[32];
+} EntryListItem;
+
 typedef enum ElemKind {
   ELEM_NOTHING = 0,
   ELEM_RECTANGLE,
@@ -164,6 +171,13 @@ typedef struct Element {
 
   KindList kindList;
   String selectedKind;
+
+  // Cache of GetEntriesByKind(selectedKind) — see EnsureEntryListCache() /
+  // InvalidateEntryListCache() in lcars_db.h. Avoids re-querying the DB
+  // every frame just to draw the list.
+  EntryListItem cachedEntries[MAX_LIST_ITEMS];
+  int cachedEntryCount;
+  bool entryListCacheValid;
 } Element;
 
 typedef struct State {
@@ -187,12 +201,5 @@ typedef struct State {
   Arena scratch_arena;
   Rectangle selection_rec;
 } State;
-
-typedef struct EntryListItem {
-  int id;
-  char title[128];
-  char created_at[32];
-  char last_modified[32];
-} EntryListItem;
 
 #endif // LCARS_TYPES_H

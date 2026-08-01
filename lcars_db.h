@@ -20,6 +20,8 @@ static inline void DeleteEntryFromDB(State *s, int id);
 static KindList GetAllKindsFromDB(State *s);
 static inline int GetEntriesByKind(State *s, const char *kind,
                                    EntryListItem *items, int maxItems);
+static inline void EnsureEntryListCache(State *s, Element *e);
+static inline void InvalidateEntryListCache(Element *e);
 static inline int GetDefaultEntryId(State *s);
 static inline String GetLogFromDB(State *s);
 static inline void UpdateLogInDB(State *s, String newLog);
@@ -227,6 +229,30 @@ static inline int GetEntriesByKind(State *s, const char *kind,
             sqlite3_errmsg(s->db));
   }
   return count;
+}
+
+// Populates e->cachedEntries/cachedEntryCount from the DB if the cache
+// isn't already valid (fresh element, or invalidated by
+// InvalidateEntryListCache since the last call). Callers read
+// e->cachedEntries/cachedEntryCount after calling this instead of calling
+// GetEntriesByKind() directly, so the list of entries for the currently
+// selected kind is only re-queried when something actually changed rather
+// than on every frame.
+static inline void EnsureEntryListCache(State *s, Element *e) {
+  if (e->entryListCacheValid) {
+    return;
+  }
+  e->cachedEntryCount = GetEntriesByKind(s, e->selectedKind.data,
+                                         e->cachedEntries, MAX_LIST_ITEMS);
+  e->entryListCacheValid = true;
+}
+
+// Marks the cached entry list stale. Call after anything that changes
+// which entries exist for the selected kind or their displayed fields:
+// creating/deleting an entry, editing the displayed entry's content (which
+// updates last_modified_at_utc), or switching selectedKind.
+static inline void InvalidateEntryListCache(Element *e) {
+  e->entryListCacheValid = false;
 }
 
 static inline int GetDefaultEntryId(State *s) {

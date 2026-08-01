@@ -259,8 +259,9 @@ static void ClampScrollY(Element *e) {
 }
 
 static void NavigateEntryList(State *s, Element *e, int direction) {
-  EntryListItem items[MAX_LIST_ITEMS];
-  int count = GetEntriesByKind(s, e->selectedKind.data, items, MAX_LIST_ITEMS);
+  EnsureEntryListCache(s, e);
+  EntryListItem *items = e->cachedEntries;
+  int count = e->cachedEntryCount;
   int selectedIdx = -1;
   for (int j = 0; j < count; j++) {
     if (items[j].id == e->selectedEntryId) {
@@ -271,6 +272,7 @@ static void NavigateEntryList(State *s, Element *e, int direction) {
   int newIdx = selectedIdx + direction;
   if (newIdx >= 0 && newIdx < count) {
     UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+    InvalidateEntryListCache(e);
     SwitchToEntry(s, e, items[newIdx].id);
 
     float viewportHeight = *e->height - 45.0f;
@@ -402,6 +404,7 @@ static void UpdateVoiceInput(State *s) {
         ReconstructText(&s->doc_arena, editor);
         if (editor->kind == ELEM_ENTRY_LIST) {
           UpdateEntryContentInDB(s, editor->selectedEntryId, editor->text);
+          InvalidateEntryListCache(editor);
         } else {
           UpdateLogInDB(s, editor->text);
         }
@@ -641,12 +644,12 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         // Mouse wheel scrolling for list
         float wheelMove = GetMouseWheelMove();
         if (wheelMove != 0.0f) {
-          EntryListItem items[MAX_LIST_ITEMS];
-          int count =
-              GetEntriesByKind(s, e->selectedKind.data, items, MAX_LIST_ITEMS);
+          EnsureEntryListCache(s, e);
           e->listScrollY -= wheelMove * SCROLL_SPEED_PX;
-          e->listScrollY = ClampScrollOffset(
-              e->listScrollY, count * el.itemStride, el.viewportHeight);
+          e->listScrollY =
+              ClampScrollOffset(e->listScrollY,
+                                e->cachedEntryCount * el.itemStride,
+                                el.viewportHeight);
         }
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -661,13 +664,13 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
               int newId = CreateNewEntry(s, e->selectedKind.data,
                                          e->selectedKind.data,
                                          StringStatic(datename));
+              InvalidateEntryListCache(e);
               SwitchToEntry(s, e, newId);
             } else {
-              EntryListItem items[MAX_LIST_ITEMS];
-
               e->kindList = GetAllKindsFromDB(s);
-              int count = GetEntriesByKind(s, e->selectedKind.data, items,
-                                           MAX_LIST_ITEMS);
+              EnsureEntryListCache(s, e);
+              EntryListItem *items = e->cachedEntries;
+              int count = e->cachedEntryCount;
               float maxItemWidth = el.width - 15.0f;
               bool isScrollable = (count * el.itemStride > el.viewportHeight);
               float itemWidth = maxItemWidth;
@@ -685,6 +688,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                   if (CheckCollisionPointRec(mPos, itemRec)) {
                     if (e->selectedEntryId != items[j].id) {
                       UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+                      InvalidateEntryListCache(e);
                       SwitchToEntry(s, e, items[j].id);
                     }
                     break;
@@ -736,18 +740,18 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                           e->position.y - btnSize - 4.0f, btnSize, btnSize};
           if (CheckCollisionPointRec(mPos, deleteBtn)) {
             DeleteEntryFromDB(s, e->selectedEntryId);
-            EntryListItem remItems[MAX_LIST_ITEMS];
-            int remCount = GetEntriesByKind(s, e->selectedKind.data, remItems,
-                                            MAX_LIST_ITEMS);
+            InvalidateEntryListCache(e);
+            EnsureEntryListCache(s, e);
             int nextEntryId;
-            if (remCount > 0) {
-              nextEntryId = remItems[0].id;
+            if (e->cachedEntryCount > 0) {
+              nextEntryId = e->cachedEntries[0].id;
             } else {
               char datename[32];
               GetTodayDateString(datename, sizeof(datename));
               nextEntryId =
                   CreateNewEntry(s, e->selectedKind.data, e->selectedKind.data,
                                  StringStatic(datename));
+              InvalidateEntryListCache(e);
             }
             SwitchToEntry(s, e, nextEntryId);
             deleteClicked = true;
@@ -1084,6 +1088,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         ReconstructText(&s->doc_arena, e);
         if (e->kind == ELEM_ENTRY_LIST) {
           UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+          InvalidateEntryListCache(e);
         } else {
           UpdateLogInDB(s, e->text);
         }
@@ -1306,9 +1311,9 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
             el.newEntryBtn.y + (el.newEntryBtn.height - 20) / 2, 20, BLACK);
 
         // Draw entries
-        EntryListItem items[MAX_LIST_ITEMS];
-        int count =
-            GetEntriesByKind(s, e->selectedKind.data, items, MAX_LIST_ITEMS);
+        EnsureEntryListCache(s, e);
+        EntryListItem *items = e->cachedEntries;
+        int count = e->cachedEntryCount;
         float maxItemWidth = el.width - 15.0f;
         bool isScrollable = (count * el.itemStride > el.viewportHeight);
         float itemWidth = maxItemWidth;
@@ -1431,6 +1436,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
                           ColorAlpha(LCARS_BLUE, 0.3f));
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
               e->selectedKind = e->kindList.kinds[k];
+              InvalidateEntryListCache(e);
             }
           }
         }
