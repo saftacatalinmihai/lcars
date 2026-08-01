@@ -187,7 +187,10 @@ typedef struct Element {
   ButtonAction on_click;
   Vector2 position;
   Vector3 position3;
-  float *width, *height;
+  float width, height;
+  // ELEM_TEXT only: true means width/height are ignored and the element
+  // is sized from its text instead — see make_text()/GetElementBoundingBox().
+  bool autoSize;
   Color color;
   Color originalColor;
   int elbowOrientation; // Only used if kind == ELBOW

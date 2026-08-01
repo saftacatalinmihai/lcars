@@ -103,8 +103,7 @@ static inline void make_button(Element *e) {
 
 static inline void make_text(Element *e) {
   e->kind = ELEM_TEXT;
-  e->width = NULL;
-  e->height = NULL;
+  e->autoSize = true;
   e->textLen = e->text.len;
 }
 
@@ -196,10 +195,8 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
   camera.projection = CAMERA_PERSPECTIVE;
   e->sphere->camera = camera;
 
-  if (e->width && e->height) {
-    e->sphere->renderTexture =
-        LoadRenderTexture((int)*e->width, (int)*e->height);
-  }
+  e->sphere->renderTexture =
+      LoadRenderTexture((int)e->width, (int)e->height);
 }
 
 #ifdef LCARS_IMPLEMENTATION
@@ -262,7 +259,7 @@ static inline float ClampScrollOffset(float scrollY, float contentHeight,
 }
 
 static void ClampScrollY(Element *e) {
-  e->scrollY = ClampScrollOffset(e->scrollY, e->textHeight, *e->height);
+  e->scrollY = ClampScrollOffset(e->scrollY, e->textHeight, e->height);
 }
 
 static void NavigateEntryList(State *s, Element *e, int direction) {
@@ -281,7 +278,7 @@ static void NavigateEntryList(State *s, Element *e, int direction) {
     FlushEntryContent(s, e);
     SwitchToEntry(s, e, items[newIdx].id);
 
-    float viewportHeight = *e->height - 45.0f;
+    float viewportHeight = e->height - 45.0f;
     if (direction < 0) { // Up
       float itemTop = newIdx * 90.0f;
       if (itemTop < e->entryList->listScrollY) {
@@ -495,15 +492,15 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
         newHeight = 20.0f;
 
       // Recreate render texture for sphere if dimensions changed
-      if (e->kind == ELEM_SPHERE && ((int)newWidth != (int)*e->width ||
-                                     (int)newHeight != (int)*e->height)) {
+      if (e->kind == ELEM_SPHERE && ((int)newWidth != (int)e->width ||
+                                     (int)newHeight != (int)e->height)) {
         UnloadRenderTexture(e->sphere->renderTexture);
         e->sphere->renderTexture =
             LoadRenderTexture((int)newWidth, (int)newHeight);
       }
 
-      *e->width = newWidth;
-      *e->height = newHeight;
+      e->width = newWidth;
+      e->height = newHeight;
     } else {
       e->isResizing = false;
     }
@@ -530,8 +527,8 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
           SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
           if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             e->isResizing = true;
-            e->dragOffsetX = mPos.x - (e->position.x + *e->width);
-            e->dragOffsetY = mPos.y - (e->position.y + *e->height);
+            e->dragOffsetX = mPos.x - (e->position.x + e->width);
+            e->dragOffsetY = mPos.y - (e->position.y + e->height);
             break;
           }
         } else if (CheckCollisionPointRec(mPos, dragHandle)) {
@@ -572,8 +569,8 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
         }
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
           e->isResizing = true;
-          e->dragOffsetX = mPos.x - (e->position.x + *e->width);
-          e->dragOffsetY = mPos.y - (e->position.y + *e->height);
+          e->dragOffsetX = mPos.x - (e->position.x + e->width);
+          e->dragOffsetY = mPos.y - (e->position.y + e->height);
           break;
         }
       }
@@ -715,18 +712,18 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
     }
 
     float editorX = e->position.x + listWidth;
-    float editorWidth = *e->width - listWidth;
+    float editorWidth = e->width - listWidth;
     ScrollbarLayout sb = ComputeScrollbarLayout(e, editorX, editorWidth);
     Rectangle activeRec = (Rectangle){.x = editorX,
                                       .y = e->position.y,
                                       .width = editorWidth + 55,
-                                      .height = *e->height};
+                                      .height = e->height};
     Rectangle totalActiveRec = activeRec;
     if (e->kind == ELEM_ENTRY_LIST) {
       totalActiveRec.x = e->position.x;
-      totalActiveRec.width = *e->width + 55;
+      totalActiveRec.width = e->width + 55;
       totalActiveRec.y = e->position.y - 25.0f;
-      totalActiveRec.height = *e->height + 25.0f;
+      totalActiveRec.height = e->height + 25.0f;
     }
 
     if (CheckCollisionPointRec(GetMousePosition(), totalActiveRec)) {
@@ -845,7 +842,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       bool isMouseOverList = false;
       if (e->kind == ELEM_ENTRY_LIST) {
         Rectangle listRec =
-            (Rectangle){e->position.x, e->position.y, listWidth, *e->height};
+            (Rectangle){e->position.x, e->position.y, listWidth, e->height};
         isMouseOverList = CheckCollisionPointRec(mPos, listRec);
       }
 
@@ -1117,8 +1114,8 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         e->snapToCursor--;
         float lineHeight = (s->font.baseSize + (float)s->font.baseSize / 2) *
                            (e->textSize / (float)s->font.baseSize);
-        if (e->cursorY > e->scrollY + *e->height - lineHeight) {
-          e->scrollY = e->cursorY - *e->height + lineHeight;
+        if (e->cursorY > e->scrollY + e->height - lineHeight) {
+          e->scrollY = e->cursorY - e->height + lineHeight;
         } else if (e->cursorY < e->scrollY) {
           e->scrollY = e->cursorY;
         }
@@ -1274,21 +1271,21 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
     return; // Skip uninitialized elements
   switch (e->kind) {
   case ELEM_RECTANGLE:
-    DrawRectangle(e->position.x, e->position.y, *e->width, *e->height,
+    DrawRectangle(e->position.x, e->position.y, e->width, e->height,
                   e->color);
     break;
   case ELEM_ELBOW:
-    DrawElbow(e->position.x, e->position.y, *e->width, *e->height, s->barWidth,
+    DrawElbow(e->position.x, e->position.y, e->width, e->height, s->barWidth,
               s->barHeight, s->innerRadius, e->color, e->elbowOrientation,
               s->debug);
     break;
   case ELEM_BUTTON:
     // printf("Drawing button element %d at (%.2d, %.2d) with size (%.2f,
-    // %.2f)\n", i, e->position.x, e->position.y, *e->width, *e->height);
+    // %.2f)\n", i, e->position.x, e->position.y, e->width, e->height);
     DrawRectangleRounded((Rectangle){.x = e->position.x,
                                      .y = e->position.y,
-                                     .width = *e->width,
-                                     .height = *e->height},
+                                     .width = e->width,
+                                     .height = e->height},
                          0.9f, 4, e->color);
     break;
   case ELEM_TEXT:
@@ -1314,10 +1311,10 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
       }
 
       // Draw list panel background
-      DrawRectangle(e->position.x, e->position.y, listWidth - 5.0f, *e->height,
+      DrawRectangle(e->position.x, e->position.y, listWidth - 5.0f, e->height,
                     (Color){15, 15, 15, 255});
       DrawRectangleLines(e->position.x, e->position.y, listWidth - 5.0f,
-                         *e->height, listBorderColor);
+                         e->height, listBorderColor);
 
       // Draw toggle button
       DrawRectangleRounded(el.toggleBtn, 0.3f, 4, LCARS_BLUE);
@@ -1397,7 +1394,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
           float trackX = e->position.x + el.width - 15.0f;
           float trackY = e->position.y + el.headerHeight;
           float trackWidth = 6.0f;
-          float trackHeight = *e->height - 50.0f;
+          float trackHeight = e->height - 50.0f;
 
           float handleHeight =
               (el.viewportHeight / (count * el.itemStride)) * trackHeight;
@@ -1426,9 +1423,9 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
     }
 
     float editorX = e->position.x + listWidth;
-    float editorWidth = *e->width - listWidth;
+    float editorWidth = e->width - listWidth;
 
-    DrawRectangleLines(editorX, e->position.y, editorWidth + 10, *e->height,
+    DrawRectangleLines(editorX, e->position.y, editorWidth + 10, e->height,
                        editorBorderColor);
 
     if (e->kind == ELEM_ENTRY_LIST && e->entryList->selectedEntryId != 0) {
@@ -1475,7 +1472,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
 
     Rectangle r = (Rectangle){editorX + EDITOR_TEXT_PADDING,
                               e->position.y + EDITOR_TEXT_PADDING, editorWidth,
-                              *e->height};
+                              e->height};
     BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
     DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false, e->color,
                   &e->textHeight, &e->cursorY, e->gap.gapStart);
@@ -1509,7 +1506,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
   }
   case ELEM_SPHERE: {
     DrawTextureRec(e->sphere->renderTexture.texture,
-                   (Rectangle){0, 0, *e->width, *e->height},
+                   (Rectangle){0, 0, e->width, e->height},
                    (Vector2){e->position.x, e->position.y}, WHITE);
 
     if (s->debug) {
@@ -1556,13 +1553,13 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
       e->kind != ELEM_ENTRY_LIST) {
     int textWidth = MeasureText(e->text.data, e->textSize);
     if (e->kind == ELEM_ELBOW) {
-      DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
+      DrawText(e->text.data, e->position.x + 3 * (e->width - textWidth) / 4,
                e->position.y + s->barHeight + s->innerRadius +
-                   (*e->height - e->textSize) / 2,
+                   (e->height - e->textSize) / 2,
                e->textSize, BLACK);
     } else {
-      DrawText(e->text.data, e->position.x + 3 * (*e->width - textWidth) / 4,
-               e->position.y + (*e->height - e->textSize) / 2 + 10, e->textSize,
+      DrawText(e->text.data, e->position.x + 3 * (e->width - textWidth) / 4,
+               e->position.y + (e->height - e->textSize) / 2 + 10, e->textSize,
                BLACK);
     }
   }

@@ -297,17 +297,10 @@ void LoadHypermediaDocument(State *s, String source) {
         }
       }
 
-      float *w_ptr = arena_alloc(&s->doc_arena, sizeof(float));
-      if (w_ptr)
-        *w_ptr = w_val;
-      float *h_ptr = arena_alloc(&s->doc_arena, sizeof(float));
-      if (h_ptr)
-        *h_ptr = h_val;
-
       Element e = {0};
       e.position = (Vector2){x, y};
-      e.width = w_ptr;
-      e.height = h_ptr;
+      e.width = w_val;
+      e.height = h_val;
       e.color = color;
       e.originalColor = color;
       e.on_click = action;

@@ -24,7 +24,7 @@ static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
                                               float editorWidth) {
   ScrollbarLayout sb = {0};
   sb.bounds =
-      (Rectangle){editorX + editorWidth + 25, e->position.y, 24.0f, *e->height};
+      (Rectangle){editorX + editorWidth + 25, e->position.y, 24.0f, e->height};
   sb.upButton =
       (Rectangle){sb.bounds.x, sb.bounds.y, sb.bounds.width, sb.bounds.width};
   sb.downButton =
@@ -34,14 +34,14 @@ static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
       (Rectangle){sb.bounds.x, sb.bounds.y + sb.bounds.width + 5,
                   sb.bounds.width, sb.bounds.height - 2 * sb.bounds.width - 10};
 
-  float visibleRatio = *e->height / e->textHeight;
+  float visibleRatio = e->height / e->textHeight;
   if (visibleRatio > 1.0f)
     visibleRatio = 1.0f;
   float handleHeight = visibleRatio * sb.track.height;
   if (handleHeight < SCROLLBAR_MIN_HANDLE_HEIGHT)
     handleHeight = SCROLLBAR_MIN_HANDLE_HEIGHT;
 
-  sb.scrollRange = e->textHeight - *e->height;
+  sb.scrollRange = e->textHeight - e->height;
   float handleY = sb.track.y;
   if (sb.scrollRange > 0.0f) {
     handleY += (e->scrollY / sb.scrollRange) * (sb.track.height - handleHeight);
@@ -61,14 +61,14 @@ static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
 static EntryListLayout ComputeEntryListLayout(Element *e) {
   EntryListLayout el = {0};
   el.width = e->entryList->listCollapsed ? 30.0f : 350.0f;
-  el.panelRec = (Rectangle){e->position.x, e->position.y, el.width, *e->height};
+  el.panelRec = (Rectangle){e->position.x, e->position.y, el.width, e->height};
   el.toggleBtn = (Rectangle){e->position.x, e->position.y, 30.0f, 30.0f};
   el.newEntryBtn = (Rectangle){e->position.x + 35.0f, e->position.y,
                                el.width - 50.0f, 30.0f};
   el.headerHeight = 45.0f;
   el.itemStride = 90.0f;
   el.itemHeight = 80.0f;
-  el.viewportHeight = *e->height - el.headerHeight;
+  el.viewportHeight = e->height - el.headerHeight;
   return el;
 }
 
@@ -97,18 +97,18 @@ static Rectangle GetElementBoundingBox(State *s, Element *e) {
   }
   switch (e->kind) {
   case ELEM_TEXT:
-    if (e->width == NULL)
-      w = MeasureText(e->text.data ? e->text.data : "", e->textSize);
-    if (e->height == NULL)
-      h = e->textSize;
+    w = e->autoSize ? MeasureText(e->text.data ? e->text.data : "",
+                                  e->textSize)
+                    : e->width;
+    h = e->autoSize ? (float)e->textSize : e->height;
     break;
   case ELEM_ELBOW:
-    w = e->width != NULL ? *e->width + s->barWidth : 0;
-    h = e->height != NULL ? *e->height + s->columnHeight + s->barHeight : 0;
+    w = e->width + s->barWidth;
+    h = e->height + s->columnHeight + s->barHeight;
     break;
   default:
-    w = e->width != NULL ? *e->width : 0;
-    h = e->height != NULL ? *e->height : 0;
+    w = e->width;
+    h = e->height;
     break;
   }
   return (Rectangle){(float)e->position.x, (float)e->position.y, w, h};
@@ -134,8 +134,8 @@ static bool IsHoveringElement(State *s, Element *e) {
       return CheckCollisionPointRec(GetMousePosition(),
                                     (Rectangle){.x = e->position.x,
                                                 .y = e->position.y,
-                                                .width = *(e->width),
-                                                .height = *(e->height) +
+                                                .width = e->width,
+                                                .height = e->height +
                                                           s->barHeight +
                                                           s->innerRadius}) ||
              CheckCollisionPointRec(
@@ -153,8 +153,8 @@ static bool IsHoveringElement(State *s, Element *e) {
       return CheckCollisionPointRec(GetMousePosition(),
                                     (Rectangle){.x = e->position.x,
                                                 .y = e->position.y,
-                                                .width = *(e->width),
-                                                .height = *(e->height) +
+                                                .width = e->width,
+                                                .height = e->height +
                                                           s->barHeight +
                                                           s->innerRadius}) ||
              CheckCollisionPointRec(
