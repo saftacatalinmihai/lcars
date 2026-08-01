@@ -2,7 +2,6 @@
 #define LCARS_TEXT_H
 
 #include "lcars_types.h"
-#include "lcars_ui.h"
 #include <math.h>
 
 static int GetLines(String text, int *lineStarts, int maxLines);
@@ -30,11 +29,11 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
                                     int selectStart, int selectLength,
                                     Color selectTint, Color selectBackTint,
                                     float *outTextHeight, float *outCursorY,
-                                    int cursorIndex);
+                                    int cursorIndex, bool drawCursor);
 static void DrawTextBoxed(State *s, Element *e, Font font, String text,
                           Rectangle rec, float fontSize, float spacing,
                           bool wordWrap, Color tint, float *outTextHeight,
-                          float *outCursorY, int cursorIndex);
+                          float *outCursorY, int cursorIndex, bool drawCursor);
 
 #ifdef LCARS_IMPLEMENTATION
 
@@ -189,7 +188,7 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
                                     int selectStart, int selectLength,
                                     Color selectTint, Color selectBackTint,
                                     float *outTextHeight, float *outCursorY,
-                                    int cursorIndex) {
+                                    int cursorIndex, bool drawCursor) {
   int length = text.len;
   (void)s;
 
@@ -334,14 +333,9 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
     cursorY = textOffsetY;
   }
 
-  // Draw the cursor if focused
-  bool isMouseOverList = false;
-  if (e->kind == ELEM_ENTRY_LIST) {
-    EntryListLayout el = ComputeEntryListLayout(e);
-    Vector2 mPos = GetMousePosition();
-    isMouseOverList = CheckCollisionPointRec(mPos, el.panelRec);
-  }
-  if (e->isFocused && !isMouseOverList) {
+  // Draw the cursor if the caller wants it (focused, and not obscured by
+  // e.g. the entry-list panel the caller knows about but we don't).
+  if (drawCursor) {
     if (e->textSelectedFramesCounter / 40 % 2 == 0) {
       DrawRectangleRec((Rectangle){cursorX_screen, cursorY_screen, 2.0f,
                                    (float)font.baseSize * scaleFactor},
@@ -358,7 +352,8 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
 static void DrawTextBoxed(State *s, Element *e, Font font, String text,
                           Rectangle rec, float fontSize, float spacing,
                           bool wordWrap, Color tint, float *outTextHeight,
-                          float *outCursorY, int cursorIndex) {
+                          float *outCursorY, int cursorIndex,
+                          bool drawCursor) {
   if (s->debug)
     DrawText(TextFormat("Selection start: %d, end: %d, length: %d",
                         e->selection.start, e->selection.end,
@@ -372,7 +367,7 @@ static void DrawTextBoxed(State *s, Element *e, Font font, String text,
                                           : -e->selection.length;
   DrawTextBoxedSelectable(s, e, font, text, rec, fontSize, spacing, wordWrap,
                           tint, selStart, selLength, BLACK, LCARS_RED_ORANGE,
-                          outTextHeight, outCursorY, cursorIndex);
+                          outTextHeight, outCursorY, cursorIndex, drawCursor);
 }
 
 #endif // LCARS_IMPLEMENTATION

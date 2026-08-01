@@ -1476,9 +1476,10 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
     Rectangle r = (Rectangle){editorX + EDITOR_TEXT_PADDING,
                               e->position.y + EDITOR_TEXT_PADDING, editorWidth,
                               e->height};
+    bool drawCursor = e->isFocused && !isMouseOverList;
     BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
     DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false, e->color,
-                  &e->textHeight, &e->cursorY, e->gap.gapStart);
+                  &e->textHeight, &e->cursorY, e->gap.gapStart, drawCursor);
     EndScissorMode();
 
     // Render scrollbar
