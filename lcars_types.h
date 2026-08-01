@@ -17,9 +17,12 @@
 #define LCARS_YELLOW (Color){255, 205, 154, 255}
 #define LCARS_BLUE (Color){155, 155, 255, 255}
 #define LCARS_GREEN (Color){153, 204, 153, 255}
+// Marks a code path that isn't implemented yet. Writes straight to stderr
+// (unbuffered, unlike stdout) and aborts immediately, so a hit can't get
+// lost in a buffered printf that never got flushed before the crash.
 #define TODO                                                                   \
-  printf("Exiting %s:%d", __FILE__, __LINE__);                                 \
-  exit(1)
+  fprintf(stderr, "TODO hit at %s:%d\n", __FILE__, __LINE__);                  \
+  abort()
 
 #define WINDOW_WIDTH 1600
 #define WINDOW_HEIGHT 900
