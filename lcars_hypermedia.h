@@ -4,6 +4,7 @@
 #include "lcars_types.h"
 #include "raylib.h"
 
+#include <ctype.h>
 #include <curl/curl.h>
 
 struct CurlMemoryBuffer {
@@ -12,8 +13,8 @@ struct CurlMemoryBuffer {
   Arena *arena;
 };
 
-static const char *GetAttributeValue(const char *tag, const char *attr,
-                                     char *dest, int max_len);
+static bool GetAttributeValue(const char *tag, const char *attr, char *dest,
+                              int max_len);
 static ElemKind TagNameToElemKind(const char *tagName);
 static Color ParseColor(String colorStr);
 static ButtonAction ParseAction(String actionStr);
@@ -24,25 +25,43 @@ void LoadHypermediaDocument(State *s, String source);
 
 #ifdef LCARS_IMPLEMENTATION
 
-static const char *GetAttributeValue(const char *tag, const char *attr,
-                                     char *dest, int max_len) {
+// Finds attr="value" (or attr='value') in tag and copies value into dest
+// (truncated to max_len - 1 bytes, always NUL-terminated). Returns whether
+// it was found. A bare strstr(tag, "x=") would also match inside "max=" or
+// a later attribute's value (e.g. an href containing "?x=1") - require the
+// match to start right after whitespace (or the very start of tag) so it
+// can only be a real attribute name. Unquoted values (attr=value, no
+// quotes) are treated the same as a missing attribute: dest is left
+// untouched and this returns false, since nothing in this document format
+// writes unquoted values.
+static bool GetAttributeValue(const char *tag, const char *attr, char *dest,
+                              int max_len) {
   char pattern[128];
   snprintf(pattern, sizeof(pattern), "%s=", attr);
-  const char *p = strstr(tag, pattern);
-  if (!p)
-    return NULL;
-  p += strlen(pattern);
-  char quote = *p;
-  if (quote == '"' || quote == '\'') {
-    p++;
-    int len = 0;
-    while (*p && *p != quote && len < max_len - 1) {
-      dest[len++] = *p++;
+  size_t patternLen = strlen(pattern);
+
+  const char *p = tag;
+  while ((p = strstr(p, pattern)) != NULL) {
+    if (p == tag || isspace((unsigned char)p[-1])) {
+      break;
     }
-    dest[len] = '\0';
-    return p;
+    p += patternLen;
   }
-  return NULL;
+  if (!p)
+    return false;
+
+  p += patternLen;
+  char quote = *p;
+  if (quote != '"' && quote != '\'')
+    return false;
+
+  p++;
+  int len = 0;
+  while (*p && *p != quote && len < max_len - 1) {
+    dest[len++] = *p++;
+  }
+  dest[len] = '\0';
+  return true;
 }
 
 static const struct {
