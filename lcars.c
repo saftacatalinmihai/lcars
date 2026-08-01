@@ -40,23 +40,42 @@ typedef void (*Fn_Reload)(State *s, bool reset);
 typedef void (*Fn_FlushPendingSaves)(State *s);
 #endif
 
-static void InitDBMinimal(void) {
-  State *s =
-      (State *)calloc(10, sizeof(State)); // Reserve some more space just in
-                                          // case we add more fields... hack
+// Allocates and initializes a fresh State: the struct itself (over-
+// allocated - see below) plus its two memory arenas' backing buffers.
+// Exits the process on allocation failure, since there's no reasonable
+// way to run without either.
+//
+// The 10x over-allocation is a stopgap for a hot-reload safety gap, not a
+// real fix: in the dynamic build, this executable allocates State once at
+// startup, but liblcars.so is recompiled and reloaded independently while
+// the app keeps running. If Element/State's layout changes and only one
+// side gets rebuilt before the next reload, the reloaded code could read
+// or write past what was actually allocated for a single State. Extra
+// headroom makes that less likely to immediately corrupt something, but
+// doesn't detect or prevent the drift - see REFACTORING.md task I3 for
+// the real fix (a layout version/size check on reload).
+static State *CreateAppState(void) {
+  State *s = (State *)calloc(10, sizeof(State));
+  if (!s) {
+    fprintf(stderr, "Fatal error: Failed to allocate State\n");
+    exit(1);
+  }
 
-  // Preallocate backing buffers for the memory arenas
   size_t doc_arena_size = 32 * 1024 * 1024;     // 32 MB
   size_t scratch_arena_size = 16 * 1024 * 1024; // 16 MB
   void *doc_backing = malloc(doc_arena_size);
   void *scratch_backing = malloc(scratch_arena_size);
   if (!doc_backing || !scratch_backing) {
-    fprintf(stderr, "Fatal error: Failed to preallocate memory arenas for "
-                    "minimal DB init\n");
+    fprintf(stderr, "Fatal error: Failed to preallocate memory arenas\n");
     exit(1);
   }
   arena_init(&s->doc_arena, doc_backing, doc_arena_size);
   arena_init(&s->scratch_arena, scratch_backing, scratch_arena_size);
+  return s;
+}
+
+static void InitDBMinimal(void) {
+  State *s = CreateAppState();
 
   sqlite3 *db = NULL;
   int rc = sqlite3_open("lcars.db", &db);
@@ -69,8 +88,8 @@ static void InitDBMinimal(void) {
   InitDB(s, true);
 
   sqlite3_close(db);
-  free(doc_backing);
-  free(scratch_backing);
+  free(s->doc_arena.buffer);
+  free(s->scratch_arena.buffer);
   free(s);
 }
 
@@ -117,21 +136,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  State *s =
-      (State *)calloc(10, sizeof(State)); // Reserve some more space just in
-                                          // case we add more fields... hack
-
-  // Preallocate backing buffers for the memory arenas
-  size_t doc_arena_size = 32 * 1024 * 1024;     // 32 MB
-  size_t scratch_arena_size = 16 * 1024 * 1024; // 16 MB
-  void *doc_backing = malloc(doc_arena_size);
-  void *scratch_backing = malloc(scratch_arena_size);
-  if (!doc_backing || !scratch_backing) {
-    fprintf(stderr, "Fatal error: Failed to preallocate memory arenas\n");
-    return 1;
-  }
-  arena_init(&s->doc_arena, doc_backing, doc_arena_size);
-  arena_init(&s->scratch_arena, scratch_backing, scratch_arena_size);
+  State *s = CreateAppState();
 
   double t_res_start = GetTimeSeconds();
   CheckAndDownloadResources();
