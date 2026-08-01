@@ -62,7 +62,10 @@ static bool LoadAppLibrary(int *reload_counter, Fn_Update *outUpdate,
           (*reload_counter)++);
   char cp_cmd[512];
   snprintf(cp_cmd, sizeof(cp_cmd), "cp ./lcars-lib.so %s", lib_path);
-  system(cp_cmd);
+  if (system(cp_cmd) != 0) {
+    printf("Failed to copy library to %s\n", lib_path);
+    return false;
+  }
 
   void *handle = dlopen(lib_path, RTLD_NOW);
   unlink(lib_path);
@@ -276,10 +279,14 @@ int main(int argc, char **argv) {
     if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyDown(KEY_LEFT_SHIFT) &&
         IsKeyPressed(KEY_R)) {
       printf("Reloading ...\n");
-      system("make lcars-lib.so");
-
-      if (LoadAppLibrary(&reload_counter, &Update, &Init, &Reload,
-                         &FlushPendingSaves)) {
+      if (system("make lcars-lib.so") != 0) {
+        // The previously-loaded library is still in place, so this just
+        // skips the reload rather than loading stale code and reporting
+        // success.
+        printf("Build failed, skipping reload.\n");
+        updateNotification(s, StringStatic("LCARS build failed!"));
+      } else if (LoadAppLibrary(&reload_counter, &Update, &Init, &Reload,
+                                &FlushPendingSaves)) {
         Reload(s, false);
         printf("Reloaded successfully.\n");
         updateNotification(s, StringStatic("LCARS reloaded successfully!"));

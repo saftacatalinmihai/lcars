@@ -1200,7 +1200,11 @@ static void UpdateGlobalShortcuts(State *s) {
   }
 
   if (IsKeyDown(KEY_LEFT_SUPER) && IsKeyPressed(KEY_S)) {
-    system("./scripts/db-push.sh");
+    if (system("./scripts/db-push.sh") != 0) {
+      updateNotification(s, StringStatic("DB push failed"));
+    } else {
+      updateNotification(s, StringStatic("DB pushed successfully"));
+    }
   }
 }
 
