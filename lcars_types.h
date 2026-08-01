@@ -32,6 +32,12 @@
 #define TEXT_VOICE_INPUT "Voice Input"
 #define TEXT_RECORDING "RECORDING..."
 
+// SQLite database file path, relative to the process's working directory.
+// Shared by every entry point that opens it directly: the main app
+// (liblcars.h), --http-only's minimal init (lcars.c), and the HTTP API
+// server (lcars_http.h).
+#define LCARS_DB_PATH "lcars.db"
+
 // The entry "kind" used to seed the DB on first run and to fall back to
 // when nothing else (a selected kind, an existing entry) is available.
 #define DEFAULT_ENTRY_KIND "architect_log"

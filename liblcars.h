@@ -339,7 +339,7 @@ void Init(State *s, bool firstInit) {
 
   if (firstInit) {
     sqlite3 *db = NULL;
-    int rc = sqlite3_open("lcars.db", &db);
+    int rc = sqlite3_open(LCARS_DB_PATH, &db);
     if (rc) {
       fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
     } else {
