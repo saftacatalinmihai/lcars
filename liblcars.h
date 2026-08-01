@@ -957,6 +957,12 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         e->moveLeftRepeat.isHeld = false;
         e->moveRightRepeat.isHeld = false;
       }
+
+      // Line starts for this frame's text, shared by the Up/Down/Home/End
+      // handling below instead of each recomputing it from scratch.
+      int lineStarts[LINE_STARTS_MAX];
+      int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
+
       bool triggerMoveUp = false;
       if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
         if (KeyRepeatFired(&e->moveUpRepeat, KEY_UP, CURSOR_MOVE_REPEAT_DELAY,
@@ -986,8 +992,6 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       }
 
       if (triggerMoveUp || triggerMoveDown) {
-        int lineStarts[LINE_STARTS_MAX];
-        int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
         int currLine = GetLineForIndex(e->gap.gapStart, lineStarts, numLines);
         int col = e->gap.gapStart - lineStarts[currLine];
 
@@ -1019,8 +1023,6 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       }
       if (IsKeyPressed(KEY_HOME)) {
         StartTextSelection(&e->gap, &e->selection, shiftDown);
-        int lineStarts[LINE_STARTS_MAX];
-        int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
         int currLine = GetLineForIndex(e->gap.gapStart, lineStarts, numLines);
         MoveGap(&e->gap, lineStarts[currLine]);
         EndTextSelection(&e->gap, &e->selection, shiftDown);
@@ -1028,8 +1030,6 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       }
       if (IsKeyPressed(KEY_END)) {
         StartTextSelection(&e->gap, &e->selection, shiftDown);
-        int lineStarts[LINE_STARTS_MAX];
-        int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
         int currLine = GetLineForIndex(e->gap.gapStart, lineStarts, numLines);
         int targetIndex = (currLine < numLines - 1)
                               ? lineStarts[currLine + 1] - 1
