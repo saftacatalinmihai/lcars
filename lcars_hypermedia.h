@@ -267,8 +267,20 @@ void LoadHypermediaDocument(State *s, String source) {
         color = ParseColor(StringStatic(val));
       if (GetAttributeValue(tag, "action", val, sizeof(val)))
         action = ParseAction(StringStatic(val));
-      if (GetAttributeValue(tag, "orientation", val, sizeof(val)))
+      if (GetAttributeValue(tag, "orientation", val, sizeof(val))) {
         orientation = atoi(val);
+        // Only 0 (top-left corner) and 3 (bottom-left corner) are actually
+        // drawn/hit-tested (see DrawElbow()/IsHoveringElement() in
+        // lcars_ui.h) - the other two corners were never implemented.
+        // Reject anything else here rather than let a bad value reach
+        // those switches.
+        if (orientation != 0 && orientation != 3) {
+          TraceLog(LOG_WARNING,
+                   "Unsupported elbow orientation %d, defaulting to 0",
+                   orientation);
+          orientation = 0;
+        }
+      }
       if (GetAttributeValue(tag, "size", val, sizeof(val))) {
         textSize = atoi(val);
         if (textSize < 20)

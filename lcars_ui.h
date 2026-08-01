@@ -144,11 +144,6 @@ static bool IsHoveringElement(State *s, Element *e) {
                              .y = e->position.y,
                              .width = s->columnWidth + s->barWidth,
                              .height = s->barHeight});
-    case 1:
-    case 2:
-      TODO;
-      return false;
-      break;
     case 3:
       return CheckCollisionPointRec(GetMousePosition(),
                                     (Rectangle){.x = e->position.x,
@@ -164,13 +159,17 @@ static bool IsHoveringElement(State *s, Element *e) {
                                   s->innerRadius,
                              .width = s->columnWidth + s->barWidth,
                              .height = s->barHeight});
-    };
-    break;
+    default:
+      // Only 0 and 3 are ever assigned (see the orientation check in
+      // lcars_hypermedia.h) - reject anything else defensively instead of
+      // falling off the end of this function.
+      return false;
+    }
   case ELEM_NOTHING:
   case ELEM_TOTAL_KINDS:
     return false;
-    break;
   }
+  return false;
 }
 
 // Orientation: 0 - corner at top-left, 1 - corner at top-right, 2 - corner at
@@ -219,8 +218,10 @@ static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
                debug ? MAGENTA : color); // Decorative ring around the elbow
     }
     break;
+  // 1 (top-right corner) and 2 (bottom-right corner) were never
+  // implemented, and lcars_hypermedia.h's orientation parsing rejects
+  // anything but 0/3 before an Element can reach here with one of these.
   case 1:
-    break;
   case 2:
     break;
   case 3:
