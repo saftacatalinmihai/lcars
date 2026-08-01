@@ -19,16 +19,13 @@ static inline String StringInit(Arena *arena, const char *c_str) {
   String s;
   if (c_str == NULL) {
     s.data = arena_alloc(arena, 1);
-    if (s.data)
-      s.data[0] = '\0';
+    s.data[0] = '\0';
     s.len = 0;
     s.is_static = false;
   } else {
     s.len = (int)strlen(c_str);
     s.data = arena_alloc(arena, s.len + 1);
-    if (s.data) {
-      memcpy(s.data, c_str, s.len + 1);
-    }
+    memcpy(s.data, c_str, s.len + 1);
     s.is_static = false;
   }
   return s;
@@ -38,17 +35,14 @@ static inline String StringInitLen(Arena *arena, const char *c_str, int len) {
   String s;
   if (c_str == NULL || len <= 0) {
     s.data = arena_alloc(arena, 1);
-    if (s.data)
-      s.data[0] = '\0';
+    s.data[0] = '\0';
     s.len = 0;
     s.is_static = false;
   } else {
     s.len = len;
     s.data = arena_alloc(arena, s.len + 1);
-    if (s.data) {
-      memcpy(s.data, c_str, len);
-      s.data[len] = '\0';
-    }
+    memcpy(s.data, c_str, len);
+    s.data[len] = '\0';
     s.is_static = false;
   }
   return s;
@@ -62,7 +56,14 @@ static inline String StringStatic(const char *c_str) {
   return s;
 }
 
-static inline void StringFree(String *s) {
+// Resets *s to an empty static String. Despite the arena-based naming
+// convention elsewhere in this codebase, this does NOT free or reclaim
+// any memory - the arena owns everything a non-static String points to,
+// and only arena_reset() ever reclaims it. This just clears the struct
+// so *s no longer references the (still-live-until-arena-reset) old
+// data, which is what StringAssign*/StringConcat* need before
+// overwriting a String that might have held a non-static value.
+static inline void StringClear(String *s) {
   if (s) {
     s->data = NULL;
     s->len = 0;
@@ -70,6 +71,11 @@ static inline void StringFree(String *s) {
   }
 }
 
+// If src is static, returns src as-is: the copy aliases the same
+// pointer, since static data is never mutated or arena-reclaimed anyway.
+// Only a non-static src gets a real arena copy. Safe as long as callers
+// never mutate a String's data in place (none in this codebase do), but
+// a footgun for new code that might.
 static inline String StringDup(Arena *arena, String src) {
   if (src.is_static) {
     return src;
@@ -80,18 +86,18 @@ static inline String StringDup(Arena *arena, String src) {
 static inline void StringAssign(Arena *arena, String *dest, String src) {
   if (dest == &src)
     return;
-  StringFree(dest);
+  StringClear(dest);
   *dest = StringDup(arena, src);
 }
 
 static inline void StringAssignC(Arena *arena, String *dest,
                                  const char *c_str) {
-  StringFree(dest);
+  StringClear(dest);
   *dest = StringInit(arena, c_str);
 }
 
 static inline void StringAssignStatic(String *dest, const char *c_str) {
-  StringFree(dest);
+  StringClear(dest);
   *dest = StringStatic(c_str);
 }
 
@@ -100,14 +106,12 @@ static inline void StringConcat(Arena *arena, String *dest, String src) {
     return;
   int newLen = dest->len + src.len;
   char *newData = arena_alloc(arena, newLen + 1);
-  if (newData) {
-    if (dest->data && dest->len > 0) {
-      memcpy(newData, dest->data, dest->len);
-    }
-    memcpy(newData + dest->len, src.data, src.len);
-    newData[newLen] = '\0';
+  if (dest->data && dest->len > 0) {
+    memcpy(newData, dest->data, dest->len);
   }
-  StringFree(dest);
+  memcpy(newData + dest->len, src.data, src.len);
+  newData[newLen] = '\0';
+  StringClear(dest);
   dest->data = newData;
   dest->len = newLen;
   dest->is_static = false;
@@ -149,13 +153,11 @@ static inline void StringFormat(Arena *arena, String *dest, const char *fmt,
   va_end(args_copy);
 
   char *buf = arena_alloc(arena, needed + 1);
-  if (buf) {
-    vsnprintf(buf, needed + 1, fmt, args);
-    StringFree(dest);
-    dest->data = buf;
-    dest->len = needed;
-    dest->is_static = false;
-  }
+  vsnprintf(buf, needed + 1, fmt, args);
+  StringClear(dest);
+  dest->data = buf;
+  dest->len = needed;
+  dest->is_static = false;
   va_end(args);
 }
 

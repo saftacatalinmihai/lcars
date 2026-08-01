@@ -393,7 +393,7 @@ static inline void SwitchToEntry(State *s, Element *e, int newEntryId) {
   e->entryList->selectedEntryId = newEntryId;
   String newText = GetEntryContentFromDB(s, newEntryId);
   LoadEntryIntoEditor(e, newText);
-  StringFree(&newText);
+  StringClear(&newText);
 }
 
 static inline void make_entry_list(Arena *doc_arena, Element *e, State *s) {
@@ -409,7 +409,7 @@ static inline void make_entry_list(Arena *doc_arena, Element *e, State *s) {
   String content = GetEntryContentFromDB(s, e->entryList->selectedEntryId);
   make_text_editor(doc_arena, e, content);
   e->kind = ELEM_ENTRY_LIST;
-  StringFree(&content);
+  StringClear(&content);
 }
 
 #endif // LCARS_IMPLEMENTATION

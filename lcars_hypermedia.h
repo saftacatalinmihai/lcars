@@ -408,7 +408,7 @@ void LoadHypermediaDocument(State *s, String source) {
     p = tag_end + 1;
   }
 
-  StringFree(&buf);
+  StringClear(&buf);
   UpdateNotification(s, StringStatic("HYPERMEDIA LOADED"));
 
   // Reset scratch arena immediately after loading is complete

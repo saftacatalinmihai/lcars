@@ -83,7 +83,7 @@ static void ClickOrHoverNotification(State *s, int i, String elem_pretty_name) {
                  NOTIFICATION_MAX_LEN,
                  s->elements[i].text.data ? s->elements[i].text.data : "");
     UpdateNotification(s, buf);
-    StringFree(&buf);
+    StringClear(&buf);
     s->notificationOnElemIdx = i;
   }
 }
