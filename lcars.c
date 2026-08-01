@@ -11,6 +11,15 @@
 #endif
 #include "liblcars.h"
 
+// InitDBMinimal() (below) calls InitDB() directly rather than through the
+// dlopen'd library, so this TU needs a real definition of it even in the
+// dynamic hot-reload build, where LCARS_IMPLEMENTATION isn't otherwise
+// defined (the UI functions come from lcars-lib.so instead). lcars_db.h's
+// own include guard makes this a no-op when LCARS_IMPLEMENTATION was
+// already defined above (the static/emscripten builds).
+#ifndef LCARS_IMPLEMENTATION
+#define LCARS_IMPLEMENTATION
+#endif
 #include "lcars_db.h"
 #define LCARS_HTTP_IMPLEMENTATION
 #include "lcars_http.h"
@@ -28,6 +37,7 @@
 typedef void (*Fn_Update)(State *s);
 typedef void (*Fn_Init)(State *s, bool firstInit);
 typedef void (*Fn_Reload)(State *s, bool reset);
+typedef void (*Fn_FlushPendingSaves)(State *s);
 #endif
 
 static void InitDBMinimal(void) {
@@ -159,6 +169,9 @@ int main(int argc, char **argv) {
   while (!WindowShouldClose()) {
     UpdateDrawFrame(s);
   }
+  // Content edits are debounced (see CONTENT_SAVE_DEBOUNCE_SECONDS); flush
+  // anything still pending before we exit so the last few edits aren't lost.
+  FlushPendingSaves(s);
 #else
   // Let browser control frame rate
   emscripten_set_main_loop_arg((em_arg_callback_func)UpdateDrawFrame, s, 0, 1);
@@ -172,6 +185,7 @@ int main(int argc, char **argv) {
   Fn_Update Update = NULL;
   Fn_Init Init = NULL;
   Fn_Reload Reload = NULL;
+  Fn_FlushPendingSaves FlushPendingSaves = NULL;
 
   int reload_counter = 0;
   char lib_path[256];
@@ -198,6 +212,12 @@ int main(int argc, char **argv) {
     if (Reload == NULL) {
       printf("Failed to load Reload: %s\n", dlerror());
       return 1;
+    }
+    *(void **)(&FlushPendingSaves) = dlsym(handle, "FlushPendingSaves");
+    if (FlushPendingSaves == NULL) {
+      printf("Warning: failed to load FlushPendingSaves: %s (pending edits "
+             "won't be flushed on exit)\n",
+             dlerror());
     }
     printf("Library loaded successfully.\n");
   } else {
@@ -238,6 +258,9 @@ int main(int argc, char **argv) {
       }
     }
     Update(s);
+  }
+  if (FlushPendingSaves) {
+    FlushPendingSaves(s);
   }
 #endif
 

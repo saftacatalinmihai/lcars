@@ -38,6 +38,11 @@ void Reload(State *s, bool reset);
 void Update(State *s);
 void UpdateDrawFrame(State *s);
 void LoadHypermediaDocument(State *s, String filename);
+// Flushes any editor content debounced-but-not-yet-saved to the DB. Content
+// edits are saved on an idle timeout, not immediately (see
+// CONTENT_SAVE_DEBOUNCE_SECONDS) — callers must call this before the
+// process exits, or the last edits made just before close can be lost.
+void FlushPendingSaves(State *s);
 
 // -----------------------------------------------------------------------------
 // Inline Utility Function Declarations
@@ -271,8 +276,7 @@ static void NavigateEntryList(State *s, Element *e, int direction) {
   }
   int newIdx = selectedIdx + direction;
   if (newIdx >= 0 && newIdx < count) {
-    UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
-    InvalidateEntryListCache(e);
+    FlushEntryContent(s, e);
     SwitchToEntry(s, e, items[newIdx].id);
 
     float viewportHeight = *e->height - 45.0f;
@@ -402,12 +406,7 @@ static void UpdateVoiceInput(State *s) {
 
       if (textChanged) {
         ReconstructText(&s->doc_arena, editor);
-        if (editor->kind == ELEM_ENTRY_LIST) {
-          UpdateEntryContentInDB(s, editor->selectedEntryId, editor->text);
-          InvalidateEntryListCache(editor);
-        } else {
-          UpdateLogInDB(s, editor->text);
-        }
+        MarkContentDirty(editor);
         editor->snapToCursor = 2;
       }
     }
@@ -634,6 +633,14 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
     break;
   case ELEM_TEXT_EDITOR:
   case ELEM_ENTRY_LIST: {
+    // Debounced autosave: flush once editing has been idle for a while,
+    // regardless of whether this element is currently focused (voice
+    // input can dirty a non-focused editor too).
+    if (e->contentDirty &&
+        (GetTime() - e->lastEditTime) >= CONTENT_SAVE_DEBOUNCE_SECONDS) {
+      FlushEntryContent(s, e);
+    }
+
     float listWidth = 0.0f;
     if (e->kind == ELEM_ENTRY_LIST) {
       EntryListLayout el = ComputeEntryListLayout(e);
@@ -657,7 +664,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             e->listCollapsed = !e->listCollapsed;
           } else if (!e->listCollapsed) {
             if (CheckCollisionPointRec(mPos, el.newEntryBtn)) {
-              UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+              FlushEntryContent(s, e);
 
               char datename[32];
               GetTodayDateString(datename, sizeof(datename));
@@ -687,8 +694,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                                                   itemWidth, el.itemHeight};
                   if (CheckCollisionPointRec(mPos, itemRec)) {
                     if (e->selectedEntryId != items[j].id) {
-                      UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
-                      InvalidateEntryListCache(e);
+                      FlushEntryContent(s, e);
                       SwitchToEntry(s, e, items[j].id);
                     }
                     break;
@@ -740,6 +746,9 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                           e->position.y - btnSize - 4.0f, btnSize, btnSize};
           if (CheckCollisionPointRec(mPos, deleteBtn)) {
             DeleteEntryFromDB(s, e->selectedEntryId);
+            // Discard (don't flush) any unsaved edits to the entry we just
+            // deleted.
+            e->contentDirty = false;
             InvalidateEntryListCache(e);
             EnsureEntryListCache(s, e);
             int nextEntryId;
@@ -1086,12 +1095,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
 
       if (textChanged) {
         ReconstructText(&s->doc_arena, e);
-        if (e->kind == ELEM_ENTRY_LIST) {
-          UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
-          InvalidateEntryListCache(e);
-        } else {
-          UpdateLogInDB(s, e->text);
-        }
+        MarkContentDirty(e);
       }
 
       // Auto-scroll to cursor
@@ -1175,6 +1179,15 @@ void Update(State *s) {
 
   for (int i = 0; i < s->numElements; i++) {
     UpdateElement(s, i, mPos, draggingIdx, resizingIdx);
+  }
+}
+
+void FlushPendingSaves(State *s) {
+  for (int i = 0; i < s->numElements; i++) {
+    Element *e = &s->elements[i];
+    if (e->kind == ELEM_TEXT_EDITOR || e->kind == ELEM_ENTRY_LIST) {
+      FlushEntryContent(s, e);
+    }
   }
 }
 

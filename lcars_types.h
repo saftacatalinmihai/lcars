@@ -50,6 +50,11 @@
 #define SCROLLBAR_MIN_HANDLE_HEIGHT 20.0f
 #define LIST_SCROLLBAR_MIN_HANDLE_HEIGHT 15.0f
 
+// How long an editor must sit idle (no edits) before its content is
+// auto-saved to the DB. Content is also always flushed immediately when
+// switching away from an entry, regardless of this delay.
+#define CONTENT_SAVE_DEBOUNCE_SECONDS 1.0f
+
 // Drag/resize edit-mode handle hit-box: a HANDLE_SIZE square offset by
 // HANDLE_OFFSET from the element's corner.
 #define EDIT_HANDLE_SIZE 16.0f
@@ -178,6 +183,13 @@ typedef struct Element {
   EntryListItem cachedEntries[MAX_LIST_ITEMS];
   int cachedEntryCount;
   bool entryListCacheValid;
+
+  // Debounced content save — see MarkContentDirty()/FlushEntryContent() in
+  // lcars_db.h. contentDirty means the in-memory text differs from what's
+  // persisted; lastEditTime is the GetTime() timestamp of the most recent
+  // edit, used to detect CONTENT_SAVE_DEBOUNCE_SECONDS of idle time.
+  bool contentDirty;
+  float lastEditTime;
 } Element;
 
 typedef struct State {

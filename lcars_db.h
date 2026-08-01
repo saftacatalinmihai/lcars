@@ -26,6 +26,8 @@ static inline int GetDefaultEntryId(State *s);
 static inline String GetLogFromDB(State *s);
 static inline void UpdateLogInDB(State *s, String newLog);
 static inline void LoadEntryIntoEditor(Element *e, String dbLog);
+static inline void MarkContentDirty(Element *e);
+static inline void FlushEntryContent(State *s, Element *e);
 static inline void SwitchToEntry(State *s, Element *e, int newEntryId);
 static inline void make_entry_list(Arena *doc_arena, Element *e, State *s);
 
@@ -304,12 +306,38 @@ static inline void LoadEntryIntoEditor(Element *e, String dbLog) {
   e->snapToCursor = 2;
 }
 
+// Marks an editor's in-memory text as changed but not yet persisted.
+// Content edits call this instead of writing to the DB immediately;
+// FlushEntryContent() (called on an idle timeout and at every point that
+// switches away from the entry) does the actual save.
+static inline void MarkContentDirty(Element *e) {
+  e->contentDirty = true;
+  e->lastEditTime = GetTime();
+}
+
+// Persists an editor's content if it has unsaved changes (a no-op
+// otherwise, e.g. switching between entries without typing). Routes to
+// UpdateEntryContentInDB for ELEM_ENTRY_LIST or UpdateLogInDB for a plain
+// ELEM_TEXT_EDITOR, matching the two editor "modes" this app has.
+static inline void FlushEntryContent(State *s, Element *e) {
+  if (!e->contentDirty) {
+    return;
+  }
+  if (e->kind == ELEM_ENTRY_LIST) {
+    UpdateEntryContentInDB(s, e->selectedEntryId, e->text);
+    InvalidateEntryListCache(e);
+  } else {
+    UpdateLogInDB(s, e->text);
+  }
+  e->contentDirty = false;
+}
+
 // Switches an entry-list editor to display a different entry: fetches its
-// content and loads it into the (gap-buffer-backed) editor. Does NOT save
-// the currently-displayed entry first — callers that need that (switching
-// away from an entry the user was editing) call UpdateEntryContentInDB()
-// themselves before this, since callers that are switching away from an
-// entry that's being deleted must not.
+// content and loads it into the (gap-buffer-backed) editor. Does NOT flush
+// the currently-displayed entry's content first — callers that need that
+// (switching away from an entry the user was editing) call
+// FlushEntryContent() themselves before this, since callers that are
+// switching away from an entry that's being deleted must not save it.
 static inline void SwitchToEntry(State *s, Element *e, int newEntryId) {
   e->selectedEntryId = newEntryId;
   String newText = GetEntryContentFromDB(s, newEntryId);
