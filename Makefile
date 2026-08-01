@@ -9,14 +9,17 @@ endif
 RAYLIB_CFLAGS = $(shell pkg-config --cflags raylib)
 RAYLIB_LIBS   = $(shell pkg-config --libs raylib)
 
-# Architecture-specific linker flags for dynamic/hot-reload build
+# Architecture-specific linker flags for dynamic/hot-reload build. Raylib
+# itself is linked via RAYLIB_LIBS (from pkg-config, folded into CFLAGS_DYN
+# below) - these are the extra system frameworks/libs raylib needs on top
+# of that.
 ifeq ($(ARCH),mac)
-	LDFLAGS_DYN := $(RAYLIB_LIB) -framework Cocoa -framework IOKit -framework CoreVideo -framework CoreAudio -framework AudioToolbox -lm
+	LDFLAGS_DYN := -framework Cocoa -framework IOKit -framework CoreVideo -framework CoreAudio -framework AudioToolbox -lm
 	RPATH_FLAGS := -Wl,-rpath,resources/ -Wl,-rpath,@executable_path/resources/
 	SHARED_FLAGS := -undefined dynamic_lookup
 	STATIC_LIBS_DESKTOP := -framework Cocoa -framework IOKit -framework CoreVideo -framework CoreAudio -framework AudioToolbox -lcurl -lsqlite3 -lm -lpthread -ldl
 else ifeq ($(ARCH),linux)
-	LDFLAGS_DYN := $(RAYLIB_LIB) -lm
+	LDFLAGS_DYN := -lm
 	RPATH_FLAGS := -Wl,-rpath,resources/
 	SHARED_FLAGS :=
 	STATIC_LIBS_DESKTOP := -lcurl -lsqlite3 -lX11 -lGL -lrt -lm -lpthread -ldl
@@ -24,14 +27,22 @@ else
 	$(error Unknown ARCH: $(ARCH). Use 'mac' or 'linux')
 endif
 
+# Toggle AddressSanitizer on debug/dynamic builds without editing this
+# file: make SANITIZE=0 lcars
+SANITIZE ?= 1
+ifeq ($(SANITIZE),1)
+	SANITIZE_FLAGS := -fsanitize=address
+else
+	SANITIZE_FLAGS :=
+endif
+
 # Base CFLAGS (excluding RAYLIB_LIBS and LDFLAGS to avoid dynamic linking in static target)
 BASE_CFLAGS = -std=c11 -Wall -Wextra -pedantic -Wshadow -DHYPERMEDIA -Ivendor -Ivendor/raylib-web/src $(RAYLIB_CFLAGS)
-CFLAGS_DEBUG = $(BASE_CFLAGS) -ggdb -g -fsanitize=address
+CFLAGS_DEBUG = $(BASE_CFLAGS) -ggdb -g $(SANITIZE_FLAGS)
 CFLAGS_RELEASE = $(BASE_CFLAGS) -O3
 
 # For the dynamic/hot-reloaded development target:
-CFLAGS_DYN = $(BASE_CFLAGS) -ggdb -g -fsanitize=address $(RAYLIB_LIBS) -lpthread $(LDFLAGS_DYN)
-# CFLAGS_DYN = $(BASE_CFLAGS) -O3                         $(RAYLIB_LIBS) -lpthread $(LDFLAGS_DYN)
+CFLAGS_DYN = $(BASE_CFLAGS) -ggdb -g $(SANITIZE_FLAGS) $(RAYLIB_LIBS) -lpthread $(LDFLAGS_DYN)
 
 # Web build settings (Emscripten)
 RAYLIB_WEB = vendor/raylib-web/src
