@@ -20,6 +20,8 @@ static inline String GetEntryContentFromDB(State *s, int id);
 static inline void UpdateEntryContentInDB(State *s, int id, String content);
 static inline void DeleteEntryFromDB(State *s, int id);
 static KindList GetAllKindsFromDB(State *s);
+static inline void EnsureKindListCache(State *s, Element *e);
+static inline void InvalidateKindListCache(Element *e);
 static inline int GetEntriesByKind(State *s, const char *kind,
                                    EntryListItem *items, int maxItems);
 static inline void EnsureEntryListCache(State *s, Element *e);
@@ -211,7 +213,7 @@ static KindList GetAllKindsFromDB(State *s) {
     fprintf(stderr, "SQL error failure fetching kinds: %s\n",
             sqlite3_errmsg(s->db));
   } else {
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
+    while (sqlite3_step(stmt) == SQLITE_ROW && kindList.count < MAX_KINDS) {
       const char *col_text = (const char *)sqlite3_column_text(stmt, 0);
       if (col_text) {
         kindList.kinds[kindList.count] = StringInit(&s->doc_arena, col_text);
@@ -221,6 +223,26 @@ static KindList GetAllKindsFromDB(State *s) {
     sqlite3_finalize(stmt);
   }
   return kindList;
+}
+
+// Populates e->kindList from the DB if the cache isn't already valid.
+// Callers read e->kindList after calling this instead of calling
+// GetAllKindsFromDB() directly, so the distinct-kinds list (and the
+// doc_arena allocation it makes for each kind's String) is only refetched
+// when something actually changed, not on every click in the list panel.
+static inline void EnsureKindListCache(State *s, Element *e) {
+  if (e->kindListCacheValid) {
+    return;
+  }
+  e->kindList = GetAllKindsFromDB(s);
+  e->kindListCacheValid = true;
+}
+
+// Marks the cached kind list stale. Call after anything that could add or
+// remove a distinct kind: creating an entry (possibly in a new kind) or
+// deleting one (possibly the last entry of its kind).
+static inline void InvalidateKindListCache(Element *e) {
+  e->kindListCacheValid = false;
 }
 
 static inline int GetEntriesByKind(State *s, const char *kind,
@@ -377,7 +399,7 @@ static inline void make_entry_list(Arena *doc_arena, Element *e, State *s) {
   e->kind = ELEM_ENTRY_LIST;
   e->listCollapsed = false;
   e->selectedEntryId = GetDefaultEntryId(s);
-  e->kindList = GetAllKindsFromDB(s);
+  EnsureKindListCache(s, e);
   e->selectedKind = e->kindList.count > 0 ? e->kindList.kinds[0]
                                           : StringStatic(DEFAULT_ENTRY_KIND);
 

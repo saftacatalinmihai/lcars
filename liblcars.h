@@ -672,9 +672,10 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                                          e->selectedKind.data,
                                          StringStatic(datename));
               InvalidateEntryListCache(e);
+              InvalidateKindListCache(e);
               SwitchToEntry(s, e, newId);
             } else {
-              e->kindList = GetAllKindsFromDB(s);
+              EnsureKindListCache(s, e);
               EnsureEntryListCache(s, e);
               EntryListItem *items = e->cachedEntries;
               int count = e->cachedEntryCount;
@@ -750,6 +751,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             // deleted.
             e->contentDirty = false;
             InvalidateEntryListCache(e);
+            InvalidateKindListCache(e);
             EnsureEntryListCache(s, e);
             int nextEntryId;
             if (e->cachedEntryCount > 0) {

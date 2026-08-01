@@ -176,6 +176,11 @@ typedef struct Element {
 
   KindList kindList;
   String selectedKind;
+  // kindList is only re-fetched when this is false — see
+  // EnsureKindListCache()/InvalidateKindListCache() in lcars_db.h. Avoids
+  // re-querying (and re-allocating a fresh KindList into doc_arena) on
+  // every click in the list panel.
+  bool kindListCacheValid;
 
   // Cache of GetEntriesByKind(selectedKind) — see EnsureEntryListCache() /
   // InvalidateEntryListCache() in lcars_db.h. Avoids re-querying the DB
