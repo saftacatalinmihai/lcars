@@ -119,14 +119,12 @@ static void ReconstructText(Arena *arena, GapBuffer *gap, String *text,
 
   char *newData = arena_alloc(arena, totalLen + 1);
 
-  if (newData) {
-    memcpy(newData, gap->buffer, beforeLen);
-    memcpy(newData + beforeLen, gap->buffer + gap->gapEnd, afterLen);
-    newData[totalLen] = '\0';
-    text->data = newData;
-    text->len = totalLen;
-    text->is_static = false;
-  }
+  memcpy(newData, gap->buffer, beforeLen);
+  memcpy(newData + beforeLen, gap->buffer + gap->gapEnd, afterLen);
+  newData[totalLen] = '\0';
+  text->data = newData;
+  text->len = totalLen;
+  text->is_static = false;
   *textLen = totalLen;
 }
 

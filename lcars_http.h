@@ -178,8 +178,6 @@ static char *json_escape(Arena *arena, const char *str) {
     p++;
   }
   char *escaped = arena_alloc(arena, len + 1);
-  if (!escaped)
-    return "";
   char *dst = escaped;
   p = str;
   while (*p) {
@@ -331,9 +329,8 @@ static bool CheckHTTPAuth(int client_fd, const char *req_buf) {
 // Parses Content-Length/Content-Type from req_buf's headers and reads the
 // body (already-buffered bytes past the headers, plus whatever's still
 // arriving) into arena. *out_body is left pointing at a static empty
-// string if there's no body. Sends a 500 response and returns false on
-// an allocation failure.
-static bool ReadHTTPRequestBody(int client_fd, Arena *arena,
+// string if there's no body.
+static void ReadHTTPRequestBody(int client_fd, Arena *arena,
                                const char *req_buf, const char *body_start,
                                int total_read, int headers_len,
                                char **out_body, char *out_content_type,
@@ -360,15 +357,6 @@ static bool ReadHTTPRequestBody(int client_fd, Arena *arena,
   *out_body = "";
   if (content_len > 0) {
     char *body = (char *)arena_alloc(arena, content_len + 1);
-    if (!body) {
-      printf("HTTP Error: Failed to allocate %d bytes in memory arena for "
-            "request body\n",
-            content_len);
-      const char *resp = "HTTP/1.1 500 Internal Server Error\r\n"
-                         "Content-Length: 0\r\n\r\n";
-      send(client_fd, resp, strlen(resp), 0);
-      return false;
-    }
     int body_already_read = total_read - headers_len;
     if (body_already_read > content_len) {
       body_already_read = content_len;
@@ -387,7 +375,6 @@ static bool ReadHTTPRequestBody(int client_fd, Arena *arena,
     body[content_len] = '\0';
     *out_body = body;
   }
-  return true;
 }
 
 // Handles GET /entries: returns all entries as a JSON array. Returns the
@@ -438,69 +425,67 @@ static int HandleGetEntries(int client_fd, Arena *arena) {
   size_t resp_cap = 4096;
   size_t resp_len = 0;
   char *resp_body = arena_alloc(arena, resp_cap);
-  if (resp_body) {
-    resp_body[0] = '[';
-    resp_len = 1;
+  resp_body[0] = '[';
+  resp_len = 1;
 
-    bool first = true;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-      if (!first) {
-        if (resp_len + 2 >= resp_cap) {
-          size_t old_cap = resp_cap;
-          resp_cap *= 2;
-          resp_body = arena_realloc(arena, resp_body, old_cap, resp_cap);
-        }
-        resp_body[resp_len++] = ',';
-      }
-      first = false;
-
-      int id = sqlite3_column_int(stmt, 0);
-      const char *kind = (const char *)sqlite3_column_text(stmt, 1);
-      const char *title = (const char *)sqlite3_column_text(stmt, 2);
-      const char *content = (const char *)sqlite3_column_text(stmt, 3);
-      int value_int = sqlite3_column_int(stmt, 4);
-      double value_float = sqlite3_column_double(stmt, 5);
-      int done_bool = sqlite3_column_int(stmt, 6);
-      const char *created_at = (const char *)sqlite3_column_text(stmt, 7);
-      const char *last_modified = (const char *)sqlite3_column_text(stmt, 8);
-
-      if (!kind)
-        kind = "";
-      if (!title)
-        title = "";
-      if (!content)
-        content = "";
-      if (!created_at)
-        created_at = "";
-      if (!last_modified)
-        last_modified = "";
-
-      char *esc_kind = json_escape(arena, kind);
-      char *esc_title = json_escape(arena, title);
-      char *esc_content = json_escape(arena, content);
-      char *esc_created = json_escape(arena, created_at);
-      char *esc_modified = json_escape(arena, last_modified);
-
-      char row_buf[4096];
-      int row_len = snprintf(
-          row_buf, sizeof(row_buf),
-          "{\"id\":%d,\"kind\":\"%s\",\"title\":\"%s\",\"content\":\"%s\","
-          "\"value_int\":%d,\"value_float\":%f,\"done_bool\":%d,\"created_at_"
-          "utc\":\"%s\",\"last_modified_at_utc\":\"%s\"}",
-          id, esc_kind, esc_title, esc_content, value_int, value_float,
-          done_bool, esc_created, esc_modified);
-
-      if (resp_len + row_len + 5 >= resp_cap) {
+  bool first = true;
+  while (sqlite3_step(stmt) == SQLITE_ROW) {
+    if (!first) {
+      if (resp_len + 2 >= resp_cap) {
         size_t old_cap = resp_cap;
-        resp_cap = (resp_cap + row_len) * 2;
+        resp_cap *= 2;
         resp_body = arena_realloc(arena, resp_body, old_cap, resp_cap);
       }
-      memcpy(resp_body + resp_len, row_buf, row_len);
-      resp_len += row_len;
+      resp_body[resp_len++] = ',';
     }
-    resp_body[resp_len++] = ']';
-    resp_body[resp_len] = '\0';
+    first = false;
+
+    int id = sqlite3_column_int(stmt, 0);
+    const char *kind = (const char *)sqlite3_column_text(stmt, 1);
+    const char *title = (const char *)sqlite3_column_text(stmt, 2);
+    const char *content = (const char *)sqlite3_column_text(stmt, 3);
+    int value_int = sqlite3_column_int(stmt, 4);
+    double value_float = sqlite3_column_double(stmt, 5);
+    int done_bool = sqlite3_column_int(stmt, 6);
+    const char *created_at = (const char *)sqlite3_column_text(stmt, 7);
+    const char *last_modified = (const char *)sqlite3_column_text(stmt, 8);
+
+    if (!kind)
+      kind = "";
+    if (!title)
+      title = "";
+    if (!content)
+      content = "";
+    if (!created_at)
+      created_at = "";
+    if (!last_modified)
+      last_modified = "";
+
+    char *esc_kind = json_escape(arena, kind);
+    char *esc_title = json_escape(arena, title);
+    char *esc_content = json_escape(arena, content);
+    char *esc_created = json_escape(arena, created_at);
+    char *esc_modified = json_escape(arena, last_modified);
+
+    char row_buf[4096];
+    int row_len = snprintf(
+        row_buf, sizeof(row_buf),
+        "{\"id\":%d,\"kind\":\"%s\",\"title\":\"%s\",\"content\":\"%s\","
+        "\"value_int\":%d,\"value_float\":%f,\"done_bool\":%d,\"created_at_"
+        "utc\":\"%s\",\"last_modified_at_utc\":\"%s\"}",
+        id, esc_kind, esc_title, esc_content, value_int, value_float,
+        done_bool, esc_created, esc_modified);
+
+    if (resp_len + row_len + 5 >= resp_cap) {
+      size_t old_cap = resp_cap;
+      resp_cap = (resp_cap + row_len) * 2;
+      resp_body = arena_realloc(arena, resp_body, old_cap, resp_cap);
+    }
+    memcpy(resp_body + resp_len, row_buf, row_len);
+    resp_len += row_len;
   }
+  resp_body[resp_len++] = ']';
+  resp_body[resp_len] = '\0';
 
   sqlite3_finalize(stmt);
   sqlite3_close(db);
@@ -513,9 +498,7 @@ static int HandleGetEntries(int client_fd, Arena *arena) {
                             "Content-Length: %zu\r\n\r\n",
                             resp_len);
   send(client_fd, header, header_len, 0);
-  if (resp_body && resp_len > 0) {
-    send(client_fd, resp_body, resp_len, 0);
-  }
+  send(client_fd, resp_body, resp_len, 0);
   return 200;
 }
 
@@ -683,12 +666,9 @@ static void HandleHTTPConnection(int client_fd) {
 
   char *body;
   char content_type[128];
-  if (!ReadHTTPRequestBody(client_fd, &arena, req_buf, body_start, total_read,
-                          headers_len, &body, content_type,
-                          sizeof(content_type))) {
-    status_code = 500;
-    goto end;
-  }
+  ReadHTTPRequestBody(client_fd, &arena, req_buf, body_start, total_read,
+                      headers_len, &body, content_type,
+                      sizeof(content_type));
 
   // Router
   if ((strcmp(req_line.path, "/entries") == 0 ||

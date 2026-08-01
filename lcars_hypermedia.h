@@ -156,10 +156,6 @@ static size_t CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb,
 
   char *ptr =
       arena_realloc(mem->arena, mem->data, mem->size, mem->size + realsize + 1);
-  if (!ptr) {
-    return 0;
-  }
-
   mem->data = ptr;
   memcpy(&(mem->data[mem->size]), contents, realsize);
   mem->size += realsize;
@@ -178,10 +174,6 @@ static String LoadFromHTTP(String source, State *s) {
   struct CurlMemoryBuffer chunk;
   chunk.arena = &s->scratch_arena;
   chunk.data = arena_alloc(chunk.arena, 1);
-  if (!chunk.data) {
-    curl_easy_cleanup(curl);
-    return StringInit(&s->scratch_arena, NULL);
-  }
   chunk.size = 0;
   chunk.data[0] = '\0';
 
@@ -226,10 +218,6 @@ static String LoadFromFile(String source, State *s) {
   fseek(f, 0, SEEK_SET);
 
   char *buf = arena_alloc(&s->scratch_arena, size + 1);
-  if (!buf) {
-    fclose(f);
-    return StringInit(&s->scratch_arena, NULL);
-  }
   size_t read_bytes = fread(buf, 1, size, f);
   buf[read_bytes] = '\0';
   fclose(f);
@@ -324,10 +312,8 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
       int text_len = close_tag_p - (tag_end + 1);
       if (text_len > 0) {
         innerText = arena_alloc(&s->scratch_arena, text_len + 1);
-        if (innerText) {
-          strncpy(innerText, tag_end + 1, text_len);
-          innerText[text_len] = '\0';
-        }
+        strncpy(innerText, tag_end + 1, text_len);
+        innerText[text_len] = '\0';
       }
     }
   }
@@ -401,10 +387,8 @@ void LoadHypermediaDocument(State *s, String source) {
 
     int tag_len = tag_end - p + 1;
     char *tag = arena_alloc(&s->scratch_arena, tag_len + 1);
-    if (tag) {
-      strncpy(tag, p, tag_len);
-      tag[tag_len] = '\0';
-    }
+    strncpy(tag, p, tag_len);
+    tag[tag_len] = '\0';
 
     char tag_name[64] = {0};
     int i = 1;

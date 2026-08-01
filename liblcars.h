@@ -150,7 +150,7 @@ static inline void make_text_editor(Arena *doc_arena, Element *e,
   int textLen = initText.data ? (int)strlen(initText.data) : 0;
   int textCapacity = GAP_BUFFER_INITIAL_CAPACITY;
   char *gapBuffer = (char *)arena_alloc(doc_arena, textCapacity + 1);
-  if (gapBuffer && initText.data) {
+  if (initText.data) {
     memcpy(gapBuffer, initText.data, textLen);
   }
   e->gap.buffer = gapBuffer;
@@ -159,7 +159,7 @@ static inline void make_text_editor(Arena *doc_arena, Element *e,
   e->gap.capacity = textCapacity;
 
   char *textAlloc = (char *)arena_alloc(doc_arena, textLen + 1);
-  if (textAlloc && initText.data) {
+  if (initText.data) {
     memcpy(textAlloc, initText.data, textLen);
     textAlloc[textLen] = '\0';
   }
