@@ -47,7 +47,7 @@ void FlushPendingSaves(State *s);
 // -----------------------------------------------------------------------------
 // Inline Utility Function Declarations
 // -----------------------------------------------------------------------------
-static inline void updateNotification(State *s, String notificationText);
+static inline void UpdateNotification(State *s, String notificationText);
 static inline bool KeyRepeatFired(KeyRepeat *repeat, int key, float delay,
                                   int frameCounter, int frameModulo);
 static inline Element *FindElementById(State *s, const char *id);
@@ -63,7 +63,7 @@ static void NavigateEntryList(State *s, Element *e, int direction);
 // -----------------------------------------------------------------------------
 // Inline Utility Function Implementations
 // -----------------------------------------------------------------------------
-static inline void updateNotification(State *s, String notificationText) {
+static inline void UpdateNotification(State *s, String notificationText) {
   StringAssign(&s->doc_arena, &s->notification, notificationText);
   s->notificationTimer = NOTIFICATION_DURATION;
 }
@@ -234,7 +234,7 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
 static void ToggleVoiceRecording(State *s) {
   VoiceRecApi *vapi = s->voiceApi;
   if (!vapi) {
-    updateNotification(s, StringStatic("VOICE ERROR"));
+    UpdateNotification(s, StringStatic("VOICE ERROR"));
     return;
   }
 
@@ -261,7 +261,7 @@ static void ToggleVoiceRecording(State *s) {
         voiceBtn->color = RED;
       }
     } else {
-      updateNotification(s, StringStatic("Voice Recording failed to start"));
+      UpdateNotification(s, StringStatic("Voice Recording failed to start"));
     }
   }
 }
@@ -394,7 +394,7 @@ void Reload(State *s, bool reset) {
 static void UpdateVoiceInput(State *s) {
   VoiceRecApi *vapi = s->voiceApi;
   if (!vapi) {
-    updateNotification(s, StringStatic("VOICE ERROR"));
+    UpdateNotification(s, StringStatic("VOICE ERROR"));
     return;
   }
 
@@ -404,7 +404,7 @@ static void UpdateVoiceInput(State *s) {
       if (strlen(partialBuf) > 0) {
         char fullNotify[300];
         snprintf(fullNotify, sizeof(fullNotify), "[Voice: \"%s\"]", partialBuf);
-        updateNotification(s, StringStatic(fullNotify));
+        UpdateNotification(s, StringStatic(fullNotify));
       }
     }
   }
@@ -633,7 +633,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
     if (isHovering) {
       s->elements[i].color =
           ColorBrightness(s->elements[i].originalColor, 0.2f);
-      clickOrHoverNotification(s, i, StringStatic("elbow element"));
+      ClickOrHoverNotification(s, i, StringStatic("elbow element"));
     } else {
       s->elements[i].color = s->elements[i].originalColor;
     }
@@ -648,7 +648,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         s->elements[i].color =
             ColorBrightness(s->elements[i].originalColor, 0.2f);
       }
-      clickOrHoverNotification(s, i, StringStatic("button element"));
+      ClickOrHoverNotification(s, i, StringStatic("button element"));
     } else {
       if (isRecording) {
         s->elements[i].color = RED;
@@ -755,7 +755,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
     }
 
     if (CheckCollisionPointRec(GetMousePosition(), totalActiveRec)) {
-      clickOrHoverNotification(s, i, StringStatic("text box element"));
+      ClickOrHoverNotification(s, i, StringStatic("text box element"));
       if (!e->isFocused)
         e->color = ColorBrightness(e->originalColor, 0.2f);
       e->isFocused = true;
@@ -906,7 +906,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             IsKeyPressed(KEY_C)) {
           if (e->selection.length <= 0) {
             SetClipboardText(e->text.data ? e->text.data : "");
-            updateNotification(s, StringStatic("All text copied to clipboard"));
+            UpdateNotification(s, StringStatic("All text copied to clipboard"));
           } else {
             int selStart = e->selection.length > 0
                                ? e->selection.start
@@ -918,7 +918,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             memcpy(selectedText, e->text.data + selStart, selLength);
             selectedText[selLength] = '\0';
             SetClipboardText(selectedText);
-            updateNotification(
+            UpdateNotification(
                 s, StringStatic("Selected text copied to clipboard"));
           }
         }
@@ -935,7 +935,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             }
             textChanged = true;
             e->snapToCursor = 2;
-            updateNotification(s, StringStatic("Clipboard text pasted"));
+            UpdateNotification(s, StringStatic("Clipboard text pasted"));
           }
         }
 
@@ -1159,7 +1159,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
   case ELEM_SPHERE: {
     if (isHovering) {
       e->color = ColorBrightness(GREEN, 0.8f);
-      clickOrHoverNotification(s, i, StringStatic("sphere element"));
+      ClickOrHoverNotification(s, i, StringStatic("sphere element"));
       if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
         UpdateCamera(&e->sphere->camera, CAMERA_THIRD_PERSON);
       } else {
@@ -1201,9 +1201,9 @@ static void UpdateGlobalShortcuts(State *s) {
 
   if (IsKeyDown(KEY_LEFT_SUPER) && IsKeyPressed(KEY_S)) {
     if (system("./scripts/db-push.sh") != 0) {
-      updateNotification(s, StringStatic("DB push failed"));
+      UpdateNotification(s, StringStatic("DB push failed"));
     } else {
-      updateNotification(s, StringStatic("DB pushed successfully"));
+      UpdateNotification(s, StringStatic("DB pushed successfully"));
     }
   }
 }

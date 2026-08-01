@@ -284,14 +284,14 @@ int main(int argc, char **argv) {
         // skips the reload rather than loading stale code and reporting
         // success.
         printf("Build failed, skipping reload.\n");
-        updateNotification(s, StringStatic("LCARS build failed!"));
+        UpdateNotification(s, StringStatic("LCARS build failed!"));
       } else if (LoadAppLibrary(&reload_counter, &Update, &Init, &Reload,
                                 &FlushPendingSaves)) {
         Reload(s, false);
         printf("Reloaded successfully.\n");
-        updateNotification(s, StringStatic("LCARS reloaded successfully!"));
+        UpdateNotification(s, StringStatic("LCARS reloaded successfully!"));
       } else {
-        updateNotification(s, StringStatic("LCARS reload failed!"));
+        UpdateNotification(s, StringStatic("LCARS reload failed!"));
       }
     }
     Update(s);

@@ -54,12 +54,12 @@ static inline int ExecSQL(State *s, String sql, String successMsg) {
   int rc = sqlite3_exec(s->db, sql.data, sqlite_callback, s, &zErrMsg);
   if (rc != SQLITE_OK) {
     fprintf(stderr, "SQL error: %s\n", zErrMsg);
-    updateNotification(s, StringStatic("SQL error"));
+    UpdateNotification(s, StringStatic("SQL error"));
     sqlite3_free(zErrMsg);
   } else {
     if (successMsg.data && successMsg.len > 0) {
       fprintf(stdout, "%s\n", successMsg.data);
-      updateNotification(s, successMsg);
+      UpdateNotification(s, successMsg);
     }
   }
   return rc;
@@ -81,9 +81,9 @@ static inline bool StepAndFinalize(State *s, sqlite3_stmt *stmt,
   bool ok = (rc == SQLITE_DONE);
   if (!ok) {
     fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(s->db));
-    updateNotification(s, StringStatic("SQL error"));
+    UpdateNotification(s, StringStatic("SQL error"));
   } else if (successMsg.data && successMsg.len > 0) {
-    updateNotification(s, successMsg);
+    UpdateNotification(s, successMsg);
   }
   sqlite3_finalize(stmt);
   return ok;
@@ -98,7 +98,7 @@ static inline int CreateNewEntry(State *s, const char *kind,
       s->db, "INSERT INTO entries (kind, title, content) VALUES (?1, ?2, ?3);",
       -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
-    updateNotification(s, StringStatic("SQL error"));
+    UpdateNotification(s, StringStatic("SQL error"));
     return 0;
   }
   sqlite3_bind_text(stmt, 1, kind, -1, SQLITE_TRANSIENT);
@@ -180,7 +180,7 @@ static inline void UpdateEntryContentInDB(State *s, int id, String content) {
       "strftime('%Y-%m-%d %H:%M:%S', 'now', 'utc') WHERE id = ?2;",
       -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
-    updateNotification(s, StringStatic("SQL error"));
+    UpdateNotification(s, StringStatic("SQL error"));
     return;
   }
   sqlite3_bind_text(stmt, 1, content.data ? content.data : "", -1,
@@ -194,7 +194,7 @@ static inline void DeleteEntryFromDB(State *s, int id) {
   int rc = sqlite3_prepare_v2(
       s->db, "UPDATE entries SET deleted = 1 WHERE id = ?1;", -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
-    updateNotification(s, StringStatic("SQL error"));
+    UpdateNotification(s, StringStatic("SQL error"));
     return;
   }
   sqlite3_bind_int(stmt, 1, id);

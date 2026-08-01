@@ -171,7 +171,7 @@ static size_t CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb,
 static String LoadFromHTTP(String source, State *s) {
   CURL *curl = curl_easy_init();
   if (!curl) {
-    updateNotification(s, StringStatic("CURL INIT FAILED"));
+    UpdateNotification(s, StringStatic("CURL INIT FAILED"));
     return StringInit(&s->scratch_arena, NULL);
   }
 
@@ -197,7 +197,7 @@ static String LoadFromHTTP(String source, State *s) {
 
   if (res != CURLE_OK) {
     printf("CURL download failed: %s\n", curl_easy_strerror(res));
-    updateNotification(s, StringStatic("DOWNLOAD FAILED"));
+    UpdateNotification(s, StringStatic("DOWNLOAD FAILED"));
     return StringInit(&s->scratch_arena, NULL);
   }
 
@@ -217,7 +217,7 @@ static String LoadFromFile(String source, State *s) {
   FILE *f = fopen(local_path, "r");
   if (!f) {
     printf("Failed to open file: %s\n", local_path);
-    updateNotification(s, StringStatic("FILE NOT FOUND"));
+    UpdateNotification(s, StringStatic("FILE NOT FOUND"));
     return StringInit(&s->scratch_arena, NULL);
   }
 
@@ -425,7 +425,7 @@ void LoadHypermediaDocument(State *s, String source) {
   }
 
   StringFree(&buf);
-  updateNotification(s, StringStatic("HYPERMEDIA LOADED"));
+  UpdateNotification(s, StringStatic("HYPERMEDIA LOADED"));
 
   // Reset scratch arena immediately after loading is complete
   arena_reset(&s->scratch_arena);

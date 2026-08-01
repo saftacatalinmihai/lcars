@@ -3,7 +3,7 @@
 
 #include "lcars_types.h"
 
-static void clickOrHoverNotification(State *s, int i, String elem_pretty_name);
+static void ClickOrHoverNotification(State *s, int i, String elem_pretty_name);
 static Rectangle GetElementBoundingBox(State *s, Element *e);
 static bool IsHoveringElement(State *s, Element *e);
 static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
@@ -72,7 +72,7 @@ static EntryListLayout ComputeEntryListLayout(Element *e) {
   return el;
 }
 
-static void clickOrHoverNotification(State *s, int i, String elem_pretty_name) {
+static void ClickOrHoverNotification(State *s, int i, String elem_pretty_name) {
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ||
       s->notificationOnElemIdx != i) {
     String buf = {0};
@@ -82,7 +82,7 @@ static void clickOrHoverNotification(State *s, int i, String elem_pretty_name) {
                  elem_pretty_name.data ? elem_pretty_name.data : "", i,
                  NOTIFICATION_MAX_LEN,
                  s->elements[i].text.data ? s->elements[i].text.data : "");
-    updateNotification(s, buf);
+    UpdateNotification(s, buf);
     StringFree(&buf);
     s->notificationOnElemIdx = i;
   }
