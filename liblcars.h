@@ -121,10 +121,10 @@ static inline void make_text_editor(Arena *doc_arena, Element *e,
   if (gapBuffer && initText.data) {
     memcpy(gapBuffer, initText.data, textLen);
   }
-  e->gapBuffer = gapBuffer;
-  e->gapStart = textLen;
-  e->gapEnd = textCapacity;
-  e->textCapacity = textCapacity;
+  e->gap.buffer = gapBuffer;
+  e->gap.gapStart = textLen;
+  e->gap.gapEnd = textCapacity;
+  e->gap.capacity = textCapacity;
 
   char *textAlloc = (char *)arena_alloc(doc_arena, textLen + 1);
   if (textAlloc && initText.data) {
@@ -402,12 +402,13 @@ static void UpdateVoiceInput(State *s) {
       bool textChanged = false;
       int voiceBufLen = strlen(voiceBuf);
       for (int k = 0; k < voiceBufLen; k++) {
-        GapInsertChar(&s->doc_arena, editor, voiceBuf[k]);
+        GapInsertChar(&s->doc_arena, &editor->gap, voiceBuf[k]);
         textChanged = true;
       }
 
       if (textChanged) {
-        ReconstructText(&s->doc_arena, editor);
+        ReconstructText(&s->doc_arena, &editor->gap, &editor->text,
+                        &editor->textLen);
         MarkContentDirty(editor);
         editor->snapToCursor = 2;
       }
@@ -863,10 +864,10 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         while (key > 0) {
           // NOTE: Only allow keys in range [32..125]
           if ((key >= 32) && (key <= 125) && (e->textLen < MAX_INPUT_CHARS)) {
-            if (DeleteSelection(e)) {
+            if (DeleteSelection(&e->gap, &e->selection)) {
               textChanged = true;
             }
-            GapInsertChar(&s->doc_arena, e, (char)key);
+            GapInsertChar(&s->doc_arena, &e->gap, (char)key);
             textChanged = true;
             e->snapToCursor = 2;
           }
@@ -878,15 +879,15 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       if (!isMouseOverList) {
         if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER)) &&
             IsKeyPressed(KEY_C)) {
-          if (e->selectTextLength <= 0) {
+          if (e->selection.length <= 0) {
             SetClipboardText(e->text.data ? e->text.data : "");
             updateNotification(s, StringStatic("All text copied to clipboard"));
           } else {
-            int selStart = e->selectTextLength > 0
-                               ? e->selectTextStart
-                               : e->selectTextStart + e->selectTextLength;
-            int selLength = e->selectTextLength > 0 ? e->selectTextLength
-                                                    : -e->selectTextLength;
+            int selStart = e->selection.length > 0
+                               ? e->selection.start
+                               : e->selection.start + e->selection.length;
+            int selLength = e->selection.length > 0 ? e->selection.length
+                                                    : -e->selection.length;
             char *selectedText =
                 (char *)arena_alloc(&s->scratch_arena, selLength + 1);
             memcpy(selectedText, e->text.data + selStart, selLength);
@@ -900,12 +901,12 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             IsKeyPressed(KEY_V)) {
           const char *clipboardText = GetClipboardText();
           if (clipboardText) {
-            if (DeleteSelection(e)) {
+            if (DeleteSelection(&e->gap, &e->selection)) {
               textChanged = true;
             }
             int clipboardTextLen = strlen(clipboardText);
             for (int j = 0; j < clipboardTextLen; j++) {
-              GapInsertChar(&s->doc_arena, e, clipboardText[j]);
+              GapInsertChar(&s->doc_arena, &e->gap, clipboardText[j]);
             }
             textChanged = true;
             e->snapToCursor = 2;
@@ -914,10 +915,10 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         }
 
         if (IsKeyPressed(KEY_ENTER)) {
-          if (DeleteSelection(e)) {
+          if (DeleteSelection(&e->gap, &e->selection)) {
             textChanged = true;
           }
-          GapInsertChar(&s->doc_arena, e, '\n');
+          GapInsertChar(&s->doc_arena, &e->gap, '\n');
           textChanged = true;
           e->snapToCursor = 2;
         }
@@ -926,27 +927,31 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         if (KeyRepeatFired(&e->moveLeftRepeat, KEY_LEFT,
                            CURSOR_MOVE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 2)) {
-          StartTextSelection(e, shiftDown);
+          StartTextSelection(&e->gap, &e->selection, shiftDown);
           bool isWordJump =
               IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
               IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-          int target = isWordJump ? FindWordBoundary(e->text, e->gapStart, -1)
-                                  : e->gapStart - 1;
-          MoveGap(e, target);
-          EndTextSelection(e, shiftDown);
+          int target = isWordJump
+                          ? FindWordBoundary(e->text, e->gap.gapStart, -1)
+                          : e->gap.gapStart - 1;
+          MoveGap(&e->gap, target);
+          EndTextSelection(&e->gap, &e->selection, shiftDown);
+          e->snapToCursor = 2;
         }
 
         if (KeyRepeatFired(&e->moveRightRepeat, KEY_RIGHT,
                            CURSOR_MOVE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 2)) {
-          StartTextSelection(e, shiftDown);
+          StartTextSelection(&e->gap, &e->selection, shiftDown);
           bool isWordJump =
               IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
               IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
-          int target = isWordJump ? FindWordBoundary(e->text, e->gapStart, 1)
-                                  : e->gapStart + 1;
-          MoveGap(e, target);
-          EndTextSelection(e, shiftDown);
+          int target = isWordJump
+                          ? FindWordBoundary(e->text, e->gap.gapStart, 1)
+                          : e->gap.gapStart + 1;
+          MoveGap(&e->gap, target);
+          EndTextSelection(&e->gap, &e->selection, shiftDown);
+          e->snapToCursor = 2;
         }
       } else {
         e->moveLeftRepeat.isHeld = false;
@@ -983,17 +988,17 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       if (triggerMoveUp || triggerMoveDown) {
         int lineStarts[LINE_STARTS_MAX];
         int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
-        int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
-        int col = e->gapStart - lineStarts[currLine];
+        int currLine = GetLineForIndex(e->gap.gapStart, lineStarts, numLines);
+        int col = e->gap.gapStart - lineStarts[currLine];
 
-        StartTextSelection(e, shiftDown);
+        StartTextSelection(&e->gap, &e->selection, shiftDown);
 
         if (triggerMoveUp) {
           if (currLine > 0) {
             int targetLineLen =
                 lineStarts[currLine] - 1 - lineStarts[currLine - 1];
             int targetCol = col < targetLineLen ? col : targetLineLen;
-            MoveGap(e, lineStarts[currLine - 1] + targetCol);
+            MoveGap(&e->gap, lineStarts[currLine - 1] + targetCol);
           }
         } else if (triggerMoveDown) {
           if (currLine < numLines - 1) {
@@ -1005,30 +1010,33 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
               targetLineLen = e->textLen - lineStarts[currLine + 1];
             }
             int targetCol = col < targetLineLen ? col : targetLineLen;
-            MoveGap(e, lineStarts[currLine + 1] + targetCol);
+            MoveGap(&e->gap, lineStarts[currLine + 1] + targetCol);
           }
         }
 
-        EndTextSelection(e, shiftDown);
+        EndTextSelection(&e->gap, &e->selection, shiftDown);
+        e->snapToCursor = 2;
       }
       if (IsKeyPressed(KEY_HOME)) {
-        StartTextSelection(e, shiftDown);
+        StartTextSelection(&e->gap, &e->selection, shiftDown);
         int lineStarts[LINE_STARTS_MAX];
         int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
-        int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
-        MoveGap(e, lineStarts[currLine]);
-        EndTextSelection(e, shiftDown);
+        int currLine = GetLineForIndex(e->gap.gapStart, lineStarts, numLines);
+        MoveGap(&e->gap, lineStarts[currLine]);
+        EndTextSelection(&e->gap, &e->selection, shiftDown);
+        e->snapToCursor = 2;
       }
       if (IsKeyPressed(KEY_END)) {
-        StartTextSelection(e, shiftDown);
+        StartTextSelection(&e->gap, &e->selection, shiftDown);
         int lineStarts[LINE_STARTS_MAX];
         int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
-        int currLine = GetLineForIndex(e->gapStart, lineStarts, numLines);
+        int currLine = GetLineForIndex(e->gap.gapStart, lineStarts, numLines);
         int targetIndex = (currLine < numLines - 1)
                               ? lineStarts[currLine + 1] - 1
                               : e->textLen;
-        MoveGap(e, targetIndex);
-        EndTextSelection(e, shiftDown);
+        MoveGap(&e->gap, targetIndex);
+        EndTextSelection(&e->gap, &e->selection, shiftDown);
+        e->snapToCursor = 2;
       }
 
       if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
@@ -1040,23 +1048,23 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                       e->position.y + EDITOR_TEXT_PADDING - e->scrollY},
             e->textSize, 2.0, mPos, editorWidth);
         if (shiftDown) {
-          if (e->selectTextStart == -1) {
-            e->selectTextStart = e->gapStart;
+          if (e->selection.start == -1) {
+            e->selection.start = e->gap.gapStart;
           }
         } else {
-          e->selectTextStart = clickedIndex;
+          e->selection.start = clickedIndex;
         }
-        e->selectTextEnd = clickedIndex;
-        e->selectTextLength = e->selectTextEnd - e->selectTextStart;
-        MoveGap(e, clickedIndex);
+        e->selection.end = clickedIndex;
+        e->selection.length = e->selection.end - e->selection.start;
+        MoveGap(&e->gap, clickedIndex);
         e->snapToCursor = 2;
       }
 
       if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_A)) {
         e->selectingText = true;
-        e->selectTextStart = 0;
-        e->selectTextEnd = e->textLen;
-        e->selectTextLength = e->textLen;
+        e->selection.start = 0;
+        e->selection.end = e->textLen;
+        e->selection.length = e->textLen;
       }
 
       if (e->selectingText) {
@@ -1065,30 +1073,30 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             (Vector2){editorX + EDITOR_TEXT_PADDING,
                       e->position.y + EDITOR_TEXT_PADDING - e->scrollY},
             e->textSize, 2.0, mPos, editorWidth);
-        e->selectTextEnd = textEnd;
-        e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+        e->selection.end = textEnd;
+        e->selection.length = e->selection.end - e->selection.start;
 
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
           e->selectingText = false;
         }
       }
 
-      if (e->selectTextStart >= 0 && e->selectTextEnd != e->selectTextStart &&
+      if (e->selection.start >= 0 && e->selection.end != e->selection.start &&
           (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))) {
-        DeleteSelection(e);
+        DeleteSelection(&e->gap, &e->selection);
         textChanged = true;
         e->snapToCursor = 2;
       } else if (IsKeyDown(KEY_BACKSPACE)) {
         if (KeyRepeatFired(&e->deleteRepeat, KEY_BACKSPACE, DELETE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 10)) {
-          GapDeleteBack(e);
+          GapDeleteBack(&e->gap);
           textChanged = true;
           e->snapToCursor = 2;
         }
       } else if (IsKeyDown(KEY_DELETE)) {
         if (KeyRepeatFired(&e->deleteRepeat, KEY_DELETE, DELETE_REPEAT_DELAY,
                            e->textSelectedFramesCounter, 10)) {
-          GapDeleteForward(e);
+          GapDeleteForward(&e->gap);
           textChanged = true;
           e->snapToCursor = 2;
         }
@@ -1100,7 +1108,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       }
 
       if (textChanged) {
-        ReconstructText(&s->doc_arena, e);
+        ReconstructText(&s->doc_arena, &e->gap, &e->text, &e->textLen);
         MarkContentDirty(e);
       }
 
@@ -1470,7 +1478,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
                               *e->height};
     BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
     DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false, e->color,
-                  &e->textHeight, &e->cursorY, e->gapStart);
+                  &e->textHeight, &e->cursorY, e->gap.gapStart);
     EndScissorMode();
 
     // Render scrollbar

@@ -350,15 +350,15 @@ static void DrawTextBoxed(State *s, Element *e, Font font, String text,
                           float *outCursorY, int cursorIndex) {
   if (s->debug)
     DrawText(TextFormat("Selection start: %d, end: %d, length: %d",
-                        e->selectTextStart, e->selectTextEnd,
-                        e->selectTextLength),
+                        e->selection.start, e->selection.end,
+                        e->selection.length),
              rec.x, rec.y - 25, 20, RED);
 
-  int selStart = e->selectTextLength > 0
-                     ? e->selectTextStart
-                     : e->selectTextStart + e->selectTextLength;
-  int selLength =
-      e->selectTextLength > 0 ? e->selectTextLength : -e->selectTextLength;
+  int selStart = e->selection.length > 0
+                     ? e->selection.start
+                     : e->selection.start + e->selection.length;
+  int selLength = e->selection.length > 0 ? e->selection.length
+                                          : -e->selection.length;
   DrawTextBoxedSelectable(s, e, font, text, rec, fontSize, spacing, wordWrap,
                           tint, selStart, selLength, BLACK, LCARS_RED_ORANGE,
                           outTextHeight, outCursorY, cursorIndex);

@@ -337,14 +337,14 @@ static inline void UpdateLogInDB(State *s, String newLog) {
 
 static inline void LoadEntryIntoEditor(Element *e, String dbLog) {
   int textLen = dbLog.data ? (int)strlen(dbLog.data) : 0;
-  if (textLen > e->textCapacity) {
-    textLen = e->textCapacity;
+  if (textLen > e->gap.capacity) {
+    textLen = e->gap.capacity;
   }
-  if (e->gapBuffer && dbLog.data) {
-    memcpy(e->gapBuffer, dbLog.data, textLen);
+  if (e->gap.buffer && dbLog.data) {
+    memcpy(e->gap.buffer, dbLog.data, textLen);
   }
-  e->gapStart = textLen;
-  e->gapEnd = e->textCapacity;
+  e->gap.gapStart = textLen;
+  e->gap.gapEnd = e->gap.capacity;
 
   if (e->text.data && dbLog.data) {
     memcpy(e->text.data, dbLog.data, textLen);

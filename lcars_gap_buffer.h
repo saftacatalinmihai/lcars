@@ -5,14 +5,16 @@
 
 static bool IsWordChar(char c);
 static int FindWordBoundary(String text, int from, int dir);
-static void MoveGap(Element *e, int index);
-static void GapInsertChar(Arena *arena, Element *e, char c);
-static void GapDeleteBack(Element *e);
-static void GapDeleteForward(Element *e);
-static void ReconstructText(Arena *arena, Element *e);
-static bool DeleteSelection(Element *e);
-static void StartTextSelection(Element *e, bool shiftDown);
-static void EndTextSelection(Element *e, bool shiftDown);
+static void MoveGap(GapBuffer *gap, int index);
+static void GapInsertChar(Arena *arena, GapBuffer *gap, char c);
+static void GapDeleteBack(GapBuffer *gap);
+static void GapDeleteForward(GapBuffer *gap);
+static void ReconstructText(Arena *arena, GapBuffer *gap, String *text,
+                            int *textLen);
+static bool DeleteSelection(GapBuffer *gap, Selection *sel);
+static void StartTextSelection(GapBuffer *gap, Selection *sel,
+                               bool shiftDown);
+static void EndTextSelection(GapBuffer *gap, Selection *sel, bool shiftDown);
 
 #ifdef LCARS_IMPLEMENTATION
 
@@ -55,113 +57,112 @@ static int FindWordBoundary(String text, int from, int dir) {
   return target;
 }
 
-static void MoveGap(Element *e, int index) {
+static void MoveGap(GapBuffer *gap, int index) {
   if (index < 0)
     index = 0;
-  int currentLen = e->gapStart + (e->textCapacity - e->gapEnd);
+  int currentLen = gap->gapStart + (gap->capacity - gap->gapEnd);
   if (index > currentLen)
     index = currentLen;
 
-  while (e->gapStart < index) {
-    e->gapBuffer[e->gapStart] = e->gapBuffer[e->gapEnd];
-    e->gapStart++;
-    e->gapEnd++;
+  while (gap->gapStart < index) {
+    gap->buffer[gap->gapStart] = gap->buffer[gap->gapEnd];
+    gap->gapStart++;
+    gap->gapEnd++;
   }
-  while (e->gapStart > index) {
-    e->gapStart--;
-    e->gapEnd--;
-    e->gapBuffer[e->gapEnd] = e->gapBuffer[e->gapStart];
+  while (gap->gapStart > index) {
+    gap->gapStart--;
+    gap->gapEnd--;
+    gap->buffer[gap->gapEnd] = gap->buffer[gap->gapStart];
   }
 }
 
-static void GapInsertChar(Arena *arena, Element *e, char c) {
-  if (e->gapStart == e->gapEnd) {
-    int newCapacity = e->textCapacity * 2;
+static void GapInsertChar(Arena *arena, GapBuffer *gap, char c) {
+  if (gap->gapStart == gap->gapEnd) {
+    int newCapacity = gap->capacity * 2;
     if (newCapacity < GAP_BUFFER_MIN_GROWN_CAPACITY)
       newCapacity = GAP_BUFFER_MIN_GROWN_CAPACITY;
     char *newBuf = arena_alloc(arena, newCapacity + 1);
 
-    memcpy(newBuf, e->gapBuffer, e->gapStart);
-    int afterGapLen = e->textCapacity - e->gapEnd;
+    memcpy(newBuf, gap->buffer, gap->gapStart);
+    int afterGapLen = gap->capacity - gap->gapEnd;
     int newGapEnd = newCapacity - afterGapLen;
-    memcpy(newBuf + newGapEnd, e->gapBuffer + e->gapEnd, afterGapLen);
+    memcpy(newBuf + newGapEnd, gap->buffer + gap->gapEnd, afterGapLen);
 
-    // Old e->gapBuffer was allocated in the arena and is reclaimed when the
+    // Old gap->buffer was allocated in the arena and is reclaimed when the
     // arena is reset
-    e->gapBuffer = newBuf;
-    e->gapEnd = newGapEnd;
-    e->textCapacity = newCapacity;
+    gap->buffer = newBuf;
+    gap->gapEnd = newGapEnd;
+    gap->capacity = newCapacity;
   }
 
-  e->gapBuffer[e->gapStart] = c;
-  e->gapStart++;
+  gap->buffer[gap->gapStart] = c;
+  gap->gapStart++;
 }
 
-static void GapDeleteBack(Element *e) {
-  if (e->gapStart > 0) {
-    e->gapStart--;
-  }
-}
-
-static void GapDeleteForward(Element *e) {
-  if (e->gapEnd < e->textCapacity) {
-    e->gapEnd++;
+static void GapDeleteBack(GapBuffer *gap) {
+  if (gap->gapStart > 0) {
+    gap->gapStart--;
   }
 }
 
-static void ReconstructText(Arena *arena, Element *e) {
-  int beforeLen = e->gapStart;
-  int afterLen = e->textCapacity - e->gapEnd;
+static void GapDeleteForward(GapBuffer *gap) {
+  if (gap->gapEnd < gap->capacity) {
+    gap->gapEnd++;
+  }
+}
+
+static void ReconstructText(Arena *arena, GapBuffer *gap, String *text,
+                            int *textLen) {
+  int beforeLen = gap->gapStart;
+  int afterLen = gap->capacity - gap->gapEnd;
   int totalLen = beforeLen + afterLen;
 
   char *newData = arena_alloc(arena, totalLen + 1);
 
   if (newData) {
-    memcpy(newData, e->gapBuffer, beforeLen);
-    memcpy(newData + beforeLen, e->gapBuffer + e->gapEnd, afterLen);
+    memcpy(newData, gap->buffer, beforeLen);
+    memcpy(newData + beforeLen, gap->buffer + gap->gapEnd, afterLen);
     newData[totalLen] = '\0';
-    e->text.data = newData;
-    e->text.len = totalLen;
-    e->text.is_static = false;
+    text->data = newData;
+    text->len = totalLen;
+    text->is_static = false;
   }
-  e->textLen = totalLen;
+  *textLen = totalLen;
 }
 
-static bool DeleteSelection(Element *e) {
-  if (e->selectTextStart >= 0 && e->selectTextEnd != e->selectTextStart) {
-    int selStart = e->selectTextLength > 0
-                       ? e->selectTextStart
-                       : e->selectTextStart + e->selectTextLength;
-    int selLength =
-        e->selectTextLength > 0 ? e->selectTextLength : -e->selectTextLength;
-    MoveGap(e, selStart);
-    e->gapEnd += selLength;
-    e->selectTextLength = 0;
-    e->selectTextStart = -1;
-    e->selectTextEnd = -1;
+static bool DeleteSelection(GapBuffer *gap, Selection *sel) {
+  if (sel->start >= 0 && sel->end != sel->start) {
+    int selStart = sel->length > 0 ? sel->start : sel->start + sel->length;
+    int selLength = sel->length > 0 ? sel->length : -sel->length;
+    MoveGap(gap, selStart);
+    gap->gapEnd += selLength;
+    sel->length = 0;
+    sel->start = -1;
+    sel->end = -1;
     return true;
   }
   return false;
 }
 
-static void StartTextSelection(Element *e, bool shiftDown) {
+static void StartTextSelection(GapBuffer *gap, Selection *sel,
+                               bool shiftDown) {
   if (shiftDown) {
-    if (e->selectTextStart == -1) {
-      e->selectTextStart = e->gapStart;
+    if (sel->start == -1) {
+      sel->start = gap->gapStart;
     }
   } else {
-    e->selectTextStart = -1;
-    e->selectTextEnd = -1;
-    e->selectTextLength = 0;
+    sel->start = -1;
+    sel->end = -1;
+    sel->length = 0;
   }
 }
 
-static void EndTextSelection(Element *e, bool shiftDown) {
+static void EndTextSelection(GapBuffer *gap, Selection *sel,
+                             bool shiftDown) {
   if (shiftDown) {
-    e->selectTextEnd = e->gapStart;
-    e->selectTextLength = e->selectTextEnd - e->selectTextStart;
+    sel->end = gap->gapStart;
+    sel->length = sel->end - sel->start;
   }
-  e->snapToCursor = 2;
 }
 
 #endif // LCARS_IMPLEMENTATION

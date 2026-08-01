@@ -135,6 +135,26 @@ typedef struct KeyRepeat {
   float startTime;
 } KeyRepeat;
 
+// Self-contained gap buffer for text editing — no Element/raylib dependency,
+// so the editing logic in lcars_gap_buffer.h can operate on it (and be
+// tested) directly. See lcars_gap_buffer.h for the operations.
+typedef struct GapBuffer {
+  char *buffer;
+  int gapStart;
+  int gapEnd;
+  int capacity;
+} GapBuffer;
+
+// A text selection expressed as gap-buffer indices. `length` is signed: a
+// selection made by dragging/shift-arrowing backwards has a negative
+// length, with `start` still the anchor (where the selection began) and
+// `end` the current cursor position.
+typedef struct Selection {
+  int start;
+  int length;
+  int end;
+} Selection;
+
 // Geometry of a text editor's vertical scrollbar, shared between input
 // handling and drawing so they can't compute it differently. See
 // ComputeScrollbarLayout() in lcars_ui.h.
@@ -182,17 +202,12 @@ typedef struct Element {
   float textHeight;
   float cursorY;
   int snapToCursor;
-  char *gapBuffer;
-  int gapStart;
-  int gapEnd;
-  int textCapacity;
+  GapBuffer gap;
 
   // Text editor state fields
   bool isFocused;
   int textSelectedFramesCounter;
-  int selectTextStart;
-  int selectTextLength;
-  int selectTextEnd;
+  Selection selection;
   KeyRepeat deleteRepeat;
   KeyRepeat moveLeftRepeat;
   KeyRepeat moveRightRepeat;
