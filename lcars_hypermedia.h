@@ -274,6 +274,10 @@ void LoadHypermediaDocument(State *s, String source) {
         if (textSize < 20)
           textSize = 20;
       }
+      String id = StringStatic(NULL);
+      if (GetAttributeValue(tag, "id", val, sizeof(val))) {
+        id = StringInit(&s->doc_arena, val);
+      }
 
       char *innerText = NULL;
       bool self_closing = false;
@@ -298,6 +302,7 @@ void LoadHypermediaDocument(State *s, String source) {
       }
 
       Element e = {0};
+      e.id = id;
       e.position = (Vector2){x, y};
       e.width = w_val;
       e.height = h_val;

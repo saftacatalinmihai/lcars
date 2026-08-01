@@ -50,6 +50,7 @@ void FlushPendingSaves(State *s);
 static inline void updateNotification(State *s, String notificationText);
 static inline bool KeyRepeatFired(KeyRepeat *repeat, int key, float delay,
                                   int frameCounter, int frameModulo);
+static inline Element *FindElementById(State *s, const char *id);
 
 #ifdef LCARS_IMPLEMENTATION
 static void ToggleVoiceRecording(State *s);
@@ -63,6 +64,18 @@ static void NavigateEntryList(State *s, Element *e, int direction);
 static inline void updateNotification(State *s, String notificationText) {
   StringAssign(&s->doc_arena, &s->notification, notificationText);
   s->notificationTimer = NOTIFICATION_DURATION;
+}
+
+// Finds the first element whose hypermedia `id="..."` attribute matches.
+// Returns NULL if no element has that id (e.g. the document didn't set
+// one, or it hasn't loaded yet).
+static inline Element *FindElementById(State *s, const char *id) {
+  for (int i = 0; i < s->numElements; i++) {
+    if (StringEqC(s->elements[i].id, id)) {
+      return &s->elements[i];
+    }
+  }
+  return NULL;
 }
 
 // Tracks a held key and reports whether its action should fire this frame,
@@ -147,20 +160,13 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
     ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
   }
 
-  int textureStatusIdx = -1;
-  for (int i = 0; i < s->numElements; i++) {
-    if (s->elements[i].kind == ELEM_RECTANGLE &&
-        s->elements[i].position.x == 0 && s->elements[i].position.y == 4) {
-      textureStatusIdx = i;
-      break;
-    }
-  }
+  Element *statusElem = FindElementById(s, "sphere_status");
 
   if (image.data != NULL) {
     TraceLog(LOG_WARNING, "Texture ready!");
-    if (textureStatusIdx != -1) {
-      s->elements[textureStatusIdx].text = StringStatic(NULL);
-      s->elements[textureStatusIdx].textSize = 0;
+    if (statusElem) {
+      statusElem->text = StringStatic(NULL);
+      statusElem->textSize = 0;
     }
     ImageRotateCW(&image);
     ImageFlipVertical(&image);
@@ -168,9 +174,8 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
     Texture2D texture = LoadTextureFromImage(image);
     if (!IsTextureValid(texture)) {
       TraceLog(LOG_ERROR, "Texture is invalid!");
-      if (textureStatusIdx != -1) {
-        s->elements[textureStatusIdx].text =
-            StringStatic("Texture is invalid!");
+      if (statusElem) {
+        statusElem->text = StringStatic("Texture is invalid!");
       }
     } else {
       Model model = LoadModelFromMesh(GenMeshSphere(3.0f, 32, 32));
@@ -180,9 +185,9 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
     }
   } else {
     TraceLog(LOG_WARNING, "Texture not ready yet!");
-    if (textureStatusIdx != -1) {
-      s->elements[textureStatusIdx].text = StringStatic("Texture not ready!");
-      s->elements[textureStatusIdx].textSize = 20;
+    if (statusElem) {
+      statusElem->text = StringStatic("Texture not ready!");
+      statusElem->textSize = 20;
     }
     s->notification = StringStatic("Failed to load image");
   }
@@ -432,10 +437,8 @@ static void HandleElementClick(State *s, Element *e) {
     ExecSQL(s, StringStatic("SELECT * FROM entries;"), StringStatic("Done"));
     break;
   case ACTION_LOAD_HYPERMEDIA: {
-    // Hack: the first element doubles as the URL input for loading
-    // hypermedia documents.
-    Element *url_input = &s->elements[0];
-    if (url_input->text.data &&
+    Element *url_input = FindElementById(s, "url_input");
+    if (url_input && url_input->text.data &&
         (strncmp(url_input->text.data, "http://", 7) == 0 ||
          strncmp(url_input->text.data, "https://", 8) == 0 ||
          strncmp(url_input->text.data, "file://", 7) == 0 ||

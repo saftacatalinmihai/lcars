@@ -184,6 +184,10 @@ typedef struct EntryListLayout {
 
 typedef struct Element {
   ElemKind kind;
+  // Optional stable identifier from the hypermedia `id="..."` attribute.
+  // Empty (data == NULL) unless the document set one. See FindElementById()
+  // in lcars_ui.h.
+  String id;
   ButtonAction on_click;
   Vector2 position;
   Vector3 position3;
