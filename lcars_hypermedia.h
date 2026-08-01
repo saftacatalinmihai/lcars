@@ -167,8 +167,7 @@ static String LoadDocumentContent(String source, State *s) {
   if (source.data == NULL) {
     return StringInit(&s->scratch_arena, NULL);
   }
-  if (strncmp(source.data, "http://", 7) == 0 ||
-      strncmp(source.data, "https://", 8) == 0) {
+  if (IsHttpURL(source.data)) {
     CURL *curl = curl_easy_init();
     if (!curl) {
       updateNotification(s, StringStatic("CURL INIT FAILED"));
@@ -331,6 +330,10 @@ void LoadHypermediaDocument(State *s, String source) {
       if (GetAttributeValue(tag, "id", val, sizeof(val))) {
         id = StringInit(&s->doc_arena, val);
       }
+      String href = StringStatic(NULL);
+      if (GetAttributeValue(tag, "href", val, sizeof(val))) {
+        href = StringInit(&s->doc_arena, val);
+      }
 
       char *innerText = NULL;
       bool self_closing = false;
@@ -356,6 +359,7 @@ void LoadHypermediaDocument(State *s, String source) {
 
       Element e = {0};
       e.id = id;
+      e.href = href;
       e.position = (Vector2){x, y};
       e.width = w_val;
       e.height = h_val;

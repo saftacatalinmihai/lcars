@@ -188,6 +188,12 @@ typedef struct Element {
   // Empty (data == NULL) unless the document set one. See FindElementById()
   // in lcars_ui.h.
   String id;
+  // Optional navigation target from the hypermedia `href="..."` attribute,
+  // used by ACTION_LOAD_HYPERMEDIA. Empty (data == NULL) unless the
+  // document set one, in which case the click handler falls back to
+  // reading the "url_input" element's typed text instead. See
+  // HandleElementClick() in liblcars.h.
+  String href;
   ButtonAction on_click;
   Vector2 position;
   Vector3 position3;

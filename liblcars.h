@@ -51,6 +51,8 @@ static inline void updateNotification(State *s, String notificationText);
 static inline bool KeyRepeatFired(KeyRepeat *repeat, int key, float delay,
                                   int frameCounter, int frameModulo);
 static inline Element *FindElementById(State *s, const char *id);
+static inline bool IsHttpURL(const char *url);
+static inline bool IsDocumentURL(const char *url);
 
 #ifdef LCARS_IMPLEMENTATION
 static void ToggleVoiceRecording(State *s);
@@ -76,6 +78,24 @@ static inline Element *FindElementById(State *s, const char *id) {
     }
   }
   return NULL;
+}
+
+static inline bool IsHttpURL(const char *url) {
+  return url && (strncmp(url, "http://", 7) == 0 ||
+                strncmp(url, "https://", 8) == 0);
+}
+
+// Whether `url` looks like a loadable hypermedia document reference at
+// all, as opposed to arbitrary free-form text (e.g. what a user has typed
+// into the URL bar but not yet finished). Shared by HandleElementClick's
+// ACTION_LOAD_HYPERMEDIA case (deciding whether an href/typed URL is
+// usable) and LoadDocumentContent in lcars_hypermedia.h (deciding HTTP
+// fetch vs local file read).
+static inline bool IsDocumentURL(const char *url) {
+  if (!url)
+    return false;
+  return IsHttpURL(url) || strncmp(url, "file://", 7) == 0 ||
+        strstr(url, ".html") != NULL;
 }
 
 // Tracks a held key and reports whether its action should fire this frame,
@@ -437,13 +457,18 @@ static void HandleElementClick(State *s, Element *e) {
     ExecSQL(s, StringStatic("SELECT * FROM entries;"), StringStatic("Done"));
     break;
   case ACTION_LOAD_HYPERMEDIA: {
-    Element *url_input = FindElementById(s, "url_input");
-    if (url_input && url_input->text.data &&
-        (strncmp(url_input->text.data, "http://", 7) == 0 ||
-         strncmp(url_input->text.data, "https://", 8) == 0 ||
-         strncmp(url_input->text.data, "file://", 7) == 0 ||
-         strstr(url_input->text.data, ".html") != NULL)) {
-      LoadHypermediaDocument(s, url_input->text);
+    // Elements with their own href="..." (hyperlink-style buttons) use it
+    // directly; otherwise fall back to the "url_input" element's typed
+    // text (the URL-bar + GO button pattern).
+    String target = e->href;
+    if (!IsDocumentURL(target.data)) {
+      Element *url_input = FindElementById(s, "url_input");
+      if (url_input) {
+        target = url_input->text;
+      }
+    }
+    if (IsDocumentURL(target.data)) {
+      LoadHypermediaDocument(s, target);
     } else {
       LoadHypermediaDocument(s, StringStatic("file://document.html"));
     }
