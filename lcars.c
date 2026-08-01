@@ -38,7 +38,75 @@ typedef void (*Fn_Update)(State *s);
 typedef void (*Fn_Init)(State *s, bool firstInit);
 typedef void (*Fn_Reload)(State *s, bool reset);
 typedef void (*Fn_FlushPendingSaves)(State *s);
-#endif
+
+// Only the true dynamic hot-reload build (neither STATIC_BUILD nor
+// __EMSCRIPTEN__) dlopens lcars-lib.so at runtime and calls this.
+#ifndef STATIC_BUILD
+
+// Copies lcars-lib.so to a fresh, uniquely-numbered path (a stale mapping
+// of the previous load can otherwise keep dlopen from picking up a
+// rebuilt .so at the same path), dlopens it, and resolves the four
+// functions the hot-reload UI relies on. All-or-nothing: Update/Init/
+// Reload are required, and *outUpdate/*outInit/*outReload/
+// *outFlushPendingSaves are only written if the whole load succeeds, so a
+// failed reload can't leave the caller with a mix of old and new function
+// pointers (or worse, a NULL one it then calls). FlushPendingSaves is the
+// one optional symbol - if it's missing, the load still succeeds but
+// *outFlushPendingSaves comes back NULL, and the caller just won't get
+// pending-edit flushing on exit.
+static bool LoadAppLibrary(int *reload_counter, Fn_Update *outUpdate,
+                           Fn_Init *outInit, Fn_Reload *outReload,
+                           Fn_FlushPendingSaves *outFlushPendingSaves) {
+  char lib_path[256];
+  snprintf(lib_path, sizeof(lib_path), "./lcars-lib_temp_%d.so",
+          (*reload_counter)++);
+  char cp_cmd[512];
+  snprintf(cp_cmd, sizeof(cp_cmd), "cp ./lcars-lib.so %s", lib_path);
+  system(cp_cmd);
+
+  void *handle = dlopen(lib_path, RTLD_NOW);
+  unlink(lib_path);
+  if (!handle) {
+    printf("Failed to load library: %s\n", dlerror());
+    return false;
+  }
+
+  Fn_Update update = NULL;
+  Fn_Init init = NULL;
+  Fn_Reload reload = NULL;
+  Fn_FlushPendingSaves flushPendingSaves = NULL;
+
+  *(void **)&update = dlsym(handle, "UpdateDrawFrame");
+  if (!update) {
+    printf("Failed to load UpdateDrawFrame: %s\n", dlerror());
+    return false;
+  }
+  *(void **)&init = dlsym(handle, "Init");
+  if (!init) {
+    printf("Failed to load Init: %s\n", dlerror());
+    return false;
+  }
+  *(void **)&reload = dlsym(handle, "Reload");
+  if (!reload) {
+    printf("Failed to load Reload: %s\n", dlerror());
+    return false;
+  }
+  *(void **)&flushPendingSaves = dlsym(handle, "FlushPendingSaves");
+  if (!flushPendingSaves) {
+    printf("Warning: failed to load FlushPendingSaves: %s (pending edits "
+          "won't be flushed on exit)\n",
+          dlerror());
+  }
+
+  *outUpdate = update;
+  *outInit = init;
+  *outReload = reload;
+  *outFlushPendingSaves = flushPendingSaves;
+  printf("Library loaded successfully.\n");
+  return true;
+}
+#endif // !STATIC_BUILD
+#endif // __EMSCRIPTEN__
 
 // Allocates and initializes a fresh State: the struct itself (over-
 // allocated - see below) plus its two memory arenas' backing buffers.
@@ -193,40 +261,8 @@ int main(int argc, char **argv) {
   Fn_FlushPendingSaves FlushPendingSaves = NULL;
 
   int reload_counter = 0;
-  char lib_path[256];
-  sprintf(lib_path, "./lcars-lib_temp_%d.so", reload_counter++);
-  char cp_cmd[512];
-  sprintf(cp_cmd, "cp ./lcars-lib.so %s", lib_path);
-  system(cp_cmd);
-
-  void *handle = dlopen(lib_path, RTLD_NOW);
-  unlink(lib_path);
-
-  if (handle) {
-    *(void **)(&Update) = dlsym(handle, "UpdateDrawFrame");
-    if (Update == NULL) {
-      printf("Failed to load UpdateDrawFrame: %s\n", dlerror());
-      return 1;
-    }
-    *(void **)(&Init) = dlsym(handle, "Init");
-    if (Init == NULL) {
-      printf("Failed to load Init: %s\n", dlerror());
-      return 1;
-    }
-    *(void **)(&Reload) = dlsym(handle, "Reload");
-    if (Reload == NULL) {
-      printf("Failed to load Reload: %s\n", dlerror());
-      return 1;
-    }
-    *(void **)(&FlushPendingSaves) = dlsym(handle, "FlushPendingSaves");
-    if (FlushPendingSaves == NULL) {
-      printf("Warning: failed to load FlushPendingSaves: %s (pending edits "
-             "won't be flushed on exit)\n",
-             dlerror());
-    }
-    printf("Library loaded successfully.\n");
-  } else {
-    printf("Failed to load library: %s\n", dlerror());
+  if (!LoadAppLibrary(&reload_counter, &Update, &Init, &Reload,
+                      &FlushPendingSaves)) {
     return 1;
   }
 
@@ -242,24 +278,13 @@ int main(int argc, char **argv) {
       printf("Reloading ...\n");
       system("make lcars-lib.so");
 
-      sprintf(lib_path, "./lcars-lib_temp_%d.so", reload_counter++);
-      sprintf(cp_cmd, "cp ./lcars-lib.so %s", lib_path);
-      system(cp_cmd);
-
-      handle = dlopen(lib_path, RTLD_NOW);
-      unlink(lib_path);
-
-      if (!handle) {
-        printf("dlopen failed: %s\n", dlerror());
-      } else {
-        *(void **)(&Update) = dlsym(handle, "UpdateDrawFrame");
-        *(void **)(&Init) = dlsym(handle, "Init");
-        *(void **)(&Reload) = dlsym(handle, "Reload");
-        if (Reload) {
-          Reload(s, false);
-        }
+      if (LoadAppLibrary(&reload_counter, &Update, &Init, &Reload,
+                         &FlushPendingSaves)) {
+        Reload(s, false);
         printf("Reloaded successfully.\n");
         updateNotification(s, StringStatic("LCARS reloaded successfully!"));
+      } else {
+        updateNotification(s, StringStatic("LCARS reload failed!"));
       }
     }
     Update(s);
