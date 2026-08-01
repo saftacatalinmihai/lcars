@@ -14,6 +14,7 @@ struct CurlMemoryBuffer {
 
 static const char *GetAttributeValue(const char *tag, const char *attr,
                                      char *dest, int max_len);
+static ElemKind TagNameToElemKind(const char *tagName);
 static Color ParseColor(String colorStr);
 static ButtonAction ParseAction(String actionStr);
 static size_t CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb,
@@ -44,23 +45,53 @@ static const char *GetAttributeValue(const char *tag, const char *attr,
   return NULL;
 }
 
+static const struct {
+  const char *tagName;
+  ElemKind kind;
+} TAG_KIND_TABLE[] = {
+    {"lcars-button", ELEM_BUTTON},
+    {"lcars-rect", ELEM_RECTANGLE},
+    {"lcars-rectangle", ELEM_RECTANGLE},
+    {"lcars-text", ELEM_TEXT},
+    {"lcars-elbow", ELEM_ELBOW},
+    {"lcars-text-editor", ELEM_TEXT_EDITOR},
+    {"lcars-entry-list", ELEM_ENTRY_LIST},
+    {"lcars-sphere", ELEM_SPHERE},
+};
+
+static ElemKind TagNameToElemKind(const char *tagName) {
+  for (size_t i = 0; i < sizeof(TAG_KIND_TABLE) / sizeof(TAG_KIND_TABLE[0]);
+      i++) {
+    if (strcmp(tagName, TAG_KIND_TABLE[i].tagName) == 0) {
+      return TAG_KIND_TABLE[i].kind;
+    }
+  }
+  return ELEM_NOTHING;
+}
+
 static Color ParseColor(String colorStr) {
   if (colorStr.data == NULL)
     return LCARS_ORANGE;
-  if (strcmp(colorStr.data, "purple") == 0)
-    return LCARS_PURPLE;
-  if (strcmp(colorStr.data, "red") == 0)
-    return LCARS_RED_ORANGE;
-  if (strcmp(colorStr.data, "orange") == 0)
-    return LCARS_ORANGE;
-  if (strcmp(colorStr.data, "yellow") == 0)
-    return LCARS_YELLOW;
-  if (strcmp(colorStr.data, "blue") == 0)
-    return LCARS_BLUE;
-  if (strcmp(colorStr.data, "white") == 0)
-    return WHITE;
-  if (strcmp(colorStr.data, "black") == 0)
-    return BLACK;
+  // Local (not file-scope static): raylib's color constants expand to
+  // compound literals, which -pedantic rejects as file-scope static
+  // initializers even though they're all-constant. A local const array is
+  // rebuilt per call, but this only runs while parsing a hypermedia
+  // document, not per-frame, so that's negligible.
+  const struct {
+    const char *name;
+    Color color;
+  } colorNameTable[] = {
+      {"purple", LCARS_PURPLE}, {"red", LCARS_RED_ORANGE},
+      {"orange", LCARS_ORANGE}, {"yellow", LCARS_YELLOW},
+      {"blue", LCARS_BLUE},     {"white", WHITE},
+      {"black", BLACK},
+  };
+  for (size_t i = 0; i < sizeof(colorNameTable) / sizeof(colorNameTable[0]);
+      i++) {
+    if (strcmp(colorStr.data, colorNameTable[i].name) == 0) {
+      return colorNameTable[i].color;
+    }
+  }
   if (colorStr.len == 7 && colorStr.data[0] == '#') {
     unsigned int r, g, b;
     if (sscanf(colorStr.data + 1, "%02x%02x%02x", &r, &g, &b) == 3) {
@@ -70,21 +101,27 @@ static Color ParseColor(String colorStr) {
   return LCARS_ORANGE;
 }
 
+static const struct {
+  const char *name;
+  ButtonAction action;
+} ACTION_NAME_TABLE[] = {
+    {"debug", ACTION_DEBUG},
+    {"edit", ACTION_EDIT},
+    {"reset", ACTION_RESET},
+    {"voice_input", ACTION_VOICE_INPUT},
+    {"print_db", ACTION_PRINT_DB},
+    {"load_hypermedia", ACTION_LOAD_HYPERMEDIA},
+};
+
 static ButtonAction ParseAction(String actionStr) {
   if (actionStr.data == NULL)
     return ACTION_NONE;
-  if (strcmp(actionStr.data, "debug") == 0)
-    return ACTION_DEBUG;
-  if (strcmp(actionStr.data, "edit") == 0)
-    return ACTION_EDIT;
-  if (strcmp(actionStr.data, "reset") == 0)
-    return ACTION_RESET;
-  if (strcmp(actionStr.data, "voice_input") == 0)
-    return ACTION_VOICE_INPUT;
-  if (strcmp(actionStr.data, "print_db") == 0)
-    return ACTION_PRINT_DB;
-  if (strcmp(actionStr.data, "load_hypermedia") == 0)
-    return ACTION_LOAD_HYPERMEDIA;
+  for (size_t i = 0;
+      i < sizeof(ACTION_NAME_TABLE) / sizeof(ACTION_NAME_TABLE[0]); i++) {
+    if (strcmp(actionStr.data, ACTION_NAME_TABLE[i].name) == 0) {
+      return ACTION_NAME_TABLE[i].action;
+    }
+  }
   return ACTION_NONE;
 }
 
@@ -228,22 +265,7 @@ void LoadHypermediaDocument(State *s, String source) {
     }
     tag_name[i - 1] = '\0';
 
-    ElemKind kind = ELEM_NOTHING;
-    if (strcmp(tag_name, "lcars-button") == 0)
-      kind = ELEM_BUTTON;
-    else if (strcmp(tag_name, "lcars-rect") == 0 ||
-             strcmp(tag_name, "lcars-rectangle") == 0)
-      kind = ELEM_RECTANGLE;
-    else if (strcmp(tag_name, "lcars-text") == 0)
-      kind = ELEM_TEXT;
-    else if (strcmp(tag_name, "lcars-elbow") == 0)
-      kind = ELEM_ELBOW;
-    else if (strcmp(tag_name, "lcars-text-editor") == 0)
-      kind = ELEM_TEXT_EDITOR;
-    else if (strcmp(tag_name, "lcars-entry-list") == 0)
-      kind = ELEM_ENTRY_LIST;
-    else if (strcmp(tag_name, "lcars-sphere") == 0)
-      kind = ELEM_SPHERE;
+    ElemKind kind = TagNameToElemKind(tag_name);
 
     if (kind != ELEM_NOTHING && s->numElements < MAX_ELEMENTS) {
       char val[256];
