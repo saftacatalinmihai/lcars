@@ -167,7 +167,9 @@ The URL decides the transport:
 
 Requests are blocking and run on the UI thread, exactly as document loading always
 has. `controls.html` is the worked example (form-style create, load/save/delete of
-the selected entry, a load-triggered fetch). This is the long-term direction (see
+the selected entry, a load-triggered fetch); `controls_test.html` is a test bench
+with one numbered button per control variant — including the failure cases —
+writing into kind `hyper_test` so exercising it leaves the journal alone. This is the long-term direction (see
 TODO.md): LCARS as a hypermedia client, entries editable as documents.
 
 ## Keyboard & mouse

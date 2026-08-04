@@ -1,0 +1,119 @@
+<lcars>
+  <!-- Hypermedia control test bench. Every button is one lc-* control and
+       nothing else - no C-side action. Where a reply exists it is swapped
+       into the RESULT panel, so you can check each control without turning
+       on the debug banner.
+
+       Creates go into kind="hyper_test", never architect_log, so poking at
+       this page does not add noise to the journal. The buttons that act on
+       "selected" act on whatever the entry list below is showing, so switch
+       it to hyper_test (click the kind at the top of the list panel) before
+       running 2-6. -->
+
+  <lcars-text-editor id="url_input" x="210" y="10" w="500" h="32" size="32">file://controls_test.html</lcars-text-editor>
+  <lcars-button x="690" y="10" w="90" h="62" color="yellow" action="load_hypermedia">GO</lcars-button>
+  <lcars-text x="800" y="4" size="48" color="yellow">CONTROL TEST BENCH</lcars-text>
+
+  <!-- Frame -->
+  <lcars-rectangle x="0" y="4" w="200" h="96" color="purple"></lcars-rectangle>
+  <lcars-elbow x="0" y="104" w="200" h="40" color="blue" orientation="3"></lcars-elbow>
+  <lcars-elbow x="0" y="210" w="200" h="40" color="red" orientation="0">03-975883</lcars-elbow>
+  <lcars-rectangle x="0" y="316" w="200" h="200" color="red"></lcars-rectangle>
+  <lcars-rectangle x="0" y="522" w="200" h="60" color="orange">05-423512</lcars-rectangle>
+  <lcars-rectangle x="0" y="588" w="200" h="250" color="orange">06-572983</lcars-rectangle>
+  <lcars-rectangle x="798" y="184" w="400" h="20" color="purple"></lcars-rectangle>
+  <lcars-rectangle x="1204" y="184" w="40" h="20" color="red"></lcars-rectangle>
+
+  <!-- Legend -->
+  <lcars-text x="240" y="120" size="20" color="yellow">1-6 ACT ON THE ENTRY SELECTED IN THE LIST BELOW - SWITCH IT TO KIND hyper_test FIRST</lcars-text>
+  <lcars-text x="240" y="148" size="20" color="white">EVERY REPLY IS SWAPPED INTO THE RESULT PANEL (lc-target="result")</lcars-text>
+  <lcars-text x="240" y="176" size="20" color="white">7-10 ARE FAILURE CASES: A FAILED REQUEST IS DELIBERATELY *NOT* SWAPPED IN -</lcars-text>
+  <lcars-text x="240" y="204" size="20" color="white">PRESS SUPER+D TO SEE THE STATUS BANNER FOR THOSE (AND WATCH stdout)</lcars-text>
+  <lcars-text x="240" y="232" size="20" color="yellow">11-12 SWAP THE WHOLE DOCUMENT. 6 DELETES - IT IS A SOFT DELETE, BUT STILL.</lcars-text>
+
+  <!-- 1: POST creates an entry from the two form editors below. lc-vals
+       supplies a literal field, lc-include takes the rest from elements. -->
+  <lcars-button id="t1" x="240" y="280" w="290" h="44" color="purple"
+                lc-post="/entries" lc-vals="kind=hyper_test"
+                lc-include="title content" lc-target="result">1 POST /entries</lcars-button>
+
+  <!-- 2: GET answers with the entry's content as plain text. -->
+  <lcars-button id="t2" x="240" y="334" w="290" h="44" color="blue"
+                lc-get="/entries/selected" lc-target="result">2 GET /entries/selected</lcars-button>
+
+  <!-- 3: same request, appended instead of replacing. -->
+  <lcars-button id="t3" x="240" y="388" w="290" h="44" color="blue"
+                lc-get="/entries/selected" lc-target="result"
+                lc-swap="append">3 GET + swap=append</lcars-button>
+
+  <!-- 4: PUT writes the CONTENT editor back to the selected entry. -->
+  <lcars-button id="t4" x="240" y="442" w="290" h="44" color="yellow"
+                lc-put="/entries/selected" lc-include="content"
+                lc-target="result">4 PUT content</lcars-button>
+
+  <!-- 5: PUT a title from a literal field - the list panel re-renders. -->
+  <lcars-button id="t5" x="240" y="496" w="290" h="44" color="yellow"
+                lc-put="/entries/selected" lc-vals="title=RENAMED BY CONTROL"
+                lc-target="result">5 PUT title</lcars-button>
+
+  <!-- 6: soft delete; the list moves to the newest remaining entry itself. -->
+  <lcars-button id="t6" x="240" y="550" w="290" h="44" color="red"
+                lc-delete="/entries/selected" lc-target="result">6 DELETE selected</lcars-button>
+
+  <!-- 7: unknown route -> 404, no swap. -->
+  <lcars-button id="t7" x="545" y="280" w="290" h="44" color="orange"
+                lc-post="/not_a_resource" lc-target="result">7 404 route</lcars-button>
+
+  <!-- 8: a row id that does not exist -> 404 rather than a fake success. -->
+  <lcars-button id="t8" x="545" y="334" w="290" h="44" color="orange"
+                lc-delete="/entries/999999" lc-target="result">8 404 missing id</lcars-button>
+
+  <!-- 9: PUT with nothing to write -> 400. -->
+  <lcars-button id="t9" x="545" y="388" w="290" h="44" color="orange"
+                lc-put="/entries/selected" lc-target="result">9 400 no fields</lcars-button>
+
+  <!-- 10: a scheme this app has no transport for -> refused before any I/O. -->
+  <lcars-button id="t10" x="545" y="442" w="290" h="44" color="orange"
+                lc-post="wat://nowhere" lc-target="result">10 bad url</lcars-button>
+
+  <!-- 11: a remote request, aimed at this app's own HTTP API on :8080.
+       Expect 401: the API wants Basic auth and controls cannot send
+       credentials yet (see TODO.md). Proof that the request really goes out
+       over the network - stdout logs the status. -->
+  <lcars-button id="t11" x="545" y="496" w="290" h="44" color="purple"
+                lc-post="http://127.0.0.1:8080/entries"
+                lc-vals="kind=hyper_test,title=FROM REMOTE POST"
+                lc-target="result">11 remote POST :8080</lcars-button>
+
+  <!-- 12: create, then re-load this document. The form resets and the list
+       shows the new entry - post/redirect/get, hypermedia style. -->
+  <lcars-button id="t12" x="545" y="550" w="290" h="44" color="purple"
+                lc-post="/entries" lc-vals="kind=hyper_test,title=RELOAD SWAP"
+                lc-include="content" lc-swap="reload">12 POST + swap=reload</lcars-button>
+
+  <!-- Whole-document swaps. -->
+  <lcars-button x="1150" y="120" w="190" h="44" color="blue" lc-get="file://main.html">MAIN</lcars-button>
+  <lcars-button x="1150" y="170" w="190" h="44" color="blue" lc-get="file://controls.html">CONTROLS</lcars-button>
+  <lcars-button x="1350" y="120" w="190" h="44" color="orange" action="debug">(SUPER+D)EBUG</lcars-button>
+  <lcars-button x="1350" y="170" w="190" h="44" color="blue" lc-get="file://controls_test.html">SELF RELOAD</lcars-button>
+
+  <!-- Where replies land. -->
+  <lcars-text x="860" y="252" size="20" color="yellow">RESULT</lcars-text>
+  <lcars-text-editor id="result" x="860" y="280" w="480" h="240" size="20">(no request yet)</lcars-text-editor>
+
+  <!-- Filled by a control on its own, at document-load time. -->
+  <lcars-text x="860" y="530" size="20" color="yellow">FILLED ON LOAD (lc-trigger="load")</lcars-text>
+  <lcars-text-editor id="onload" x="860" y="558" w="480" h="60" size="20"
+                     lc-get="/entries/selected" lc-target="onload"
+                     lc-trigger="load">(waiting)</lcars-text-editor>
+
+  <!-- Form fields. An id is the field name; neither is bind="log", so typing
+       here never touches the DB until a control says so. -->
+  <lcars-text x="860" y="636" size="20" color="yellow">TITLE</lcars-text>
+  <lcars-text-editor id="title" x="960" y="630" w="380" h="32" size="32">Test Entry</lcars-text-editor>
+  <lcars-text x="860" y="676" size="20" color="yellow">CONTENT</lcars-text>
+  <lcars-text-editor id="content" x="960" y="670" w="380" h="80" size="20">Written by a hypermedia control.</lcars-text-editor>
+
+  <!-- The list that "selected" refers to. -->
+  <lcars-entry-list id="list" x="240" y="640" w="590" h="200" color="purple"></lcars-entry-list>
+</lcars>
