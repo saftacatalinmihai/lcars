@@ -1,4 +1,5 @@
 #include "lcars_resources_download.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,11 +52,17 @@ static const char *required_files[] = {
 #define NUM_FILES (sizeof(required_files) / sizeof(required_files[0]))
 
 static void create_parent_dirs(const char *path) {
+  assert(path != NULL);
+  // The loop below starts at tmp + 1, so an empty path would step straight
+  // past the terminator it just copied.
+  assert(path[0] != '\0');
+
   char tmp[1024];
   size_t len = strlen(path);
   if (len >= sizeof(tmp))
     return;
   memcpy(tmp, path, len + 1);
+  assert(tmp[len] == '\0');
 
   for (char *p = tmp + 1; *p; p++) {
     if (*p == '/') {
@@ -75,6 +82,9 @@ static size_t write_callback(void *ptr, size_t size, size_t nmemb,
 #endif
 
 static bool download_file_from_url(const char *url, const char *path) {
+  assert(url != NULL && url[0] != '\0');
+  assert(path != NULL && path[0] != '\0');
+
   create_parent_dirs(path);
 
 #ifdef __EMSCRIPTEN__
@@ -188,6 +198,7 @@ static bool extract_vosk_dylib_from_jar(void) {
 #endif
 
 static bool download_file(const char *path) {
+  assert(path != NULL && path[0] != '\0');
 #ifdef __APPLE__
   if (strcmp(path, "resources/libvosk.dylib") == 0) {
     return extract_vosk_dylib_from_jar();
@@ -213,6 +224,8 @@ bool CheckAndDownloadResources(void) {
 
   for (size_t i = 0; i < NUM_FILES; i++) {
     const char *path = required_files[i];
+    // Every entry in the table is a compile-time literal path.
+    assert(path != NULL && path[0] != '\0');
 
     if (access(path, F_OK) == 0) {
       printf("  [OK] %s\n", path);

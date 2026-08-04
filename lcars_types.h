@@ -161,6 +161,28 @@ typedef struct GapBuffer {
   int textCapacity; // Allocated size of `text`, including the '\0'.
 } GapBuffer;
 
+// The structural invariant every GapBuffer holds between operations: the
+// gap is a well-formed (possibly empty) range lying entirely inside the
+// allocation. Every operation in lcars_gap_buffer.h asserts it on entry and
+// on exit, because the failure mode when it breaks is not a wrong character
+// on screen - ReconstructText() computes `capacity - gapEnd` as a memcpy
+// length, so a gapEnd past capacity becomes a negative length and then a
+// gigantic size_t. Declared here rather than in lcars_gap_buffer.h because
+// lcars_db.h and make_text_editor() are compiled before that header is
+// included and assert against it too.
+static inline bool GapBufferValid(const GapBuffer *gap) {
+  return gap != NULL && gap->buffer != NULL && gap->capacity >= 0 &&
+         gap->gapStart >= 0 && gap->gapStart <= gap->gapEnd &&
+         gap->gapEnd <= gap->capacity;
+}
+
+// Number of characters the buffer currently holds: everything outside the
+// gap. This is the length the flattened text (Element.text) will have.
+static inline int GapTextLen(const GapBuffer *gap) {
+  assert(GapBufferValid(gap));
+  return gap->gapStart + (gap->capacity - gap->gapEnd);
+}
+
 // A text selection expressed as gap-buffer indices. `length` is signed: a
 // selection made by dragging/shift-arrowing backwards has a negative
 // length, with `start` still the anchor (where the selection began) and

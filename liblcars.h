@@ -64,14 +64,29 @@ static void NavigateEntryList(State *s, Element *e, int direction);
 // Inline Utility Function Implementations
 // -----------------------------------------------------------------------------
 static inline void UpdateNotification(State *s, String notificationText) {
+  assert(s != NULL);
+  assert(StringValid(notificationText));
+  // WARNING: a static String is aliased, not copied (see StringDup) - so
+  // notificationText must not point at a stack buffer that dies before the
+  // banner does. StringFormat into scratch_arena when the text is built at
+  // runtime.
   StringAssign(&s->doc_arena, &s->notification, notificationText);
   s->notificationTimer = NOTIFICATION_DURATION;
+
+  assert(StringValid(s->notification));
+  assert(s->notificationTimer > 0.0f);
 }
 
 // Finds the first element whose hypermedia `id="..."` attribute matches.
 // Returns NULL if no element has that id (e.g. the document didn't set
 // one, or it hasn't loaded yet).
 static inline Element *FindElementById(State *s, const char *id) {
+  assert(s != NULL);
+  assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
+  // A NULL id would match every element whose id was never set, silently
+  // returning the first one instead of "not found".
+  assert(id != NULL);
+
   for (int i = 0; i < s->numElements; i++) {
     if (StringEqC(s->elements[i].id, id)) {
       return &s->elements[i];
@@ -103,6 +118,11 @@ static inline bool IsDocumentURL(const char *url) {
 // `frameModulo` throttles the repeat rate once `delay` seconds have passed.
 static inline bool KeyRepeatFired(KeyRepeat *repeat, int key, float delay,
                                   int frameCounter, int frameModulo) {
+  assert(repeat != NULL);
+  assert(delay >= 0.0f);
+  // frameCounter % frameModulo below - zero would divide by zero.
+  assert(frameModulo > 0);
+
   if (!IsKeyDown(key)) {
     repeat->isHeld = false;
     return false;
@@ -119,22 +139,33 @@ static inline bool KeyRepeatFired(KeyRepeat *repeat, int key, float delay,
 // Element constructors (In-place)
 // -----------------------------------------------------------------------------
 static inline void make_rectangle(Element *e) {
+  assert(e != NULL);
+  assert(StringValid(e->text));
   e->kind = ELEM_RECTANGLE;
   e->textLen = e->text.len;
 }
 
 static inline void make_elbow(Element *e, int orientation) {
+  assert(e != NULL);
+  assert(StringValid(e->text));
+  // Only these two corners are drawn/hit-tested; the hypermedia parser
+  // rewrites anything else to 0 before it gets here.
+  assert(orientation == 0 || orientation == 3);
   e->kind = ELEM_ELBOW;
   e->elbowOrientation = orientation;
   e->textLen = e->text.len;
 }
 
 static inline void make_button(Element *e) {
+  assert(e != NULL);
+  assert(StringValid(e->text));
   e->kind = ELEM_BUTTON;
   e->textLen = e->text.len;
 }
 
 static inline void make_text(Element *e) {
+  assert(e != NULL);
+  assert(StringValid(e->text));
   e->kind = ELEM_TEXT;
   e->autoSize = true;
   e->textLen = e->text.len;
@@ -142,6 +173,11 @@ static inline void make_text(Element *e) {
 
 static inline void make_text_editor(Arena *doc_arena, Element *e,
                                     String initText) {
+  assert(doc_arena != NULL);
+  assert(e != NULL);
+  assert(StringValid(initText));
+  assert(StringValid(e->text));
+
   e->kind = ELEM_TEXT_EDITOR;
   if (initText.len == 0 && e->text.len > 0) {
     initText = e->text;
@@ -156,7 +192,9 @@ static inline void make_text_editor(Arena *doc_arena, Element *e,
   int textCapacity = GAP_BUFFER_INITIAL_CAPACITY;
   while (textCapacity < textLen) {
     textCapacity *= 2;
+    assert(textCapacity > 0); // int overflow on a pathological entry
   }
+  assert(textCapacity >= textLen);
   char *gapBuffer = (char *)arena_alloc(doc_arena, textCapacity + 1);
   if (initText.data) {
     memcpy(gapBuffer, initText.data, textLen);
@@ -180,9 +218,21 @@ static inline void make_text_editor(Arena *doc_arena, Element *e,
   e->text.is_static = false;
 
   e->textLen = textLen;
+
+  // The editor is now consistent: a usable gap buffer holding exactly the
+  // initial text, and Element.text a matching flat view of it.
+  assert(GapBufferValid(&e->gap));
+  assert(GapTextLen(&e->gap) == textLen);
+  assert(StringValid(e->text));
+  assert(e->text.len == e->textLen);
 }
 
 static inline void make_sphere(State *s, Element *e, const char *imagePath) {
+  assert(s != NULL);
+  assert(e != NULL);
+  // LoadRenderTexture() below takes these as int pixel dimensions.
+  assert(e->width >= 0.0f && e->height >= 0.0f);
+
   e->kind = ELEM_SPHERE;
   e->sphere = arena_alloc(&s->doc_arena, sizeof(SphereState));
 
@@ -233,6 +283,11 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
   e->sphere->camera = camera;
 
   e->sphere->renderTexture = LoadRenderTexture((int)e->width, (int)e->height);
+
+  // PreRenderElements()/DrawElement() dereference e->sphere for every
+  // ELEM_SPHERE without checking.
+  assert(e->kind == ELEM_SPHERE);
+  assert(e->sphere != NULL);
 }
 
 #ifdef LCARS_IMPLEMENTATION
@@ -243,6 +298,7 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 static void ToggleVoiceRecording(State *s) {
+  assert(s != NULL);
   VoiceRecApi *vapi = s->voiceApi;
   if (!vapi) {
     UpdateNotification(s, StringStatic("VOICE ERROR"));
@@ -291,14 +347,29 @@ static inline float ClampScrollOffset(float scrollY, float contentHeight,
     maxScroll = 0.0f;
   if (scrollY > maxScroll)
     scrollY = maxScroll;
+
+  // Never negative, and never past the end of the content. NaN would fail
+  // this too, which is the point: it propagates into every later scroll
+  // computation otherwise.
+  assert(scrollY >= 0.0f);
+  assert(scrollY <= maxScroll);
   return scrollY;
 }
 
 static void ClampScrollY(Element *e) {
+  assert(e != NULL);
+  assert(e->kind == ELEM_TEXT_EDITOR || e->kind == ELEM_ENTRY_LIST);
   e->scrollY = ClampScrollOffset(e->scrollY, e->textHeight, e->height);
+  assert(e->scrollY >= 0.0f);
 }
 
 static void NavigateEntryList(State *s, Element *e, int direction) {
+  assert(s != NULL);
+  assert(e != NULL);
+  assert(e->kind == ELEM_ENTRY_LIST);
+  assert(e->entryList != NULL);
+  assert(direction == -1 || direction == 1);
+
   EnsureEntryListCache(s, e);
   EntryListItem *items = e->entryList->cachedEntries;
   int count = e->entryList->cachedEntryCount;
@@ -311,6 +382,7 @@ static void NavigateEntryList(State *s, Element *e, int direction) {
   }
   int newIdx = selectedIdx + direction;
   if (newIdx >= 0 && newIdx < count) {
+    assert(newIdx < MAX_LIST_ITEMS); // count is capped there by the cache
     FlushEntryContent(s, e);
     SwitchToEntry(s, e, items[newIdx].id);
 
@@ -332,6 +404,16 @@ static void NavigateEntryList(State *s, Element *e, int direction) {
 }
 
 void Init(State *s, bool firstInit) {
+  assert(s != NULL);
+  // The host process (lcars.c CreateAppState) owns and pre-sizes both
+  // arenas before ever calling in here; the .so must never allocate them.
+  assert(arena_valid(&s->doc_arena));
+  assert(arena_valid(&s->scratch_arena));
+  // A reload (firstInit == false) reuses the DB handle opened on the first
+  // pass - losing it would silently run the whole session without
+  // persistence.
+  assert(firstInit || s->db != NULL);
+
   double t_init_start = GetTimeSeconds();
 
   s->debug = false;
@@ -392,6 +474,7 @@ void Init(State *s, bool firstInit) {
 }
 
 void Reload(State *s, bool reset) {
+  assert(s != NULL);
   if (reset) {
     Init(s, false);
   } else {
@@ -403,6 +486,7 @@ void Reload(State *s, bool reset) {
 // final result, inserts the recognized text into the currently active
 // text editor or entry-list element (the first one found).
 static void UpdateVoiceInput(State *s) {
+  assert(s != NULL);
   VoiceRecApi *vapi = s->voiceApi;
   if (!vapi) {
     UpdateNotification(s, StringStatic("VOICE ERROR"));
@@ -432,6 +516,7 @@ static void UpdateVoiceInput(State *s) {
     }
 
     if (editor) {
+      assert(GapBufferValid(&editor->gap));
       bool textChanged = false;
       int voiceBufLen = strlen(voiceBuf);
       for (int k = 0; k < voiceBufLen; k++) {
@@ -444,12 +529,20 @@ static void UpdateVoiceInput(State *s) {
                         &editor->textLen);
         MarkContentDirty(editor);
         editor->snapToCursor = 2;
+        // Voice input bypasses the keyboard path entirely, so it has to
+        // leave the same text/gap agreement behind that it does.
+        assert(editor->text.len == editor->textLen);
+        assert(editor->textLen == GapTextLen(&editor->gap));
       }
     }
   }
 }
 
 static void HandleElementClick(State *s, Element *e) {
+  assert(s != NULL);
+  assert(e != NULL);
+  assert(StringValid(e->href));
+
   switch (e->on_click) {
   case ACTION_DEBUG:
     s->debug = !s->debug;
@@ -498,6 +591,10 @@ static void HandleElementClick(State *s, Element *e) {
 // frame.
 static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
                                 int *outDraggingIdx, int *outResizingIdx) {
+  assert(s != NULL);
+  assert(outDraggingIdx != NULL && outResizingIdx != NULL);
+  assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
+
   int draggingIdx = -1;
   int resizingIdx = -1;
   for (int i = 0; i < s->numElements; i++) {
@@ -533,6 +630,7 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
       // Recreate render texture for sphere if dimensions changed
       if (e->kind == ELEM_SPHERE && ((int)newWidth != (int)e->width ||
                                      (int)newHeight != (int)e->height)) {
+        assert(e->sphere != NULL);
         UnloadRenderTexture(e->sphere->renderTexture);
         e->sphere->renderTexture =
             LoadRenderTexture((int)newWidth, (int)newHeight);
@@ -616,6 +714,13 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
     }
   }
 
+  // Either "none" or a real element index - UpdateElement() compares
+  // against these to decide cursor shape.
+  assert(draggingIdx == -1 ||
+         (draggingIdx >= 0 && draggingIdx < s->numElements));
+  assert(resizingIdx == -1 ||
+         (resizingIdx >= 0 && resizingIdx < s->numElements));
+
   *outDraggingIdx = draggingIdx;
   *outResizingIdx = resizingIdx;
 }
@@ -626,8 +731,17 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
 // entry-list panel input, sphere camera/rotation).
 static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                           int resizingIdx) {
+  assert(s != NULL);
+  assert(i >= 0 && i < s->numElements);
+
   VoiceRecApi *vapi = s->voiceApi;
   Element *e = &s->elements[i];
+  assert(e->kind >= ELEM_NOTHING && e->kind < ELEM_TOTAL_KINDS);
+  // The two heavy side structs are allocated by their constructors and
+  // dereferenced unconditionally throughout this function.
+  assert(e->kind != ELEM_ENTRY_LIST || e->entryList != NULL);
+  assert(e->kind != ELEM_SPHERE || e->sphere != NULL);
+
   bool isHovering = IsHoveringElement(s, e);
   if (isHovering && !e->isDragging && !e->isResizing) {
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
@@ -927,6 +1041,21 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
                                : e->selection.start + e->selection.length;
             int selLength = e->selection.length > 0 ? e->selection.length
                                                     : -e->selection.length;
+            // Same staleness as in DeleteSelection(): plain Backspace can
+            // shrink the text without resetting the selection, so the
+            // recorded range can point past the end by the time it is
+            // copied. Clamp before the memcpy rather than assert - the
+            // sequence is ordinary input - but the range must be inside
+            // the buffer by the time we read it.
+            if (selStart > e->text.len)
+              selStart = e->text.len;
+            if (selStart < 0)
+              selStart = 0;
+            if (selStart + selLength > e->text.len)
+              selLength = e->text.len - selStart;
+            assert(selStart >= 0 && selLength >= 0);
+            assert(selStart + selLength <= e->text.len);
+
             char *selectedText =
                 (char *)arena_alloc(&s->scratch_arena, selLength + 1);
             memcpy(selectedText, e->text.data + selStart, selLength);
@@ -1001,6 +1130,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       // handling below instead of each recomputing it from scratch.
       int lineStarts[LINE_STARTS_MAX];
       int numLines = GetLines(e->text, lineStarts, LINE_STARTS_MAX);
+      assert(numLines >= 1 && numLines <= LINE_STARTS_MAX);
 
       bool triggerMoveUp = false;
       if (e->kind == ELEM_ENTRY_LIST && isMouseOverList) {
@@ -1047,12 +1177,16 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
           if (currLine < numLines - 1) {
             int targetLineLen = 0;
             if (currLine + 1 < numLines - 1) {
+              // The guard is exactly `currLine + 2 < numLines`, which is
+              // what makes this two-ahead index legal.
+              assert(currLine + 2 < numLines);
               targetLineLen =
                   lineStarts[currLine + 2] - 1 - lineStarts[currLine + 1];
             } else {
               targetLineLen = e->textLen - lineStarts[currLine + 1];
             }
             int targetCol = col < targetLineLen ? col : targetLineLen;
+            assert(currLine + 1 < numLines);
             MoveGap(&e->gap, lineStarts[currLine + 1] + targetCol);
           }
         }
@@ -1149,6 +1283,12 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       if (textChanged) {
         ReconstructText(&s->doc_arena, &e->gap, &e->text, &e->textLen);
         MarkContentDirty(e);
+        // Everything downstream this frame (draw, hit-testing, the DB
+        // flush) reads Element.text and Element.textLen as the truth about
+        // the gap buffer's contents.
+        assert(e->text.len == e->textLen);
+        assert(e->textLen == GapTextLen(&e->gap));
+        assert(e->contentDirty);
       }
 
       // Auto-scroll to cursor
@@ -1196,6 +1336,7 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
 // is focused: debug toggle, reset, edit-mode toggle, voice recording
 // toggle, and the push-to-remote shortcut.
 static void UpdateGlobalShortcuts(State *s) {
+  assert(s != NULL);
   if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_D)) {
     s->debug = !s->debug;
   }
@@ -1223,6 +1364,10 @@ static void UpdateGlobalShortcuts(State *s) {
 }
 
 void Update(State *s) {
+  assert(s != NULL);
+  assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
+  assert(arena_valid(&s->doc_arena) && arena_valid(&s->scratch_arena));
+
   UpdateGlobalShortcuts(s);
   UpdateVoiceInput(s);
 
@@ -1240,10 +1385,16 @@ void Update(State *s) {
 }
 
 void FlushPendingSaves(State *s) {
+  assert(s != NULL);
+  assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
+
   for (int i = 0; i < s->numElements; i++) {
     Element *e = &s->elements[i];
     if (e->kind == ELEM_TEXT_EDITOR || e->kind == ELEM_ENTRY_LIST) {
       FlushEntryContent(s, e);
+      // This is the last chance before the process exits; nothing may
+      // still be waiting on the debounce timer.
+      assert(!e->contentDirty);
     }
   }
 }
@@ -1252,12 +1403,16 @@ void FlushPendingSaves(State *s) {
 // spheres) before the main draw pass, since that texture is what the main
 // pass samples from.
 static void PreRenderElements(State *s) {
+  assert(s != NULL);
+  assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
+
   for (int i = 0; i < s->numElements; i++) {
     Element *e = &s->elements[i];
     if (e->kind == ELEM_NOTHING)
       continue; // Skip uninitialized elements
     switch (e->kind) {
     case ELEM_SPHERE: {
+      assert(e->sphere != NULL);
       BeginTextureMode(e->sphere->renderTexture);
       ClearBackground(BLACK);
       BeginMode3D(e->sphere->camera);
@@ -1288,6 +1443,7 @@ static void PreRenderElements(State *s) {
 // meaningful while Shift is held; the rect collapses to zero size once
 // released). Only works dragging from top-left to bottom-right.
 static void UpdateAndDrawSelectionRect(State *s, Vector2 mPos) {
+  assert(s != NULL);
   if (!IsKeyDown(KEY_LEFT_SHIFT)) {
     return;
   }
@@ -1312,7 +1468,16 @@ static void UpdateAndDrawSelectionRect(State *s, Vector2 mPos) {
 // on-element label text drawn for kinds other than TEXT/TEXT_EDITOR/
 // ENTRY_LIST.
 static void DrawElement(State *s, int i, Vector2 mPos) {
+  assert(s != NULL);
+  assert(i >= 0 && i < s->numElements);
+
   Element *e = &s->elements[i];
+  assert(e->kind >= ELEM_NOTHING && e->kind < ELEM_TOTAL_KINDS);
+  assert(StringValid(e->text));
+  // Drawing dereferences these unconditionally for their kinds.
+  assert(e->kind != ELEM_ENTRY_LIST || e->entryList != NULL);
+  assert(e->kind != ELEM_SPHERE || e->sphere != NULL);
+
   if (e->kind == ELEM_NOTHING)
     return; // Skip uninitialized elements
   switch (e->kind) {
@@ -1383,6 +1548,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
         EnsureEntryListCache(s, e);
         EntryListItem *items = e->entryList->cachedEntries;
         int count = e->entryList->cachedEntryCount;
+        assert(count >= 0 && count <= MAX_LIST_ITEMS);
         float maxItemWidth = el.width - 15.0f;
         bool isScrollable = (count * el.itemStride > el.viewportHeight);
         float itemWidth = maxItemWidth;
@@ -1490,7 +1656,10 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
                deleteBtn.y + (deleteBtn.height - fontSize) / 2.0f, fontSize,
                BLACK);
       if (e->entryList->kindList.count > 0) {
+        assert(e->entryList->kindList.count <= MAX_KINDS);
         for (int k = 0; k < e->entryList->kindList.count; k++) {
+          assert(StringValid(e->entryList->kindList.kinds[k]));
+          assert(e->entryList->kindList.kinds[k].data != NULL);
           DrawText(e->entryList->kindList.kinds[k].data,
                    e->position.x + 50.0f + k * 200.0f + 12.0f,
                    e->position.y - 20.0f, 20, WHITE);
@@ -1519,6 +1688,10 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
                               e->position.y + EDITOR_TEXT_PADDING, editorWidth,
                               e->height};
     bool drawCursor = e->isFocused && !isMouseOverList;
+    // The cursor is passed as a byte index into e->text; the two must be
+    // describing the same buffer by the time we render.
+    assert(GapBufferValid(&e->gap));
+    assert(e->text.len == e->textLen);
     BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
     DrawTextBoxed(s, e, s->font, e->text, r, e->textSize, 2.0f, false, e->color,
                   &e->textHeight, &e->cursorY, e->gap.gapStart, drawCursor);
@@ -1614,6 +1787,8 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
 // Draws (and ages out) the transient notification banner, when debug mode
 // is on to actually make it visible.
 static void DrawNotification(State *s) {
+  assert(s != NULL);
+  assert(StringValid(s->notification));
   if (s->notification.data && s->notificationTimer > 0.0f) {
     s->notificationTimer -= GetFrameTime();
     if (s->debug) {
@@ -1626,6 +1801,7 @@ static void DrawNotification(State *s) {
 }
 
 static void DrawDebugOverlay(State *s, Vector2 mPos) {
+  assert(s != NULL);
   if (!s->debug) {
     return;
   }
@@ -1639,6 +1815,8 @@ static void DrawDebugOverlay(State *s, Vector2 mPos) {
 // Draws the drag/resize handles on top of every element while in edit mode,
 // highlighted when hovered or actively being dragged/resized.
 static void DrawEditHandles(State *s) {
+  assert(s != NULL);
+  assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
   if (!s->is_editing) {
     return;
   }
@@ -1688,6 +1866,13 @@ static void DrawEditHandles(State *s) {
 }
 
 void UpdateDrawFrame(State *s) {
+  assert(s != NULL);
+  // In the hot-reload build this is the .so's entry point into memory the
+  // host allocated, so it is the right place to check that State still
+  // looks like State before anything walks it.
+  assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
+  assert(arena_valid(&s->doc_arena) && arena_valid(&s->scratch_arena));
+
   Update(s);
   Vector2 mPos = GetMousePosition();
 
@@ -1708,6 +1893,10 @@ void UpdateDrawFrame(State *s) {
 
   EndDrawing();
   arena_reset(&s->scratch_arena);
+  // The per-frame arena is the one thing that must be empty again at the
+  // end of every frame - anything still pointing into it is dangling from
+  // here on (see the scratch_arena note in ARCHITECTURE.md).
+  assert(s->scratch_arena.curr_offset == 0);
 }
 
 #include "lcars_hypermedia.h"
