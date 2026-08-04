@@ -53,6 +53,12 @@ WEB_LDFLAGS = -s USE_GLFW=3 -s ASYNCIFY -s TOTAL_MEMORY=67108864 -s ALLOW_MEMORY
               --preload-file resources/earth.jpg \
               --preload-file resources/style_cyber.rgs
 
+# Every lcars_*.h is part of the same unity translation unit, so a change to
+# any of them invalidates every binary - listing only a couple of them (as
+# lcars-lib.so used to) means Ctrl+Shift+R can "succeed" and reload code that
+# was never rebuilt.
+LCARS_HEADERS := $(wildcard lcars_*.h) liblcars.h
+
 compile_commands.json: Makefile
 	bear -- make -B lcars
 
@@ -82,17 +88,17 @@ vendor/libminiaudio.a: vendor/miniaudio.c
 	rm vendor/miniaudio.o
 
 # Static targets
-lcars: lcars.c vendor/libraylib.a vendor/libminiaudio.a ensure-resources
+lcars: lcars.c $(LCARS_HEADERS) vendor/libraylib.a vendor/libminiaudio.a ensure-resources
 	cc $(CFLAGS_DEBUG) -DSTATIC_BUILD -o lcars lcars.c vendor/libraylib.a vendor/libminiaudio.a $(STATIC_LIBS_DESKTOP)
 
-lcars-release: lcars.c vendor/libraylib.a vendor/libminiaudio.a ensure-resources
+lcars-release: lcars.c $(LCARS_HEADERS) vendor/libraylib.a vendor/libminiaudio.a ensure-resources
 	cc $(CFLAGS_RELEASE) -DSTATIC_BUILD -o lcars lcars.c vendor/libraylib.a vendor/libminiaudio.a $(STATIC_LIBS_DESKTOP)
 
 # Dynamic targets
-lcars-dynamic: lcars.c lcars-lib.so vendor/libminiaudio.a ensure-resources
+lcars-dynamic: lcars.c $(LCARS_HEADERS) lcars-lib.so vendor/libminiaudio.a ensure-resources
 	cc $(CFLAGS_DYN) -o lcars lcars.c vendor/libminiaudio.a -lcurl -lsqlite3 -ldl -Lresources/ -lvosk $(RPATH_FLAGS)
 
-lcars-lib.so: liblcars.h liblcars.c lcars_voice_rec.h lcars_db.h
+lcars-lib.so: liblcars.c $(LCARS_HEADERS)
 	cc $(CFLAGS_DYN) -fPIC -shared $(SHARED_FLAGS) -lsqlite3 -ldl -lcurl -o lcars-lib.so liblcars.c
 
 run: lcars
@@ -112,7 +118,7 @@ lcars-portable:
 		chown $(shell id -u):$(shell id -g) lcars"
 
 # Web build targets
-lcars-web: lcars.c $(RAYLIB_WEB)/libraylib.web.a
+lcars-web: lcars.c $(LCARS_HEADERS) $(RAYLIB_WEB)/libraylib.web.a
 	emcc lcars.c vendor/sqlite3.c -ldl -o lcars.js $(WEB_CFLAGS) $(WEB_LDFLAGS) $(RAYLIB_WEB)/libraylib.web.a
 
 serve: lcars-web
