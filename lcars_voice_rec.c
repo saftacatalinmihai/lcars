@@ -3,6 +3,7 @@
 #include "lcars_base.h"
 
 #ifndef __EMSCRIPTEN__
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -142,7 +143,14 @@ static volatile bool g_isRecording = false;
 
 // Helper: queue a text result
 static void QueueResultText(const char *text) {
+  assert(text != NULL);
+
   pthread_mutex_lock(&g_resultMutex);
+  // Both indices are only ever advanced modulo the queue size, so they stay
+  // inside g_resultQueue[] - which is what makes the writes below safe.
+  assert(g_resultHead >= 0 && g_resultHead < RESULT_QUEUE_SIZE);
+  assert(g_resultTail >= 0 && g_resultTail < RESULT_QUEUE_SIZE);
+
   int nextHead = (g_resultHead + 1) % RESULT_QUEUE_SIZE;
   if (nextHead == g_resultTail) {
     // Queue full, discard oldest element to make room
@@ -152,6 +160,8 @@ static void QueueResultText(const char *text) {
           sizeof(g_resultQueue[g_resultHead]) - 1);
   g_resultQueue[g_resultHead][sizeof(g_resultQueue[g_resultHead]) - 1] = '\0';
   g_resultHead = nextHead;
+
+  assert(g_resultHead != g_resultTail); // never left looking empty after a push
   pthread_mutex_unlock(&g_resultMutex);
 }
 
@@ -186,8 +196,12 @@ static void ParseAndQueueResult(const char *jsonStr) {
   }
 
   int len = end - start;
+  assert(len >= 0); // end only ever walked forward from start
+  // The bound is 510, not 512: the copy is followed by a trailing space and
+  // a terminator, so text[len + 1] must still be inside the array.
   if (len > 0 && len < 510) {
     char text[512];
+    assert(len + 1 < (int)sizeof(text));
     memcpy(text, start, len);
     text[len] = ' '; // Add a trailing space for easy continuation
     text[len + 1] = '\0';
@@ -226,6 +240,7 @@ static void UpdatePartialResult(const char *jsonStr) {
   }
 
   int len = end - start;
+  assert(len >= 0);
   pthread_mutex_lock(&g_partialMutex);
   if (len > 0 && len < (int)sizeof(g_partialResult) - 1) {
     memcpy(g_partialResult, start, len);
@@ -245,6 +260,8 @@ static void AudioCaptureCallback(ma_device *pDevice, void *pOutput,
   (void)pDevice;
   if (pInput && frameCount > 0) {
     pthread_mutex_lock(&g_audioMutex);
+    assert(g_audioHead >= 0 && g_audioHead < AUDIO_BUFFER_SIZE);
+    assert(g_audioTail >= 0 && g_audioTail < AUDIO_BUFFER_SIZE);
     const short *samples = (const short *)pInput;
     for (ma_uint32 i = 0; i < frameCount; i++) {
       int nextHead = (g_audioHead + 1) % AUDIO_BUFFER_SIZE;
@@ -273,12 +290,17 @@ static void *VoiceWorkerThread(void *arg) {
 
     // Read available samples
     while (g_audioHead != g_audioTail && count < 1600) {
+      assert(g_audioTail >= 0 && g_audioTail < AUDIO_BUFFER_SIZE);
       chunk[count++] = g_audioBuffer[g_audioTail];
       g_audioTail = (g_audioTail + 1) % AUDIO_BUFFER_SIZE;
     }
     pthread_mutex_unlock(&g_audioMutex);
 
+    assert(count >= 0 && count <= 1600); // chunk[] holds exactly 1600
     if (count > 0 && g_isRecording) {
+      // The worker thread only runs between StartRecording and
+      // StopRecording, which is exactly when the recognizer exists.
+      assert(g_recognizer != NULL);
       int finalized = vosk_recognizer_accept_waveform(
           g_recognizer, (const char *)chunk, count * sizeof(short));
       if (finalized) {
@@ -295,10 +317,12 @@ static void *VoiceWorkerThread(void *arg) {
   int count = 0;
   pthread_mutex_lock(&g_audioMutex);
   while (g_audioHead != g_audioTail && count < 1600) {
+    assert(g_audioTail >= 0 && g_audioTail < AUDIO_BUFFER_SIZE);
     chunk[count++] = g_audioBuffer[g_audioTail];
     g_audioTail = (g_audioTail + 1) % AUDIO_BUFFER_SIZE;
   }
   pthread_mutex_unlock(&g_audioMutex);
+  assert(count >= 0 && count <= 1600); // chunk[] holds exactly 1600
 
   if (count > 0) {
     vosk_recognizer_accept_waveform(g_recognizer, (const char *)chunk,
@@ -314,6 +338,7 @@ static void *VoiceWorkerThread(void *arg) {
 
 // Public API
 static bool Real_VoiceRec_Init(const char *modelPath) {
+  assert(modelPath != NULL);
   if (!LoadVoskLibrary()) {
     return false;
   }
@@ -330,6 +355,8 @@ static bool Real_VoiceRec_Init(const char *modelPath) {
     g_model = NULL;
     return false;
   }
+  // Both are dereferenced by the worker thread without further checks.
+  assert(g_model != NULL && g_recognizer != NULL);
   printf("VoiceRec: Initialized successfully with model '%s'\n", modelPath);
   return true;
 }
@@ -475,11 +502,16 @@ bool VoiceRec_IsRecording(void) {
 }
 
 bool VoiceRec_PollResult(char *outBuffer, size_t maxLen) {
+  assert(outBuffer != NULL);
+  // outBuffer[maxLen - 1] below underflows to a huge index when maxLen is 0.
+  assert(maxLen > 0);
+
   pthread_mutex_lock(&g_resultMutex);
   if (g_resultHead == g_resultTail) {
     pthread_mutex_unlock(&g_resultMutex);
     return false;
   }
+  assert(g_resultTail >= 0 && g_resultTail < RESULT_QUEUE_SIZE);
 
   const char *text = g_resultQueue[g_resultTail];
   strncpy(outBuffer, text, maxLen);
@@ -491,6 +523,9 @@ bool VoiceRec_PollResult(char *outBuffer, size_t maxLen) {
 }
 
 bool VoiceRec_PollPartial(char *outBuffer, size_t maxLen) {
+  assert(outBuffer != NULL);
+  assert(maxLen > 0); // see VoiceRec_PollResult
+
   pthread_mutex_lock(&g_partialMutex);
   if (!g_partialChanged) {
     pthread_mutex_unlock(&g_partialMutex);

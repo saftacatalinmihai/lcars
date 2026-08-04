@@ -33,6 +33,48 @@ unimplemented/unreachable paths, not a marker for future work.
   drops the extras), but wrong. Now reachable in practice since editor content
   is no longer capped — size the array from the actual line count
   (scratch_arena) instead of a fixed stack array.
+- [ ] **`GET /entries` truncates any entry longer than ~4KB mid-JSON.**
+  `HandleGetEntries` (`lcars_http.h`) formats each row into a 4096-byte stack
+  `row_buf`; `snprintf` truncates, and the response ends up with a row cut off
+  in the middle of a string literal, so the whole payload fails to parse. (The
+  memory-safety half of this is fixed: `row_len` is now clamped to what was
+  actually written, because `snprintf` returns the *would-be* length and the
+  following `memcpy` was reading up to that far past the end of the stack
+  array.) Real fix: build each row straight into the arena-backed response
+  buffer instead of a fixed stack buffer.
+- [ ] **`json_escape` doesn't escape `\b` and `\f`.** (`lcars_http.h`) The
+  measuring pass counts them as two bytes but the writing pass emits the raw
+  control byte, which is invalid inside a JSON string. Over-allocates, so it's
+  memory-safe, but the response can be unparseable for content containing
+  either character.
+- [ ] **A large `Content-Length` aborts the whole API server.**
+  `ReadHTTPRequestBody` (`lcars_http.h`) passes the client-supplied length
+  straight to `arena_alloc` on the connection's 1MB stack arena, and arena OOM
+  is a deliberate `abort()` — so one oversized (or malicious) request takes the
+  process down, UI included. Needs an explicit size cap with a 413 response
+  before it ever reaches the arena.
+- [ ] **`UpdateNotification` can be handed a dangling stack buffer.**
+  `StringDup` returns static Strings by alias rather than copying, so
+  `UpdateNotification(s, StringStatic(localBuf))` leaves `s->notification`
+  pointing at a dead stack frame. `UpdateVoiceInput` (`liblcars.h`) does exactly
+  this with its `fullNotify[300]`; the banner is only rendered in debug mode,
+  which is why it hasn't shown up. Either `StringFormat` into `scratch_arena`
+  at that call site, or make `UpdateNotification` always copy.
+- [ ] **Stale `Selection` outlives the text it indexes.** Nothing resets
+  `Element.selection` when plain Backspace/Delete shortens the buffer, so the
+  anchor can end up past the end and a later shift-extend produces a range
+  outside the text. Both consumers now clamp (`DeleteSelection` in
+  `lcars_gap_buffer.h`, the Ctrl+C copy in `liblcars.h`) — before that the
+  former pushed `gapEnd` past `capacity` and handed `ReconstructText` a
+  negative `memcpy` length. Clamping is a guard, not the fix: the selection
+  should be invalidated (or clamped) at the point the text shrinks.
+- [ ] **`Element.text` is only re-flattened once per frame.** A frame that both
+  inserts and moves the cursor (Ctrl+V then Ctrl+Right, or Enter while
+  Ctrl+Arrow auto-repeats) runs the cursor logic against a stale
+  `Element.text`, so `gap.gapStart` can exceed `text.len`. `FindWordBoundary`
+  now clamps for this (it previously walked off the end of the allocation
+  without terminating in the forward direction), but the real fix is to
+  reconstruct as soon as the gap changes, before any cursor handling reads it.
 - [ ] **Hot reload has no layout/size safety check.** `lcars-lib.so` reloads
   into the host's pre-allocated `State` with no verification that the host and
   the freshly-rebuilt `.so` agree on struct layout — `CreateAppState`'s 10x

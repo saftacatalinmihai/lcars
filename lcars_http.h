@@ -44,6 +44,12 @@ void SetHTTPServerCredentials(const char *username, const char *password) {
 }
 
 static int base64_decode(const char *in, char *out, int out_max) {
+  assert(in != NULL);
+  assert(out != NULL);
+  // out[len] = '\0' below is only bounded by out_max - 1, so a zero-sized
+  // output buffer writes out[-1].
+  assert(out_max > 0);
+
   static const int table[] = {
       -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
       -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -75,6 +81,7 @@ static int base64_decode(const char *in, char *out, int out_max) {
       val = 0;
     }
   }
+  assert(len >= 0 && len < out_max); // the terminator must fit
   out[len] = '\0';
   return len;
 }
@@ -82,7 +89,14 @@ static int base64_decode(const char *in, char *out, int out_max) {
 // Simple JSON extraction helpers
 static bool json_get_string(const char *json, const char *key, char *out_val,
                             size_t max_len) {
+  assert(json != NULL);
+  assert(key != NULL);
+  assert(out_val != NULL);
+  // `len < max_len - 1` underflows into a huge size_t when max_len is 0.
+  assert(max_len > 0);
+
   char pattern[128];
+  assert(strlen(key) + 3 <= sizeof(pattern)); // quotes plus terminator
   snprintf(pattern, sizeof(pattern), "\"%s\"", key);
   const char *p = strstr(json, pattern);
   if (!p)
@@ -101,6 +115,7 @@ static bool json_get_string(const char *json, const char *key, char *out_val,
       }
       out_val[len++] = *p++;
     }
+    assert(len < max_len); // the terminator must fit
     out_val[len] = '\0';
     return true;
   }
@@ -108,6 +123,10 @@ static bool json_get_string(const char *json, const char *key, char *out_val,
 }
 
 static bool json_get_int(const char *json, const char *key, int *out_val) {
+  assert(json != NULL);
+  assert(key != NULL);
+  assert(out_val != NULL);
+
   char pattern[128];
   snprintf(pattern, sizeof(pattern), "\"%s\"", key);
   const char *p = strstr(json, pattern);
@@ -127,6 +146,10 @@ static bool json_get_int(const char *json, const char *key, int *out_val) {
 }
 
 static bool json_get_float(const char *json, const char *key, float *out_val) {
+  assert(json != NULL);
+  assert(key != NULL);
+  assert(out_val != NULL);
+
   char pattern[128];
   snprintf(pattern, sizeof(pattern), "\"%s\"", key);
   const char *p = strstr(json, pattern);
@@ -147,7 +170,10 @@ static bool json_get_float(const char *json, const char *key, float *out_val) {
 
 static const char *find_header_value(const char *headers,
                                      const char *header_name) {
+  assert(headers != NULL);
+  assert(header_name != NULL);
   size_t name_len = strlen(header_name);
+  assert(name_len > 0); // strncasecmp of 0 bytes matches everything
   const char *p = headers;
   while (p && *p) {
     if (strncasecmp(p, header_name, name_len) == 0) {
@@ -164,6 +190,7 @@ static const char *find_header_value(const char *headers,
 }
 
 static char *json_escape(Arena *arena, const char *str) {
+  assert(arena != NULL);
   if (!str)
     return "";
   size_t len = 0;
@@ -179,6 +206,8 @@ static char *json_escape(Arena *arena, const char *str) {
   }
   char *escaped = arena_alloc(arena, len + 1);
   char *dst = escaped;
+  size_t escapedLen = len;
+  (void)escapedLen; // read only by the postcondition assert below
   p = str;
   while (*p) {
     if (*p == '"' || *p == '\\') {
@@ -198,6 +227,14 @@ static char *json_escape(Arena *arena, const char *str) {
     }
     p++;
   }
+  // The writing pass must stay within what the measuring pass sized, with
+  // room left for the terminator. NOTE: this is `<=`, not `==`, on purpose:
+  // the measuring pass counts '\b' and '\f' as two bytes but the writing
+  // pass has no case for them and emits one (a raw control byte, which is
+  // invalid inside a JSON string - see TODO.md). That over-allocates, which
+  // is harmless here; the direction that would corrupt memory is the one
+  // asserted.
+  assert((size_t)(dst - escaped) <= escapedLen);
   *dst = '\0';
   return escaped;
 }
@@ -221,6 +258,13 @@ static bool ReadHTTPRequestLine(int client_fd, char *req_buf,
                                 size_t req_buf_size, int *out_total_read,
                                 char **out_body_start, int *out_headers_len,
                                 HTTPRequestLine *out_line) {
+  assert(client_fd >= 0);
+  assert(req_buf != NULL);
+  // req_buf[total_read] = '\0' with total_read bounded by req_buf_size - 1.
+  assert(req_buf_size > 1);
+  assert(out_total_read != NULL && out_body_start != NULL);
+  assert(out_headers_len != NULL && out_line != NULL);
+
   int total_read = 0;
   while (total_read < (int)req_buf_size - 1) {
     int n = recv(client_fd, req_buf + total_read,
@@ -233,6 +277,7 @@ static bool ReadHTTPRequestLine(int client_fd, char *req_buf,
       break;
     }
   }
+  assert(total_read >= 0 && total_read < (int)req_buf_size);
   *out_total_read = total_read;
 
   char *body_start = strstr(req_buf, "\r\n\r\n");
@@ -243,6 +288,10 @@ static bool ReadHTTPRequestLine(int client_fd, char *req_buf,
   body_start += 4;
   *out_body_start = body_start;
   *out_headers_len = (int)(body_start - req_buf);
+  // ReadHTTPRequestBody() computes `total_read - headers_len` as the count
+  // of body bytes already buffered, so the delimiter must lie within what
+  // was actually read.
+  assert(*out_headers_len > 0 && *out_headers_len <= total_read);
 
   if (sscanf(req_buf, "%15s %255s", out_line->method, out_line->path) != 2) {
     printf("HTTP Request Parsing Failure: Cannot parse HTTP method/path\n");
@@ -256,6 +305,9 @@ static bool ReadHTTPRequestLine(int client_fd, char *req_buf,
 // the "admin"/"admin" default) on first call. Sends a 401 response and
 // returns false if authentication fails.
 static bool CheckHTTPAuth(int client_fd, const char *req_buf) {
+  assert(client_fd >= 0);
+  assert(req_buf != NULL);
+
   if (!g_auth_enabled) {
     const char *env_user = getenv("LCARS_AUTH_USER");
     const char *env_pass = getenv("LCARS_AUTH_PASS");
@@ -335,6 +387,14 @@ static void ReadHTTPRequestBody(int client_fd, Arena *arena,
                                int total_read, int headers_len,
                                char **out_body, char *out_content_type,
                                size_t content_type_size) {
+  assert(client_fd >= 0);
+  assert(arena != NULL);
+  assert(req_buf != NULL && body_start != NULL);
+  assert(out_body != NULL && out_content_type != NULL);
+  assert(content_type_size > 0);
+  assert(headers_len >= 0 && headers_len <= total_read);
+  assert(body_start >= req_buf); // body_start points into req_buf
+
   const char *cl_val = find_header_value(req_buf, "Content-Length:");
   int content_len = cl_val ? atoi(cl_val) : 0;
 
@@ -356,30 +416,44 @@ static void ReadHTTPRequestBody(int client_fd, Arena *arena,
 
   *out_body = "";
   if (content_len > 0) {
+    // NOTE: content_len is attacker-controlled (it is just the
+    // Content-Length header run through atoi) and is NOT asserted - a
+    // request oversized for this connection's 1MB arena must be handled,
+    // not trapped. See TODO.md: today it reaches arena_alloc and aborts.
     char *body = (char *)arena_alloc(arena, content_len + 1);
     int body_already_read = total_read - headers_len;
     if (body_already_read > content_len) {
       body_already_read = content_len;
     }
+    assert(body_already_read >= 0 && body_already_read <= content_len);
     if (body_already_read > 0) {
       memcpy(body, body_start, body_already_read);
     }
     int body_to_read = content_len - body_already_read;
     while (body_to_read > 0) {
+      // Each recv writes at body + body_already_read for body_to_read
+      // bytes; together they must stay inside the content_len allocation.
+      assert(body_already_read + body_to_read == content_len);
       int n = recv(client_fd, body + body_already_read, body_to_read, 0);
       if (n <= 0)
         break;
       body_already_read += n;
       body_to_read -= n;
     }
+    assert(body_already_read <= content_len);
     body[content_len] = '\0';
     *out_body = body;
   }
+
+  assert(*out_body != NULL);
 }
 
 // Handles GET /entries: returns all entries as a JSON array. Returns the
 // HTTP status code sent (200 on success, 500 on any DB failure).
 static int HandleGetEntries(int client_fd, Arena *arena) {
+  assert(client_fd >= 0);
+  assert(arena_valid(arena));
+
   sqlite3 *db;
   int rc = sqlite3_open(LCARS_DB_PATH, &db);
   if (rc != SQLITE_OK) {
@@ -475,15 +549,30 @@ static int HandleGetEntries(int client_fd, Arena *arena) {
         "utc\":\"%s\",\"last_modified_at_utc\":\"%s\"}",
         id, esc_kind, esc_title, esc_content, value_int, value_float,
         done_bool, esc_created, esc_modified);
+    // snprintf returns what it *would* have written, not what it did. Any
+    // entry whose escaped content pushes the row past row_buf (4KB - well
+    // within a normal journal entry) therefore yields a row_len larger than
+    // the buffer, and the memcpy below would read off the end of this stack
+    // array. Clamp to what is actually there. NOTE: the row is still
+    // truncated mid-JSON, which is its own bug - see TODO.md.
+    assert(row_len >= 0); // snprintf only returns negative on encoding error
+    if (row_len >= (int)sizeof(row_buf)) {
+      row_len = (int)sizeof(row_buf) - 1;
+    }
+    assert(row_len < (int)sizeof(row_buf));
 
     if (resp_len + row_len + 5 >= resp_cap) {
       size_t old_cap = resp_cap;
       resp_cap = (resp_cap + row_len) * 2;
       resp_body = arena_realloc(arena, resp_body, old_cap, resp_cap);
     }
+    // The +5 slack in the growth test is what leaves room for the ',' of
+    // the next row and the ']' and '\0' written after the loop.
+    assert(resp_len + (size_t)row_len + 5 < resp_cap);
     memcpy(resp_body + resp_len, row_buf, row_len);
     resp_len += row_len;
   }
+  assert(resp_len + 2 <= resp_cap); // room for the ']' and its terminator
   resp_body[resp_len++] = ']';
   resp_body[resp_len] = '\0';
 
@@ -507,6 +596,12 @@ static int HandleGetEntries(int client_fd, Arena *arena) {
 // query-execution failure, 500 on any other DB failure).
 static int HandlePostEntry(int client_fd, const char *body,
                           const char *content_type) {
+  assert(client_fd >= 0);
+  // Both are strstr'd/strncpy'd unconditionally below;
+  // ReadHTTPRequestBody() guarantees a non-NULL body even with no content.
+  assert(body != NULL);
+  assert(content_type != NULL);
+
   bool is_json = (strstr(content_type, "application/json") != NULL);
 
   char kind[128] = {0};
@@ -619,10 +714,13 @@ static int HandlePostEntry(int client_fd, const char *body,
     status_code = 500;
   }
   sqlite3_close(db);
+  assert(status_code == 200 || status_code == 400 || status_code == 500);
   return status_code;
 }
 
 static void HandleHTTPConnection(int client_fd) {
+  assert(client_fd >= 0);
+
   // Allocate 1 MB memory arena on the thread stack.
   // Extremely fast, safe, and avoids malloc fragmentation or memory leaks.
   uint8_t arena_backing[1024 * 1024];
@@ -700,6 +798,8 @@ end: {
 }
 
 void RunHTTPServer(int port) {
+  assert(port > 0 && port <= 65535);
+
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd < 0) {
     perror("Failed to create HTTP socket");
@@ -751,6 +851,10 @@ static void *HTTPServerThread(void *arg) {
 }
 
 void StartHTTPServer(int port) {
+  // Validated where it is parsed (lcars.c); by here it is an internal
+  // contract with RunHTTPServer on the new thread.
+  assert(port > 0 && port <= 65535);
+
   int *arg = malloc(sizeof(int));
   if (arg) {
     *arg = port;

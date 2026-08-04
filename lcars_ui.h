@@ -22,6 +22,14 @@ static EntryListLayout ComputeEntryListLayout(Element *e);
 // only place this geometry should be computed so the two can't diverge.
 static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
                                               float editorWidth) {
+  assert(e != NULL);
+  // Only the two scrollable editor kinds have the height/textHeight/scrollY
+  // fields this reads.
+  assert(e->kind == ELEM_TEXT_EDITOR || e->kind == ELEM_ENTRY_LIST);
+  // NOTE: e->height/e->textHeight are deliberately not asserted positive.
+  // Both are document- and resize-driven (a hypermedia h="0", or an editor
+  // dragged small), which is input to handle, not a bug to trap.
+
   ScrollbarLayout sb = {0};
   sb.bounds =
       (Rectangle){editorX + editorWidth + 25, e->position.y, 24.0f, e->height};
@@ -48,6 +56,12 @@ static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
   }
   sb.handle = (Rectangle){sb.bounds.x, handleY, sb.bounds.width, handleHeight};
 
+  // Input handling hit-tests these and drawing renders them, so they must
+  // describe the same single column of screen space.
+  assert(sb.upButton.x == sb.bounds.x && sb.downButton.x == sb.bounds.x &&
+         sb.track.x == sb.bounds.x && sb.handle.x == sb.bounds.x);
+  assert(sb.upButton.width == sb.bounds.width &&
+         sb.handle.width == sb.bounds.width);
   return sb;
 }
 
@@ -59,6 +73,12 @@ static ScrollbarLayout ComputeScrollbarLayout(Element *e, float editorX,
 // about it (they previously did: lcars_text.h used a stale 220px width
 // where everywhere else used 350px).
 static EntryListLayout ComputeEntryListLayout(Element *e) {
+  assert(e != NULL);
+  assert(e->kind == ELEM_ENTRY_LIST);
+  // Only make_entry_list() allocates this side struct; an ELEM_ENTRY_LIST
+  // that reached here without one was built by some other path.
+  assert(e->entryList != NULL);
+
   EntryListLayout el = {0};
   el.width = e->entryList->listCollapsed ? 30.0f : 350.0f;
   el.panelRec = (Rectangle){e->position.x, e->position.y, el.width, e->height};
@@ -69,10 +89,20 @@ static EntryListLayout ComputeEntryListLayout(Element *e) {
   el.itemStride = 90.0f;
   el.itemHeight = 80.0f;
   el.viewportHeight = e->height - el.headerHeight;
+
+  // The panel rect must agree with the width every other consumer reads —
+  // this function exists because they once disagreed (220 vs 350).
+  assert(el.panelRec.width == el.width);
+  assert(el.width == 30.0f || el.width == 350.0f);
+  assert(el.itemHeight <= el.itemStride); // rows must not overlap
   return el;
 }
 
 static void ClickOrHoverNotification(State *s, int i, String elem_pretty_name) {
+  assert(s != NULL);
+  assert(i >= 0 && i < s->numElements); // indexes s->elements below
+  assert(StringValid(elem_pretty_name));
+
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) ||
       s->notificationOnElemIdx != i) {
     String buf = {0};
@@ -89,6 +119,10 @@ static void ClickOrHoverNotification(State *s, int i, String elem_pretty_name) {
 }
 
 static Rectangle GetElementBoundingBox(State *s, Element *e) {
+  assert(s != NULL);
+  assert(e != NULL);
+  assert(e->kind >= ELEM_NOTHING && e->kind < ELEM_TOTAL_KINDS);
+
   float w = 0;
   float h = 0;
   if (ELEM_TOTAL_KINDS != 8) {
@@ -115,6 +149,10 @@ static Rectangle GetElementBoundingBox(State *s, Element *e) {
 }
 
 static bool IsHoveringElement(State *s, Element *e) {
+  assert(s != NULL);
+  assert(e != NULL);
+  assert(e->kind >= ELEM_NOTHING && e->kind < ELEM_TOTAL_KINDS);
+
   switch (e->kind) {
   case ELEM_RECTANGLE:
   case ELEM_BUTTON:
@@ -177,6 +215,12 @@ static bool IsHoveringElement(State *s, Element *e) {
 static void DrawElbow(int posX, int posY, int columnWidth, int columnHeight,
                       int barWidth, int barHeight, int innerRadius, Color color,
                       int orientation, bool debug) {
+  // lcars_hypermedia.h rejects anything but 0 and 3 at parse time, so cases
+  // 1/2 below are unreachable placeholders rather than a fallback for
+  // arbitrary values.
+  assert(orientation == 0 || orientation == 3);
+  assert(innerRadius >= 0);
+
   switch (orientation) {
   case 0:
     if (columnWidth >= barHeight + innerRadius) {

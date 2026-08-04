@@ -57,6 +57,11 @@ typedef void (*Fn_FlushPendingSaves)(State *s);
 static bool LoadAppLibrary(int *reload_counter, Fn_Update *outUpdate,
                            Fn_Init *outInit, Fn_Reload *outReload,
                            Fn_FlushPendingSaves *outFlushPendingSaves) {
+  assert(reload_counter != NULL);
+  assert(*reload_counter >= 0);
+  assert(outUpdate != NULL && outInit != NULL && outReload != NULL);
+  assert(outFlushPendingSaves != NULL);
+
   char lib_path[256];
   snprintf(lib_path, sizeof(lib_path), "./lcars-lib_temp_%d.so",
           (*reload_counter)++);
@@ -101,6 +106,11 @@ static bool LoadAppLibrary(int *reload_counter, Fn_Update *outUpdate,
           dlerror());
   }
 
+  // All-or-nothing: the three required symbols are published together or
+  // not at all, so a failed reload can never leave the caller holding a mix
+  // of old and new pointers. FlushPendingSaves is the one optional symbol.
+  assert(update != NULL && init != NULL && reload != NULL);
+
   *outUpdate = update;
   *outInit = init;
   *outReload = reload;
@@ -142,11 +152,20 @@ static State *CreateAppState(void) {
   }
   arena_init(&s->doc_arena, doc_backing, doc_arena_size);
   arena_init(&s->scratch_arena, scratch_backing, scratch_arena_size);
+
+  // Everything the app (and, in the hot-reload build, the .so) assumes
+  // about State from its very first frame.
+  assert(arena_valid(&s->doc_arena));
+  assert(arena_valid(&s->scratch_arena));
+  assert(s->doc_arena.buffer != s->scratch_arena.buffer);
+  assert(s->numElements == 0); // calloc'd
+  assert(s->db == NULL);
   return s;
 }
 
 static void InitDBMinimal(void) {
   State *s = CreateAppState();
+  assert(s != NULL);
 
   sqlite3 *db = NULL;
   int rc = sqlite3_open(LCARS_DB_PATH, &db);
@@ -175,7 +194,14 @@ int main(int argc, char **argv) {
       http_only = true;
     } else if ((strcmp(argv[i], "--port") == 0 || strcmp(argv[i], "-p") == 0) &&
                i + 1 < argc) {
+      // Validated here, at the boundary, rather than asserted deeper in:
+      // a bad command line is user error, and the server functions assert
+      // a usable port on the strength of this check.
       port = atoi(argv[++i]);
+      if (port <= 0 || port > 65535) {
+        fprintf(stderr, "Invalid port '%s' (expected 1-65535)\n", argv[i]);
+        return 1;
+      }
     } else if ((strcmp(argv[i], "--user") == 0 || strcmp(argv[i], "-u") == 0) &&
                i + 1 < argc) {
       auth_user = argv[++i];
@@ -208,6 +234,8 @@ int main(int argc, char **argv) {
   }
 
   State *s = CreateAppState();
+  assert(s != NULL);
+  assert(port > 0 && port <= 65535);
 
   double t_res_start = GetTimeSeconds();
   CheckAndDownloadResources();
@@ -268,6 +296,8 @@ int main(int argc, char **argv) {
                       &FlushPendingSaves)) {
     return 1;
   }
+  // The loop below calls these unconditionally every frame.
+  assert(Update != NULL && Init != NULL && Reload != NULL);
 
   // Initialize global state
   Init(s, true);

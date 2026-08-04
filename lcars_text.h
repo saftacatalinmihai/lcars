@@ -38,6 +38,12 @@ static void DrawTextBoxed(State *s, Element *e, Font font, String text,
 #ifdef LCARS_IMPLEMENTATION
 
 static int GetLines(String text, int *lineStarts, int maxLines) {
+  assert(StringValid(text));
+  assert(lineStarts != NULL);
+  // The first slot is written unconditionally below, before any bounds
+  // check, so a zero-length array here is an immediate overflow.
+  assert(maxLines > 0);
+
   int count = 0;
   lineStarts[count++] = 0;
   int len = text.len;
@@ -48,16 +54,29 @@ static int GetLines(String text, int *lineStarts, int maxLines) {
       }
     }
   }
+
+  // Always at least the implicit first line, never more than the caller's
+  // array holds - GetLineForIndex() and the Up/Down/Home/End handlers both
+  // index `lineStarts` with the result.
+  assert(count >= 1 && count <= maxLines);
   return count;
 }
 
 static int GetLineForIndex(int index, const int *lineStarts, int numLines) {
+  assert(lineStarts != NULL);
+  // The fallback below returns numLines - 1 and callers use it as an index.
+  assert(numLines > 0);
+
+  int line = numLines - 1;
   for (int i = 0; i < numLines - 1; i++) {
     if (index >= lineStarts[i] && index < lineStarts[i + 1]) {
-      return i;
+      line = i;
+      break;
     }
   }
-  return numLines - 1;
+
+  assert(line >= 0 && line < numLines);
+  return line;
 }
 
 // Decodes the codepoint at text.data[byteIndex] and computes its advance
@@ -66,11 +85,22 @@ static int GetLineForIndex(int index, const int *lineStarts, int numLines) {
 // can't make the two disagree about where a character sits on screen.
 static GlyphMetrics DecodeGlyphMetrics(Font font, String text, int byteIndex,
                                        float scaleFactor, float spacing) {
+  assert(StringValid(text));
+  // Both callers walk `text` by codepoint length, so byteIndex always names
+  // a real byte. Past the end it would decode whatever follows the
+  // allocation and return a byte count that keeps the walk going.
+  assert(byteIndex >= 0 && byteIndex < text.len);
+  assert(font.glyphs != NULL && font.recs != NULL && font.glyphCount > 0);
+  assert(scaleFactor > 0.0f);
+
   GlyphMetrics m = {0};
   m.codepoint = text.data
                     ? GetCodepoint(&text.data[byteIndex], &m.codepointByteCount)
                     : 0;
   int index = GetGlyphIndex(font, m.codepoint);
+  // raylib falls back to the '?' glyph for anything unmapped, so this is
+  // always a real slot in the two parallel arrays indexed below.
+  assert(index >= 0 && index < font.glyphCount);
 
   // NOTE: Normally we'd exit the decoding sequence as soon as a bad byte is
   // found (and return 0x3f), but we need to draw all of the bad bytes using
@@ -85,6 +115,11 @@ static GlyphMetrics DecodeGlyphMetrics(Font font, String text, int byteIndex,
     if (byteIndex + m.codepointByteCount < text.len)
       m.glyphWidth += spacing;
   }
+
+  // Callers advance their byte cursor by this, so a non-positive count
+  // would leave them walking the same byte forever.
+  assert(m.codepointByteCount > 0);
+  assert(m.glyphWidth >= 0.0f);
   return m;
 }
 
@@ -107,6 +142,16 @@ static int GetCharIndexAtMouse(const State *s, Font font, String text,
                                Vector2 textPos, float fontSize, float spacing,
                                Vector2 mousePos, float recWidth) {
   (void)s;
+  assert(StringValid(text));
+  assert(fontSize > 0.0f);
+  // Divided by below; a zero baseSize would make every glyph position NaN
+  // and the returned index meaningless.
+  assert(font.baseSize > 0);
+  // NOTE: recWidth is deliberately *not* asserted positive - it is
+  // e->width minus the entry-list panel width, which really can go negative
+  // when the element is resized narrower than the panel. Character wrap
+  // handles that (every glyph wraps); it is not a bug to catch here.
+
   if (text.data == NULL)
     return 0;
   int length = text.len;
@@ -151,6 +196,10 @@ static int GetCharIndexAtMouse(const State *s, Font font, String text,
     textOffsetX += m.glyphWidth;
 
     i += m.codepointByteCount;
+    // The walk must land on a byte boundary at or before the end, never
+    // past it - the loop condition is `i < length`, so overshooting here is
+    // what turns into an out-of-range index handed back to the caller.
+    assert(i > 0 && i <= length);
 
     // Evaluate candidate boundary position after the current codepoint
     {
@@ -181,6 +230,9 @@ static int GetCharIndexAtMouse(const State *s, Font font, String text,
     }
   }
 
+  // Callers feed this straight into MoveGap()/Selection as a character
+  // index, so it has to name a real boundary within the text.
+  assert(bestIndex >= 0 && bestIndex <= length);
   return bestIndex;
 }
 
@@ -191,6 +243,16 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
                                     Color selectTint, Color selectBackTint,
                                     float *outTextHeight, float *outCursorY,
                                     int cursorIndex, bool drawCursor) {
+  assert(s != NULL);
+  assert(e != NULL);
+  assert(StringValid(text));
+  assert(fontSize > 0.0f);
+  assert(font.baseSize > 0); // divided by, to build scaleFactor
+  // A negative selection length would make the "is this glyph selected"
+  // range test below wrap; DrawTextBoxed() normalizes it before calling.
+  assert(selectLength >= 0);
+  assert(cursorIndex >= 0);
+
   int length = text.len;
   (void)s;
 
@@ -356,12 +418,25 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
     *outTextHeight = maxTextOffsetY + lineHeight;
   if (outCursorY)
     *outCursorY = cursorY;
+
+  // Both feed scroll clamping (ClampScrollY, and the snap-to-cursor block in
+  // UpdateElement); a negative height there would clamp scrollY to nonsense.
+  assert(!outTextHeight || *outTextHeight >= 0.0f);
+  assert(!outCursorY || *outCursorY >= 0.0f);
 }
 
 static void DrawTextBoxed(State *s, Element *e, Font font, String text,
                           Rectangle rec, float fontSize, float spacing,
                           bool wordWrap, Color tint, float *outTextHeight,
                           float *outCursorY, int cursorIndex, bool drawCursor) {
+  assert(s != NULL);
+  assert(e != NULL);
+  assert(StringValid(text));
+  // start/end/length are maintained together: a live selection has an
+  // anchor, and length is always end - start (see EndTextSelection).
+  assert(e->selection.start < 0 ||
+         e->selection.length == e->selection.end - e->selection.start);
+
   if (s->debug)
     DrawText(TextFormat("Selection start: %d, end: %d, length: %d",
                         e->selection.start, e->selection.end,
