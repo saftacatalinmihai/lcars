@@ -18,8 +18,8 @@ typedef struct GlyphMetrics {
 
 static GlyphMetrics DecodeGlyphMetrics(Font font, String text, int byteIndex,
                                        float scaleFactor, float spacing);
-static void ApplyCharWrap(float *x, float *y, float lineHeight,
-                          float wrapWidth, GlyphMetrics m);
+static void ApplyCharWrap(float *x, float *y, float lineHeight, float wrapWidth,
+                          GlyphMetrics m);
 static int GetCharIndexAtMouse(const State *s, Font font, String text,
                                Vector2 textPos, float fontSize, float spacing,
                                Vector2 mousePos, float recWidth);
@@ -67,9 +67,9 @@ static int GetLineForIndex(int index, const int *lineStarts, int numLines) {
 static GlyphMetrics DecodeGlyphMetrics(Font font, String text, int byteIndex,
                                        float scaleFactor, float spacing) {
   GlyphMetrics m = {0};
-  m.codepoint = text.data ? GetCodepoint(&text.data[byteIndex],
-                                         &m.codepointByteCount)
-                          : 0;
+  m.codepoint = text.data
+                    ? GetCodepoint(&text.data[byteIndex], &m.codepointByteCount)
+                    : 0;
   int index = GetGlyphIndex(font, m.codepoint);
 
   // NOTE: Normally we'd exit the decoding sequence as soon as a bad byte is
@@ -92,8 +92,8 @@ static GlyphMetrics DecodeGlyphMetrics(Font font, String text, int byteIndex,
 // newline, or a glyph that would overflow wrapWidth, starts a new line
 // first. Mutates *x/*y in place to the position where the glyph should be
 // measured/drawn.
-static void ApplyCharWrap(float *x, float *y, float lineHeight,
-                          float wrapWidth, GlyphMetrics m) {
+static void ApplyCharWrap(float *x, float *y, float lineHeight, float wrapWidth,
+                          GlyphMetrics m) {
   if (m.codepoint == '\n') {
     *y += lineHeight;
     *x = 0.0f;
@@ -144,9 +144,11 @@ static int GetCharIndexAtMouse(const State *s, Font font, String text,
   for (int i = 0; i < length;) {
     GlyphMetrics m = DecodeGlyphMetrics(font, text, i, scaleFactor, spacing);
     ApplyCharWrap(&textOffsetX, &textOffsetY, lineHeight, recWidth, m);
-    if ((textOffsetX != 0.0f) || (m.codepoint != ' ')) {
-      textOffsetX += m.glyphWidth;
-    }
+    // Every glyph advances, spaces at the start of a line included (see the
+    // leading-space note in DrawTextBoxedSelectable). Hit-testing must step
+    // in exactly the same increments the draw pass uses or a click lands on
+    // a different character than the one under the mouse.
+    textOffsetX += m.glyphWidth;
 
     i += m.codepointByteCount;
 
@@ -320,8 +322,15 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
       }
     }
 
-    if ((textOffsetX != 0) || (codepoint != ' '))
-      textOffsetX += glyphWidth; // avoid leading spaces
+    // Suppressing the advance of a line's leading space is a *word-wrap*
+    // rule: the space that caused an automatic break must not indent the
+    // line it was pushed onto. In character-wrap mode it is simply wrong —
+    // a space at the start of a line is one the user typed. Swallowing its
+    // advance made the space bar look dead at the start of a line (the byte
+    // went into the gap buffer, but the cursor never moved, and because
+    // textOffsetX stayed 0 every following space was swallowed too).
+    if (!wordWrap || (textOffsetX != 0) || (codepoint != ' '))
+      textOffsetX += glyphWidth;
   }
 
   if (textOffsetY > maxTextOffsetY)
@@ -352,8 +361,7 @@ static void DrawTextBoxedSelectable(State *s, Element *e, Font font,
 static void DrawTextBoxed(State *s, Element *e, Font font, String text,
                           Rectangle rec, float fontSize, float spacing,
                           bool wordWrap, Color tint, float *outTextHeight,
-                          float *outCursorY, int cursorIndex,
-                          bool drawCursor) {
+                          float *outCursorY, int cursorIndex, bool drawCursor) {
   if (s->debug)
     DrawText(TextFormat("Selection start: %d, end: %d, length: %d",
                         e->selection.start, e->selection.end,
@@ -363,8 +371,8 @@ static void DrawTextBoxed(State *s, Element *e, Font font, String text,
   int selStart = e->selection.length > 0
                      ? e->selection.start
                      : e->selection.start + e->selection.length;
-  int selLength = e->selection.length > 0 ? e->selection.length
-                                          : -e->selection.length;
+  int selLength =
+      e->selection.length > 0 ? e->selection.length : -e->selection.length;
   DrawTextBoxedSelectable(s, e, font, text, rec, fontSize, spacing, wordWrap,
                           tint, selStart, selLength, BLACK, LCARS_RED_ORANGE,
                           outTextHeight, outCursorY, cursorIndex, drawCursor);
