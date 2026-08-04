@@ -81,8 +81,8 @@ static inline Element *FindElementById(State *s, const char *id) {
 }
 
 static inline bool IsHttpURL(const char *url) {
-  return url && (strncmp(url, "http://", 7) == 0 ||
-                strncmp(url, "https://", 8) == 0);
+  return url &&
+         (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
 }
 
 // Whether `url` looks like a loadable hypermedia document reference at
@@ -95,7 +95,7 @@ static inline bool IsDocumentURL(const char *url) {
   if (!url)
     return false;
   return IsHttpURL(url) || strncmp(url, "file://", 7) == 0 ||
-        strstr(url, ".html") != NULL;
+         strstr(url, ".html") != NULL;
 }
 
 // Tracks a held key and reports whether its action should fire this frame,
@@ -148,7 +148,15 @@ static inline void make_text_editor(Arena *doc_arena, Element *e,
   }
 
   int textLen = initText.data ? (int)strlen(initText.data) : 0;
+  // Nothing caps how long an entry can be (the HTTP API, voice input and
+  // paste all write unbounded content), so size the buffer to the text
+  // instead of assuming it fits in GAP_BUFFER_INITIAL_CAPACITY — copying a
+  // longer entry into a fixed 4096-byte buffer would run straight off the
+  // end of the arena allocation.
   int textCapacity = GAP_BUFFER_INITIAL_CAPACITY;
+  while (textCapacity < textLen) {
+    textCapacity *= 2;
+  }
   char *gapBuffer = (char *)arena_alloc(doc_arena, textCapacity + 1);
   if (initText.data) {
     memcpy(gapBuffer, initText.data, textLen);
@@ -157,6 +165,10 @@ static inline void make_text_editor(Arena *doc_arena, Element *e,
   e->gap.gapStart = textLen;
   e->gap.gapEnd = textCapacity;
   e->gap.capacity = textCapacity;
+  // Filled in on the first ReconstructText() after an edit; until then
+  // e->text below is the flattened view.
+  e->gap.text = NULL;
+  e->gap.textCapacity = 0;
 
   char *textAlloc = (char *)arena_alloc(doc_arena, textLen + 1);
   if (initText.data) {
@@ -220,8 +232,7 @@ static inline void make_sphere(State *s, Element *e, const char *imagePath) {
   camera.projection = CAMERA_PERSPECTIVE;
   e->sphere->camera = camera;
 
-  e->sphere->renderTexture =
-      LoadRenderTexture((int)e->width, (int)e->height);
+  e->sphere->renderTexture = LoadRenderTexture((int)e->width, (int)e->height);
 }
 
 #ifdef LCARS_IMPLEMENTATION
@@ -714,8 +725,8 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
               if (isScrollable) {
                 itemWidth = maxItemWidth - 10.0f;
               }
-              float itemY = e->position.y + el.headerHeight -
-                           e->entryList->listScrollY;
+              float itemY =
+                  e->position.y + el.headerHeight - e->entryList->listScrollY;
               Rectangle scrollableListRec =
                   (Rectangle){e->position.x, e->position.y + el.headerHeight,
                               el.width - 5.0f, el.viewportHeight};
@@ -789,9 +800,9 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
             } else {
               char datename[32];
               GetTodayDateString(datename, sizeof(datename));
-              nextEntryId = CreateNewEntry(
-                  s, e->entryList->selectedKind.data,
-                  e->entryList->selectedKind.data, StringStatic(datename));
+              nextEntryId = CreateNewEntry(s, e->entryList->selectedKind.data,
+                                           e->entryList->selectedKind.data,
+                                           StringStatic(datename));
               InvalidateEntryListCache(e);
             }
             SwitchToEntry(s, e, nextEntryId);
@@ -887,8 +898,11 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       } else {
         // Check if more characters have been pressed on the same frame
         while (key > 0) {
-          // NOTE: Only allow keys in range [32..125]
-          if ((key >= 32) && (key <= 125) && (e->textLen < MAX_INPUT_CHARS)) {
+          // NOTE: Only allow keys in range [32..125]. Length is deliberately
+          // uncapped: the gap buffer grows on demand (as it already did for
+          // the paste, Enter and voice-input paths, which never went through
+          // any cap), so the only ceiling is doc_arena's 32MB budget.
+          if ((key >= 32) && (key <= 125)) {
             if (DeleteSelection(&e->gap, &e->selection)) {
               textChanged = true;
             }
@@ -957,8 +971,8 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
               IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
               IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
           int target = isWordJump
-                          ? FindWordBoundary(e->text, e->gap.gapStart, -1)
-                          : e->gap.gapStart - 1;
+                           ? FindWordBoundary(e->text, e->gap.gapStart, -1)
+                           : e->gap.gapStart - 1;
           MoveGap(&e->gap, target);
           EndTextSelection(&e->gap, &e->selection, shiftDown);
           e->snapToCursor = 2;
@@ -972,8 +986,8 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
               IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
               IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
           int target = isWordJump
-                          ? FindWordBoundary(e->text, e->gap.gapStart, 1)
-                          : e->gap.gapStart + 1;
+                           ? FindWordBoundary(e->text, e->gap.gapStart, 1)
+                           : e->gap.gapStart + 1;
           MoveGap(&e->gap, target);
           EndTextSelection(&e->gap, &e->selection, shiftDown);
           e->snapToCursor = 2;
@@ -1303,8 +1317,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
     return; // Skip uninitialized elements
   switch (e->kind) {
   case ELEM_RECTANGLE:
-    DrawRectangle(e->position.x, e->position.y, e->width, e->height,
-                  e->color);
+    DrawRectangle(e->position.x, e->position.y, e->width, e->height, e->color);
     break;
   case ELEM_ELBOW:
     DrawElbow(e->position.x, e->position.y, e->width, e->height, s->barWidth,
@@ -1437,7 +1450,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
           float handleY = trackY;
           if (scrollRange > 0.0f) {
             handleY += (e->entryList->listScrollY / scrollRange) *
-                      (trackHeight - handleHeight);
+                       (trackHeight - handleHeight);
           }
 
           // Draw track
@@ -1482,7 +1495,7 @@ static void DrawElement(State *s, int i, Vector2 mPos) {
                    e->position.x + 50.0f + k * 200.0f + 12.0f,
                    e->position.y - 20.0f, 20, WHITE);
           if (StringEq(e->entryList->kindList.kinds[k],
-                      e->entryList->selectedKind)) {
+                       e->entryList->selectedKind)) {
             DrawRectangle(e->position.x + 50.0f + k * 200.0f,
                           e->position.y - 20.0f, 180.0f, 20.0f,
                           ColorAlpha(LCARS_BLUE, 0.5f));

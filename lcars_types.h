@@ -28,7 +28,6 @@
 #define WINDOW_HEIGHT 900
 
 #define MAX_ELEMENTS 10000
-#define MAX_INPUT_CHARS 1024
 #define MAX_KINDS 32
 #define MAX_LIST_ITEMS 32
 
@@ -152,6 +151,14 @@ typedef struct GapBuffer {
   int gapStart;
   int gapEnd;
   int capacity;
+  // Scratch buffer holding the flattened (gap-free) contents, handed out as
+  // Element.text by ReconstructText(). Owned here, and reused across
+  // reconstructions, because text is rebuilt on *every* keystroke and
+  // doc_arena reclaims nothing until the document is reloaded — allocating a
+  // fresh buffer per edit costs O(n^2) of the arena over an editing session
+  // and eventually trips its OOM abort. Grows geometrically like `buffer`.
+  char *text;
+  int textCapacity; // Allocated size of `text`, including the '\0'.
 } GapBuffer;
 
 // A text selection expressed as gap-buffer indices. `length` is signed: a

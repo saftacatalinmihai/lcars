@@ -14,8 +14,8 @@ static inline bool StepAndFinalize(State *s, sqlite3_stmt *stmt,
                                    String successMsg);
 static void InitDB(State *s, bool firstInit);
 static inline void GetTodayDateString(char *buf, size_t bufSize);
-static inline int CreateNewEntry(State *s, const char *kind,
-                                 const char *title, String content);
+static inline int CreateNewEntry(State *s, const char *kind, const char *title,
+                                 String content);
 static inline String GetEntryContentFromDB(State *s, int id);
 static inline void UpdateEntryContentInDB(State *s, int id, String content);
 static inline void DeleteEntryFromDB(State *s, int id);
@@ -29,7 +29,8 @@ static inline void InvalidateEntryListCache(Element *e);
 static inline int GetDefaultEntryId(State *s);
 static inline String GetLogFromDB(State *s);
 static inline void UpdateLogInDB(State *s, String newLog);
-static inline void LoadEntryIntoEditor(Element *e, String dbLog);
+static inline void LoadEntryIntoEditor(Arena *doc_arena, Element *e,
+                                       String dbLog);
 static inline void MarkContentDirty(Element *e);
 static inline void FlushEntryContent(State *s, Element *e);
 static inline void SwitchToEntry(State *s, Element *e, int newEntryId);
@@ -91,8 +92,8 @@ static inline bool StepAndFinalize(State *s, sqlite3_stmt *stmt,
 
 // Inserts a new entry with the given kind/title/content and returns its id
 // (0 if the insert failed).
-static inline int CreateNewEntry(State *s, const char *kind,
-                                 const char *title, String content) {
+static inline int CreateNewEntry(State *s, const char *kind, const char *title,
+                                 String content) {
   sqlite3_stmt *stmt;
   int rc = sqlite3_prepare_v2(
       s->db, "INSERT INTO entries (kind, title, content) VALUES (?1, ?2, ?3);",
@@ -311,11 +312,10 @@ static inline void InvalidateEntryListCache(Element *e) {
 static inline int GetDefaultEntryId(State *s) {
   sqlite3_stmt *stmt;
   int id = 1;
-  if (sqlite3_prepare_v2(
-          s->db,
-          "SELECT id FROM entries WHERE kind=?1 AND (deleted IS "
-          "NULL OR deleted = 0) ORDER BY ID DESC LIMIT 1",
-          -1, &stmt, NULL) == SQLITE_OK) {
+  if (sqlite3_prepare_v2(s->db,
+                         "SELECT id FROM entries WHERE kind=?1 AND (deleted IS "
+                         "NULL OR deleted = 0) ORDER BY ID DESC LIMIT 1",
+                         -1, &stmt, NULL) == SQLITE_OK) {
     sqlite3_bind_text(stmt, 1, DEFAULT_ENTRY_KIND, -1, SQLITE_STATIC);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
       id = sqlite3_column_int(stmt, 0);
@@ -335,10 +335,24 @@ static inline void UpdateLogInDB(State *s, String newLog) {
   UpdateEntryContentInDB(s, id, newLog);
 }
 
-static inline void LoadEntryIntoEditor(Element *e, String dbLog) {
+// Replaces an editor's contents with `dbLog` (which lives in scratch_arena
+// and is gone next frame, so everything here is copied into doc_arena).
+static inline void LoadEntryIntoEditor(Arena *doc_arena, Element *e,
+                                       String dbLog) {
   int textLen = dbLog.data ? (int)strlen(dbLog.data) : 0;
+
+  // The gap buffer is sized for whatever entry the editor held before, and
+  // the entry being loaded can be arbitrarily longer — grow to fit rather
+  // than truncating the content to the old capacity (which silently dropped
+  // the tail of long entries) or copying past the end of the allocation.
   if (textLen > e->gap.capacity) {
-    textLen = e->gap.capacity;
+    int newCapacity =
+        e->gap.capacity > 0 ? e->gap.capacity : GAP_BUFFER_INITIAL_CAPACITY;
+    while (newCapacity < textLen) {
+      newCapacity *= 2;
+    }
+    e->gap.buffer = (char *)arena_alloc(doc_arena, newCapacity + 1);
+    e->gap.capacity = newCapacity;
   }
   if (e->gap.buffer && dbLog.data) {
     memcpy(e->gap.buffer, dbLog.data, textLen);
@@ -346,12 +360,16 @@ static inline void LoadEntryIntoEditor(Element *e, String dbLog) {
   e->gap.gapStart = textLen;
   e->gap.gapEnd = e->gap.capacity;
 
-  if (e->text.data && dbLog.data) {
-    memcpy(e->text.data, dbLog.data, textLen);
-    e->text.data[textLen] = '\0';
-  }
-  e->text.len = textLen;
+  // Fresh copy rather than a memcpy into e->text's existing buffer: that
+  // buffer was allocated for the previous (possibly much shorter) entry.
+  // ReconstructText() takes over from here on the first edit.
+  e->text = StringInitLen(doc_arena, dbLog.data, textLen);
   e->textLen = textLen;
+  // The selection indexes the entry we just replaced; leaving it set would
+  // let the next edit delete a range that no longer exists.
+  e->selection.start = -1;
+  e->selection.end = -1;
+  e->selection.length = 0;
   e->scrollY = 0.0f;
   e->cursorY = 0.0f;
   e->snapToCursor = 2;
@@ -392,7 +410,7 @@ static inline void FlushEntryContent(State *s, Element *e) {
 static inline void SwitchToEntry(State *s, Element *e, int newEntryId) {
   e->entryList->selectedEntryId = newEntryId;
   String newText = GetEntryContentFromDB(s, newEntryId);
-  LoadEntryIntoEditor(e, newText);
+  LoadEntryIntoEditor(&s->doc_arena, e, newText);
   StringClear(&newText);
 }
 

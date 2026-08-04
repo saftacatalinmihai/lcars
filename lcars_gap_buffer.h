@@ -12,8 +12,7 @@ static void GapDeleteForward(GapBuffer *gap);
 static void ReconstructText(Arena *arena, GapBuffer *gap, String *text,
                             int *textLen);
 static bool DeleteSelection(GapBuffer *gap, Selection *sel);
-static void StartTextSelection(GapBuffer *gap, Selection *sel,
-                               bool shiftDown);
+static void StartTextSelection(GapBuffer *gap, Selection *sel, bool shiftDown);
 static void EndTextSelection(GapBuffer *gap, Selection *sel, bool shiftDown);
 
 #ifdef LCARS_IMPLEMENTATION
@@ -111,18 +110,31 @@ static void GapDeleteForward(GapBuffer *gap) {
   }
 }
 
+// Flattens the gap buffer into gap->text and points *text at it. Callers run
+// this after every edit, so it must not allocate on the common path: the
+// flatten buffer is grown geometrically and then reused in place, which is
+// why *text is only ever a view into gap->text and must not be held across
+// later edits (nothing does — Element.text is re-read every frame).
 static void ReconstructText(Arena *arena, GapBuffer *gap, String *text,
                             int *textLen) {
   int beforeLen = gap->gapStart;
   int afterLen = gap->capacity - gap->gapEnd;
   int totalLen = beforeLen + afterLen;
 
-  char *newData = arena_alloc(arena, totalLen + 1);
+  if (!gap->text || totalLen + 1 > gap->textCapacity) {
+    int newCapacity = gap->textCapacity > 0 ? gap->textCapacity
+                                            : GAP_BUFFER_MIN_GROWN_CAPACITY;
+    while (newCapacity < totalLen + 1) {
+      newCapacity *= 2;
+    }
+    gap->text = arena_alloc(arena, newCapacity);
+    gap->textCapacity = newCapacity;
+  }
 
-  memcpy(newData, gap->buffer, beforeLen);
-  memcpy(newData + beforeLen, gap->buffer + gap->gapEnd, afterLen);
-  newData[totalLen] = '\0';
-  text->data = newData;
+  memcpy(gap->text, gap->buffer, beforeLen);
+  memcpy(gap->text + beforeLen, gap->buffer + gap->gapEnd, afterLen);
+  gap->text[totalLen] = '\0';
+  text->data = gap->text;
   text->len = totalLen;
   text->is_static = false;
   *textLen = totalLen;
@@ -142,8 +154,7 @@ static bool DeleteSelection(GapBuffer *gap, Selection *sel) {
   return false;
 }
 
-static void StartTextSelection(GapBuffer *gap, Selection *sel,
-                               bool shiftDown) {
+static void StartTextSelection(GapBuffer *gap, Selection *sel, bool shiftDown) {
   if (shiftDown) {
     if (sel->start == -1) {
       sel->start = gap->gapStart;
@@ -155,8 +166,7 @@ static void StartTextSelection(GapBuffer *gap, Selection *sel,
   }
 }
 
-static void EndTextSelection(GapBuffer *gap, Selection *sel,
-                             bool shiftDown) {
+static void EndTextSelection(GapBuffer *gap, Selection *sel, bool shiftDown) {
   if (shiftDown) {
     sel->end = gap->gapStart;
     sel->length = sel->end - sel->start;
