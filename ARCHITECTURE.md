@@ -47,7 +47,9 @@ Everything is a single-header library: declarations always visible, bodies under
 | `lcars_text.h` | Glyph decoding, line wrapping, mouse→char hit-testing. Shared by input and render so they can't diverge |
 | `lcars_ui.h` | Geometry + layout helpers (`ComputeScrollbarLayout`, `ComputeEntryListLayout`, `DrawElbow`, bounding boxes) |
 | `lcars_db.h` | SQLite layer: schema init, entry CRUD (prepared statements), kind/entry-list caches, debounced content saves |
-| `lcars_hypermedia.h` | Parses `<lcars>` documents (table-driven tag/color/action mapping), loads them from file/HTTP via libcurl |
+| `lcars_net.h` | Blocking libcurl HTTP client (`NetHttpRequest`), shared by document loading and hypermedia controls |
+| `lcars_hypermedia.h` | Parses `<lcars>` documents (table-driven tag/color/action/control mapping), loads them from file/HTTP or straight from a response body |
+| `lcars_hypermedia_controls.h` | The `lc-*` controls: collects request fields, serves local `/entries` routes in-process, issues remote requests, applies the response swap |
 | `lcars_http.h` | Threaded HTTP API server (raw sockets, Basic auth, tiny JSON helpers). Per-connection on-stack arena |
 | `liblcars.h` | The app core: `Init`/`Reload`/`Update`/`UpdateDrawFrame`, input handling, element constructors (`make_*`), drawing, voice input plumbing |
 | `lcars.c` | Host process: CLI args, window creation, hot-reload loop, voice init, `--http-only` mode. `#include`s the two host-only `.c` files at the bottom |
@@ -73,7 +75,14 @@ Everything is a single-header library: declarations always visible, bodies under
 - **Editor**: gap buffer per text-editor element; `ReconstructText` materializes
   `Element.text` for rendering. Edits mark `contentDirty` and save to the DB after
   1s idle (`CONTENT_SAVE_DEBOUNCE_SECONDS`); switching entries or exiting flushes
-  immediately (`FlushPendingSaves`).
+  immediately (`FlushPendingSaves`). A plain `<lcars-text-editor>` only persists
+  if the document said `bind="log"` — otherwise it is typed input owned by the
+  document (a URL bar, a form field), and a control has to store it explicitly.
+- **Document generation**: `State.documentGeneration` is bumped by every document
+  load, and `State.currentDocument` remembers the source so a control can ask for
+  a reload. Loading throws away `doc_arena`, so anything holding an `Element *`
+  across a call that might load (`UpdateElement`, `Update`, `FireHyperControl`)
+  compares the generation before and after and bails out if it changed.
 
 ## Persistence
 
@@ -124,9 +133,42 @@ implemented), `src` (sphere texture), `id` (lookup key), `href` (navigation targ
 becomes the element label/content. `action="load_hypermedia"` follows `href`, or
 falls back to the text typed in the element with `id="url_input"` (the URL bar).
 
+### Hypermedia controls (`lc-*`)
+
 Navigation = "the browser": GO button / href buttons load a new document over the
-running State. This is the long-term direction (see TODO.md): LCARS as a hypermedia
-client, entries editable as documents.
+running State. **Controls** are the other verbs — the HTMX/DataStar idea without a
+scripting language. Any element can declare a request, where the reply goes and
+what makes it fire:
+
+| Attribute | Meaning |
+|---|---|
+| `lc-get` / `lc-post` / `lc-put` / `lc-delete` | The request; the attribute picks the method |
+| `lc-target` | Element id a text/append swap writes into (a leading `#` is tolerated) |
+| `lc-swap` | `none` / `text` / `append` / `document` / `reload`. Default: `text` with a target, else `document` for GET, else `none` |
+| `lc-trigger` | `click` (default) or `load` (fires once when the document finishes parsing) |
+| `lc-vals` | Literal fields, `name=value,name=value` (flat, not JSON — so no commas or `=` inside a value) |
+| `lc-include` | Ids of elements whose text becomes a field; **the id is the field name** |
+
+The URL decides the transport:
+
+- `/...` — served in-process against `lcars.db`, no socket involved. Routes:
+  `POST /entries` (fields `kind`, `title`, `content`), `GET /entries/<id>` (answers
+  with the content as plain text), `PUT /entries/<id>` (fields `content` and/or
+  `title`), `DELETE /entries/<id>` (soft delete). `<id>` may be the literal
+  `selected`, meaning whatever entry the `<lcars-entry-list>` is showing. Writes
+  invalidate the entry-list caches and resync any list displaying that entry.
+- `http(s)://...` — a real request through `lcars_net.h`, fields sent as a flat
+  JSON object. That is the same shape `lcars_http.h`'s `POST /entries` parses, so
+  a document works against this app or against a remote LCARS server unchanged.
+  (No auth support yet — see TODO.md.)
+- `file://...` / anything with `.html` — GET only; the local-document case
+  `action="load_hypermedia"` + `href` has always covered, which makes `lc-get` a
+  superset of the old GET-style link.
+
+Requests are blocking and run on the UI thread, exactly as document loading always
+has. `controls.html` is the worked example (form-style create, load/save/delete of
+the selected entry, a load-triggered fetch). This is the long-term direction (see
+TODO.md): LCARS as a hypermedia client, entries editable as documents.
 
 ## Keyboard & mouse
 

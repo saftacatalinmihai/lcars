@@ -1,0 +1,69 @@
+<lcars>
+  <!-- Hypermedia controls demo. Every button below is declarative: no
+       action="..." handler in C, just an lc-* request and a swap.
+       Load it from the URL bar with file://controls.html, or from the
+       DEMO DOC page. -->
+
+  <!-- URL bar. GO still uses the built-in action, because it reads its
+       target out of another element's text - something a control has no
+       syntax for. -->
+  <lcars-text-editor id="url_input" x="210" y="10" w="500" h="32" size="32">file://controls.html</lcars-text-editor>
+  <lcars-button x="690" y="10" w="90" h="62" color="yellow" action="load_hypermedia">GO</lcars-button>
+
+  <!-- Frame -->
+  <lcars-rectangle x="0" y="4" w="200" h="96" color="purple"></lcars-rectangle>
+  <lcars-elbow x="0" y="104" w="200" h="40" color="blue" orientation="3"></lcars-elbow>
+  <lcars-text x="800" y="4" size="48" color="yellow">HYPERMEDIA CONTROLS</lcars-text>
+  <lcars-elbow x="0" y="210" w="200" h="40" color="red" orientation="0">03-975883</lcars-elbow>
+  <lcars-rectangle x="0" y="316" w="200" h="200" color="red"></lcars-rectangle>
+  <lcars-rectangle x="0" y="522" w="200" h="60" color="orange">05-423512</lcars-rectangle>
+  <lcars-rectangle x="0" y="588" w="200" h="250" color="orange">06-572983</lcars-rectangle>
+  <lcars-rectangle x="606" y="184" w="40" h="20" color="orange"></lcars-rectangle>
+  <lcars-rectangle x="652" y="184" w="140" h="20" color="purple"></lcars-rectangle>
+  <lcars-rectangle x="798" y="184" w="400" h="20" color="purple"></lcars-rectangle>
+  <lcars-rectangle x="1204" y="184" w="40" h="20" color="red"></lcars-rectangle>
+
+  <!-- Navigation. lc-get on a document URL is the GET-style link that
+       action="load_hypermedia" + href used to be: no lc-target, so the
+       response swaps in as the whole document. -->
+  <lcars-button x="804" y="60" w="210" h="50" color="blue" lc-get="file://main.html">MAIN</lcars-button>
+  <lcars-button x="1024" y="60" w="210" h="50" color="blue" lc-get="file://document.html">DEMO DOC</lcars-button>
+  <lcars-button x="1244" y="60" w="210" h="50" color="orange" action="debug">(LC+d)ebug</lcars-button>
+
+  <!-- Form. An editor's id is the field name: lc-include="title content"
+       sends {"title": ..., "content": ...}. Neither editor is bind="log",
+       so what gets typed here is the document's, not the journal's, until a
+       control says otherwise. -->
+  <lcars-text x="240" y="272" size="20" color="yellow">TITLE</lcars-text>
+  <lcars-text-editor id="title" x="360" y="264" w="480" h="34" size="32">Away Team Report</lcars-text-editor>
+  <lcars-text x="240" y="316" size="20" color="yellow">CONTENT</lcars-text>
+
+  <!-- lc-trigger="load" fires once when this document finishes parsing:
+       the editor asks for the selected entry and fills itself in. -->
+  <lcars-text-editor id="content" x="360" y="310" w="480" h="120" size="20"
+                     lc-get="/entries/selected" lc-target="content" lc-trigger="load">...</lcars-text-editor>
+
+  <!-- POST /entries creates a row, exactly like the HTTP API's POST
+       /entries does. lc-swap="reload" re-loads this document afterwards, so
+       the form resets and the list below shows the new entry. -->
+  <lcars-button x="880" y="264" w="240" h="50" color="purple"
+                lc-post="/entries" lc-vals="kind=architect_log"
+                lc-include="title content" lc-swap="reload">CREATE ENTRY</lcars-button>
+
+  <!-- GET /entries/<id> answers with the entry's content as plain text;
+       lc-target sends it into the editor (the default swap for a target). -->
+  <lcars-button x="880" y="324" w="240" h="50" color="blue"
+                lc-get="/entries/selected" lc-target="content">LOAD SELECTED</lcars-button>
+
+  <!-- PUT writes the editor's text back to the selected entry. -->
+  <lcars-button x="880" y="384" w="240" h="50" color="yellow"
+                lc-put="/entries/selected" lc-include="content">SAVE SELECTED</lcars-button>
+
+  <!-- DELETE soft-deletes it; the list moves to the newest remaining entry
+       on its own. -->
+  <lcars-button x="1140" y="384" w="240" h="50" color="red"
+                lc-delete="/entries/selected">DELETE SELECTED</lcars-button>
+
+  <!-- The entry list is what "selected" refers to above. -->
+  <lcars-entry-list x="240" y="470" w="950" h="370" color="purple"></lcars-entry-list>
+</lcars>

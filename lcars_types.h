@@ -78,6 +78,82 @@ typedef enum ButtonAction {
   ACTION_LOAD_HYPERMEDIA,
 } ButtonAction;
 
+// ---------------------------------------------------------------------------
+// Hypermedia controls — the lc-* document attributes
+// ---------------------------------------------------------------------------
+// A "control" is what turns a static element into one that issues a request
+// and does something with the reply: the HTMX/DataStar idea, minus the
+// scripting. See lcars_hypermedia_controls.h for the dispatch side and
+// ParseHyperControl() in lcars_hypermedia.h for the parse side.
+
+// Which request the control issues, taken from *which* attribute carried the
+// URL (lc-get/lc-post/lc-put/lc-delete). NONE means the element has no
+// control at all, which is also why Element.control is NULL in that case -
+// the two must never disagree.
+typedef enum HyperMethod {
+  HYPER_METHOD_NONE = 0,
+  HYPER_METHOD_GET,
+  HYPER_METHOD_POST,
+  HYPER_METHOD_PUT,
+  HYPER_METHOD_DELETE,
+  HYPER_METHOD_TOTAL,
+} HyperMethod;
+
+// What to do with the response body (lc-swap). DEFAULT is not a swap: it
+// means the document didn't say, and ResolveHyperSwap() picks one from the
+// method and whether an lc-target was given.
+typedef enum HyperSwap {
+  HYPER_SWAP_DEFAULT = 0,
+  HYPER_SWAP_NONE,     // discard the body (a notification still shows)
+  HYPER_SWAP_TEXT,     // replace the target element's text
+  HYPER_SWAP_APPEND,   // append to the target element's text
+  HYPER_SWAP_DOCUMENT, // parse the body as a hypermedia document
+  HYPER_SWAP_RELOAD,   // re-load the document that is currently displayed
+  HYPER_SWAP_TOTAL,
+} HyperSwap;
+
+// What makes the control fire (lc-trigger). LOAD fires once, right after the
+// document that declares it finishes parsing.
+typedef enum HyperTrigger {
+  HYPER_TRIGGER_CLICK = 0,
+  HYPER_TRIGGER_LOAD,
+  HYPER_TRIGGER_TOTAL,
+} HyperTrigger;
+
+// Upper bound on the name=value pairs one request can carry (lc-vals plus
+// lc-include). Requests are built into a fixed stack array of this size, so
+// a document asking for more gets the extras dropped with a warning rather
+// than an overrun - document content is runtime input, not a programmer
+// error.
+#define MAX_HYPER_FIELDS 16
+
+// One name=value pair of a request body. Both halves live in scratch_arena:
+// fields are collected at dispatch time and never outlive the frame.
+typedef struct HyperField {
+  String name;
+  String value;
+} HyperField;
+
+// The parsed lc-* attributes of one element. Allocated on demand into
+// doc_arena by ParseHyperControl() and referenced by pointer from Element,
+// for the same reason as EntryListState/SphereState: most elements have no
+// control, and there are MAX_ELEMENTS of them.
+//
+// Every String here points into doc_arena, so a control is only valid until
+// the next document load - see the snapshot comment in FireHyperControl().
+typedef struct HyperControl {
+  HyperMethod method;
+  HyperSwap swap;
+  HyperTrigger trigger;
+  // Where the request goes: a path starting with '/' is handled in-process
+  // against lcars.db (this app is its own origin), http(s):// goes out over
+  // the network.
+  String url;
+  String target;  // id of the element a TEXT/APPEND swap writes into
+  String vals;    // literal "name=value,name=value" pairs
+  String include; // ids of elements whose text becomes a field
+} HyperControl;
+
 typedef struct KindList {
   String kinds[MAX_KINDS];
   int count;
@@ -233,6 +309,9 @@ typedef struct Element {
   // HandleElementClick() in liblcars.h.
   String href;
   ButtonAction on_click;
+  // Only non-NULL if the document gave this element an lc-get/lc-post/
+  // lc-put/lc-delete attribute — see HyperControl.
+  HyperControl *control;
   Vector2 position;
   Vector3 position3;
   float width, height;
@@ -254,6 +333,15 @@ typedef struct Element {
   float cursorY;
   int snapToCursor;
   GapBuffer gap;
+
+  // ELEM_TEXT_EDITOR only: whether this editor's contents are the default
+  // log entry, i.e. whether the debounced save writes them to the DB at all
+  // (see FlushEntryContent in lcars_db.h). Opt-in via bind="log", because
+  // the other thing documents use editors for is typed input - a URL bar, a
+  // form field - and saving those over the newest journal entry is exactly
+  // what used to happen. An entry list carries its own binding through
+  // EntryListState.selectedEntryId and ignores this.
+  bool bindsToLog;
 
   // Text editor state fields
   bool isFocused;
@@ -304,6 +392,19 @@ typedef struct State {
   Arena doc_arena;
   Arena scratch_arena;
   Rectangle selection_rec;
+
+  // Source (file://..., http://..., a path) of the document currently
+  // displayed, as handed to LoadHypermediaDocument(). A fixed array rather
+  // than a String because every load resets doc_arena, which is where any
+  // String would live: this has to survive the reset to be re-loadable
+  // afterwards (HYPER_SWAP_RELOAD). Empty until the first load.
+  char currentDocument[512];
+  // Bumped by every document load. Anything holding an Element * (or an
+  // index into s->elements) across a call that can load a document compares
+  // this before and after and bails out if it changed - the array, and
+  // everything in doc_arena the old elements pointed at, is gone by then.
+  // See UpdateElement()/Update() in liblcars.h.
+  int documentGeneration;
 } State;
 
 #endif // LCARS_TYPES_H

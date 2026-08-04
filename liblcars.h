@@ -38,6 +38,10 @@ void Reload(State *s, bool reset);
 void Update(State *s);
 void UpdateDrawFrame(State *s);
 void LoadHypermediaDocument(State *s, String filename);
+// Loads a document that is already in memory (a hypermedia control's
+// response body) instead of fetching one. See lcars_hypermedia.h.
+void LoadHypermediaDocumentFromString(State *s, String content,
+                                      const char *source);
 // Flushes any editor content debounced-but-not-yet-saved to the DB. Content
 // edits are saved on an idle timeout, not immediately (see
 // CONTENT_SAVE_DEBOUNCE_SECONDS) — callers must call this before the
@@ -58,6 +62,11 @@ static inline bool IsDocumentURL(const char *url);
 static void ToggleVoiceRecording(State *s);
 static void ClampScrollY(Element *e);
 static void NavigateEntryList(State *s, Element *e, int direction);
+// Defined in lcars_hypermedia.h, which is included at the very bottom of
+// this file (it needs every make_* constructor). Declared up here because
+// the control dispatcher, which is included much earlier, fetches
+// documents through it.
+static String LoadDocumentContent(String source, State *s);
 #endif // LCARS_IMPLEMENTATION
 
 // -----------------------------------------------------------------------------
@@ -337,6 +346,12 @@ static void ToggleVoiceRecording(State *s) {
 #include "lcars_gap_buffer.h"
 #include "lcars_text.h"
 #include "lcars_ui.h"
+// Included here, not at the end next to lcars_hypermedia.h, because
+// HandleElementClick() below dispatches controls: everything the dispatcher
+// needs (the DB layer, the editor helpers, the HTTP client) is in scope by
+// this point, while the document parser it hands work back to is declared at
+// the top of this file.
+#include "lcars_hypermedia_controls.h"
 
 static inline float ClampScrollOffset(float scrollY, float contentHeight,
                                       float viewportHeight) {
@@ -543,6 +558,8 @@ static void HandleElementClick(State *s, Element *e) {
   assert(e != NULL);
   assert(StringValid(e->href));
 
+  int generation = s->documentGeneration;
+
   switch (e->on_click) {
   case ACTION_DEBUG:
     s->debug = !s->debug;
@@ -580,6 +597,17 @@ static void HandleElementClick(State *s, Element *e) {
   }
   default:
     break;
+  }
+
+  // Built-in action first, hypermedia control second - but only if `e` still
+  // exists. ACTION_LOAD_HYPERMEDIA above replaces the whole element array,
+  // and `e` then points at whatever the new document put in that slot;
+  // reading a control off it would fire a request the user never clicked.
+  if (s->documentGeneration != generation) {
+    return;
+  }
+  if (e->control != NULL && e->control->trigger == HYPER_TRIGGER_CLICK) {
+    FireHyperControl(s, e);
   }
 }
 
@@ -745,7 +773,15 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
   bool isHovering = IsHoveringElement(s, e);
   if (isHovering && !e->isDragging && !e->isResizing) {
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+      int generation = s->documentGeneration;
       HandleElementClick(s, e);
+      if (s->documentGeneration != generation) {
+        // The click navigated (or a control swapped in a new document):
+        // this element, its per-kind side structs and everything else in
+        // doc_arena are gone. Update() stops the whole element loop for the
+        // same reason - see the generation check there.
+        return;
+      }
     }
   }
 
@@ -1379,8 +1415,16 @@ void Update(State *s) {
   int resizingIdx = -1;
   UpdateDragAndResize(s, mPos, mDelta, &draggingIdx, &resizingIdx);
 
+  int generation = s->documentGeneration;
   for (int i = 0; i < s->numElements; i++) {
     UpdateElement(s, i, mPos, draggingIdx, resizingIdx);
+    if (s->documentGeneration != generation) {
+      // A click loaded a different document mid-loop. `i` now indexes a
+      // completely different set of elements, and since the mouse button is
+      // still down for the rest of this frame, carrying on would deliver the
+      // same click to whatever the new document placed under the cursor.
+      break;
+    }
   }
 }
 
