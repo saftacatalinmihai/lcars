@@ -1,25 +1,18 @@
 #ifndef LCARS_HYPERMEDIA_H
 #define LCARS_HYPERMEDIA_H
 
+#include "lcars_net.h"
 #include "lcars_types.h"
 #include "raylib.h"
 
 #include <ctype.h>
-#include <curl/curl.h>
-
-struct CurlMemoryBuffer {
-  char *data;
-  size_t size;
-  Arena *arena;
-};
 
 static bool GetAttributeValue(const char *tag, const char *attr, char *dest,
                               int max_len);
 static ElemKind TagNameToElemKind(const char *tagName);
 static Color ParseColor(String colorStr);
 static ButtonAction ParseAction(String actionStr);
-static size_t CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb,
-                                      void *userp);
+static HyperControl *ParseHyperControl(Arena *doc_arena, const char *tag);
 static String LoadFromHTTP(String source, State *s);
 static String LoadFromFile(String source, State *s);
 static String LoadDocumentContent(String source, State *s);
@@ -27,6 +20,8 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
                            const char *p, const char *tag_end,
                            Element *outElement);
 void LoadHypermediaDocument(State *s, String source);
+void LoadHypermediaDocumentFromString(State *s, String content,
+                                      const char *source);
 
 #ifdef LCARS_IMPLEMENTATION
 
@@ -168,28 +163,88 @@ static ButtonAction ParseAction(String actionStr) {
   return ACTION_NONE;
 }
 
-static size_t CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb,
-                                      void *userp) {
-  size_t realsize = size * nmemb;
-  struct CurlMemoryBuffer *mem = (struct CurlMemoryBuffer *)userp;
-  assert(mem != NULL);
-  assert(mem->arena != NULL);
-  // LoadFromHTTP() seeds this with a 1-byte allocation before handing the
-  // buffer to curl, so it is never NULL on the first callback either.
-  assert(mem->data != NULL);
-  assert(contents != NULL || realsize == 0);
+// Which attribute carries the URL is also what picks the method - there is
+// no separate lc-method attribute, exactly like HTMX's hx-get/hx-post.
+static const struct {
+  const char *attr;
+  HyperMethod method;
+} HYPER_METHOD_TABLE[] = {
+    {"lc-get", HYPER_METHOD_GET},
+    {"lc-post", HYPER_METHOD_POST},
+    {"lc-put", HYPER_METHOD_PUT},
+    {"lc-delete", HYPER_METHOD_DELETE},
+};
 
-  size_t oldSize = mem->size;
-  (void)oldSize; // read only by the postcondition assert below
-  char *ptr =
-      arena_realloc(mem->arena, mem->data, mem->size, mem->size + realsize + 1);
-  mem->data = ptr;
-  memcpy(&(mem->data[mem->size]), contents, realsize);
-  mem->size += realsize;
-  mem->data[mem->size] = 0;
+// Reads the lc-* attributes off one tag. Returns NULL - and allocates
+// nothing - for the overwhelmingly common case of an element that declares
+// no request, which is why Element.control is a pointer: see HyperControl in
+// lcars_types.h for the attribute reference.
+static HyperControl *ParseHyperControl(Arena *doc_arena, const char *tag) {
+  assert(doc_arena != NULL);
+  assert(tag != NULL);
 
-  assert(mem->size == oldSize + realsize);
-  return realsize;
+  // Wider than ParseElementTag's own scratch buffer: lc-vals holds a whole
+  // field list, not a single number or color name.
+  char val[512];
+
+  HyperMethod method = HYPER_METHOD_NONE;
+  String url = StringStatic("");
+  for (size_t i = 0;
+      i < sizeof(HYPER_METHOD_TABLE) / sizeof(HYPER_METHOD_TABLE[0]); i++) {
+    if (!GetAttributeValue(tag, HYPER_METHOD_TABLE[i].attr, val, sizeof(val))) {
+      continue;
+    }
+    if (method != HYPER_METHOD_NONE) {
+      // Two verbs on one element has no meaning ("which one fires?"), and
+      // guessing would be worse than picking the first deterministically.
+      TraceLog(LOG_WARNING,
+               "Element declares several lc-* methods; ignoring %s",
+               HYPER_METHOD_TABLE[i].attr);
+      continue;
+    }
+    method = HYPER_METHOD_TABLE[i].method;
+    url = StringInit(doc_arena, val);
+  }
+  if (method == HYPER_METHOD_NONE) {
+    return NULL;
+  }
+
+  HyperControl *ctl = arena_alloc(doc_arena, sizeof(HyperControl));
+  ctl->method = method;
+  ctl->url = url;
+  ctl->target = StringStatic("");
+  ctl->vals = StringStatic("");
+  ctl->include = StringStatic("");
+  ctl->swap = HYPER_SWAP_DEFAULT;
+  ctl->trigger = HYPER_TRIGGER_CLICK;
+
+  if (GetAttributeValue(tag, "lc-target", val, sizeof(val))) {
+    // '#id' is what an HTMX user writes; ids in this format carry no sigil.
+    const char *id = (val[0] == '#') ? val + 1 : val;
+    ctl->target = StringInit(doc_arena, id);
+  }
+  if (GetAttributeValue(tag, "lc-swap", val, sizeof(val))) {
+    ctl->swap = ParseHyperSwap(StringStatic(val));
+  }
+  if (GetAttributeValue(tag, "lc-trigger", val, sizeof(val))) {
+    ctl->trigger = ParseHyperTrigger(StringStatic(val));
+  }
+  if (GetAttributeValue(tag, "lc-vals", val, sizeof(val))) {
+    ctl->vals = StringInit(doc_arena, val);
+  }
+  if (GetAttributeValue(tag, "lc-include", val, sizeof(val))) {
+    ctl->include = StringInit(doc_arena, val);
+  }
+
+  // A control that reached this point is dispatchable: a real method, and
+  // every String either an arena copy or the empty literal.
+  assert(ctl->method > HYPER_METHOD_NONE && ctl->method < HYPER_METHOD_TOTAL);
+  assert(ctl->swap >= HYPER_SWAP_DEFAULT && ctl->swap < HYPER_SWAP_TOTAL);
+  assert(ctl->trigger >= HYPER_TRIGGER_CLICK &&
+         ctl->trigger < HYPER_TRIGGER_TOTAL);
+  assert(StringValid(ctl->url) && StringValid(ctl->target) &&
+         StringValid(ctl->vals) && StringValid(ctl->include));
+  return ctl;
 }
 
 static String LoadFromHTTP(String source, State *s) {
@@ -197,39 +252,23 @@ static String LoadFromHTTP(String source, State *s) {
   assert(StringValid(source));
   assert(source.data != NULL); // handed to curl as CURLOPT_URL
 
-  CURL *curl = curl_easy_init();
-  if (!curl) {
-    UpdateNotification(s, StringStatic("CURL INIT FAILED"));
-    return StringInit(&s->scratch_arena, NULL);
-  }
-
-  struct CurlMemoryBuffer chunk;
-  chunk.arena = &s->scratch_arena;
-  chunk.data = arena_alloc(chunk.arena, 1);
-  chunk.size = 0;
-  chunk.data[0] = '\0';
-
-  curl_easy_setopt(curl, CURLOPT_URL, source.data);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWriteMemoryCallback);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
-  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-  curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-
-  CURLcode res = curl_easy_perform(curl);
-  curl_easy_cleanup(curl);
-
-  if (res != CURLE_OK) {
-    printf("CURL download failed: %s\n", curl_easy_strerror(res));
+  String body;
+  long status = 0;
+  bool ok = NetHttpRequest(&s->scratch_arena, "GET", source.data,
+                           StringStatic(""), NULL, &body, &status);
+  // NetHttpRequest only reports transport failures, so the status check is
+  // what keeps the old CURLOPT_FAILONERROR behavior: an error page is not a
+  // document, and parsing one would silently replace the UI with nothing.
+  if (!ok || status >= 400) {
+    if (ok) {
+      printf("Document fetch failed: HTTP %ld for %s\n", status, source.data);
+    }
     UpdateNotification(s, StringStatic("DOWNLOAD FAILED"));
     return StringInit(&s->scratch_arena, NULL);
   }
 
-  String ret;
-  ret.data = chunk.data;
-  ret.len = (int)chunk.size;
-  ret.is_static = false;
-  return ret;
+  assert(StringValid(body));
+  return body;
 }
 
 static String LoadFromFile(String source, State *s) {
@@ -359,6 +398,22 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
   if (GetAttributeValue(tag, "href", val, sizeof(val))) {
     href = StringInit(&s->doc_arena, val);
   }
+  // bind="log" opts a plain <lcars-text-editor> into being the default log
+  // entry's editor, i.e. into having its contents saved to the DB. Without
+  // it an editor is just typed text the document owns - see
+  // Element.bindsToLog.
+  bool bindsToLog = false;
+  if (GetAttributeValue(tag, "bind", val, sizeof(val))) {
+    if (strcmp(val, "log") == 0) {
+      bindsToLog = (kind == ELEM_TEXT_EDITOR);
+      if (!bindsToLog) {
+        TraceLog(LOG_WARNING,
+                 "bind=\"log\" only applies to <lcars-text-editor>, ignoring");
+      }
+    } else {
+      TraceLog(LOG_WARNING, "Unknown bind value '%s', ignoring", val);
+    }
+  }
 
   char *innerText = NULL;
   bool self_closing = (tag_end > p && *(tag_end - 1) == '/');
@@ -382,6 +437,8 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
   Element e = {0};
   e.id = id;
   e.href = href;
+  e.control = ParseHyperControl(&s->doc_arena, tag);
+  e.bindsToLog = bindsToLog;
   e.position = (Vector2){x, y};
   e.width = w_val;
   e.height = h_val;
@@ -422,28 +479,25 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
   assert(e.kind != ELEM_SPHERE || e.sphere != NULL);
   assert((e.kind != ELEM_TEXT_EDITOR && e.kind != ELEM_ENTRY_LIST) ||
          GapBufferValid(&e.gap));
+  // Either no control at all, or one with a real method - the dispatcher
+  // switches on Element.control being non-NULL and never re-checks.
+  assert(e.control == NULL || (e.control->method > HYPER_METHOD_NONE &&
+                               e.control->method < HYPER_METHOD_TOTAL));
 
   *outElement = e;
   return true;
 }
 
-void LoadHypermediaDocument(State *s, String source) {
+// Parses `buf` into s->elements. The caller owns the surrounding lifecycle
+// (resetting doc_arena, zeroing numElements, bumping the generation), which
+// is what lets a document come either from a source URL or straight from a
+// response body - see LoadHypermediaDocument /
+// LoadHypermediaDocumentFromString below.
+static void ParseHypermediaElements(State *s, String buf) {
   assert(s != NULL);
-  assert(StringValid(source));
-  assert(arena_valid(&s->doc_arena) && arena_valid(&s->scratch_arena));
-
-  // Reset the document arena to reclaim all memory from the previous document
-  arena_reset(&s->doc_arena);
-  s->numElements = 0;
-  // Everything the old elements pointed at (text, ids, per-kind state) just
-  // became reclaimable, so nothing may still be referring to them.
-  assert(s->doc_arena.curr_offset == 0);
-
-  String buf = LoadDocumentContent(source, s);
-  if (!buf.data) {
-    return;
-  }
   assert(StringValid(buf));
+  assert(buf.data != NULL);
+  assert(s->numElements == 0); // the caller cleared the previous document
 
   const char *p = buf.data;
   while (*p) {
@@ -491,7 +545,43 @@ void LoadHypermediaDocument(State *s, String source) {
     p = tag_end + 1;
   }
 
-  StringClear(&buf);
+  assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
+}
+
+// Replaces the running document with one already in memory (a response body
+// swapped in by a hypermedia control, HYPER_SWAP_DOCUMENT). `source` records
+// what to call the new document for a later HYPER_SWAP_RELOAD, or NULL to
+// keep whatever was displayed before as the reloadable source - a response
+// body has no URL of its own unless the request that produced it was a GET.
+//
+// `content` may live in scratch_arena; it is fully parsed before that arena
+// is reset on the way out, but callers must not touch it afterwards.
+void LoadHypermediaDocumentFromString(State *s, String content,
+                                      const char *source) {
+  assert(s != NULL);
+  assert(StringValid(content));
+  assert(arena_valid(&s->doc_arena) && arena_valid(&s->scratch_arena));
+
+  // Reset the document arena to reclaim all memory from the previous document
+  arena_reset(&s->doc_arena);
+  s->numElements = 0;
+  // Everything the old elements pointed at (text, ids, per-kind state, their
+  // controls) just became reclaimable, so nothing may still be referring to
+  // them.
+  assert(s->doc_arena.curr_offset == 0);
+
+  if (source != NULL) {
+    snprintf(s->currentDocument, sizeof(s->currentDocument), "%s", source);
+  }
+
+  if (content.data != NULL) {
+    ParseHypermediaElements(s, content);
+  }
+
+  // Bumped before anything can run app code again (load triggers below, or
+  // the caller's element loop): everything that held an Element * across
+  // this call detects the swap by comparing generations.
+  s->documentGeneration++;
   UpdateNotification(s, StringStatic("HYPERMEDIA LOADED"));
 
   // Reset scratch arena immediately after loading is complete
@@ -502,6 +592,52 @@ void LoadHypermediaDocument(State *s, String source) {
   // doc_arena on the way past.
   assert(s->scratch_arena.curr_offset == 0);
   assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
+
+  // Runs last, on a fully built document with a clean scratch arena - a
+  // load-triggered control is a request made *by* this document.
+  FireHyperLoadTriggers(s);
+}
+
+void LoadHypermediaDocument(State *s, String source) {
+  assert(s != NULL);
+  assert(StringValid(source));
+  assert(arena_valid(&s->doc_arena) && arena_valid(&s->scratch_arena));
+
+  // `source` is usually an element's href or the URL bar's text, both of
+  // which live in the doc_arena that loading is about to reset - copy it out
+  // before that happens rather than fetching through freed (if not yet
+  // overwritten) memory.
+  char sourceBuf[sizeof(s->currentDocument)];
+  snprintf(sourceBuf, sizeof(sourceBuf), "%s", source.data ? source.data : "");
+
+  arena_reset(&s->doc_arena);
+  s->numElements = 0;
+  assert(s->doc_arena.curr_offset == 0);
+
+  String buf = LoadDocumentContent(StringStatic(sourceBuf), s);
+  if (!buf.data) {
+    // The fetch failed and said so (notification + stderr). The old document
+    // is already gone, but leaving numElements at 0 is the honest outcome -
+    // and the generation still has to move, because the elements the caller
+    // was iterating no longer exist.
+    s->documentGeneration++;
+    return;
+  }
+  assert(StringValid(buf));
+
+  ParseHypermediaElements(s, buf);
+  StringClear(&buf);
+
+  snprintf(s->currentDocument, sizeof(s->currentDocument), "%s", sourceBuf);
+  s->documentGeneration++;
+  UpdateNotification(s, StringStatic("HYPERMEDIA LOADED"));
+
+  arena_reset(&s->scratch_arena);
+
+  assert(s->scratch_arena.curr_offset == 0);
+  assert(s->numElements >= 0 && s->numElements <= MAX_ELEMENTS);
+
+  FireHyperLoadTriggers(s);
 }
 
 #endif // LCARS_IMPLEMENTATION

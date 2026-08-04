@@ -13,11 +13,28 @@ unimplemented/unreachable paths, not a marker for future work.
   underlying `.html` hypermedia document itself (ideally live), not just entry
   content. This is the long-term "LCARS as a hypermedia client" direction
   described in `ARCHITECTURE.md`'s Hypermedia documents section.
-- [ ] **Hypermedia controls beyond GET-style navigation.** Today the format only
-  supports navigation (`action="load_hypermedia"` + `href`, or the URL-bar/GO
-  button) — the hypermedia equivalent of a GET link. There's no declarative way
-  for a document to POST/mutate entries (form-style controls), which is the
-  natural next step toward the editor idea above. Inspiration from HTMX, DataStar etc...
+- [ ] **Local `GET /entries` list route.** The in-process control routes cover
+  one entry at a time (`GET/PUT/DELETE /entries/<id>`, `POST /entries`) but
+  there is no way to ask for the list. The interesting version isn't JSON: it
+  is a route that *renders* an `<lcars>` document (a button per entry) so
+  `lc-get="/entries" lc-swap="document"` builds a screen out of the DB —
+  hypermedia all the way down, no C-side list widget required.
+- [ ] **Query-string fields for GET controls.** `lc-vals`/`lc-include` are only
+  sent on POST/PUT/DELETE; a GET carries no body and this format has no syntax
+  for putting the fields in the URL, so a control can't parameterize a GET yet.
+- [ ] **Auth for remote controls.** `lc-post="https://…"` against the deployed
+  API gets a 401: the HTTP API wants Basic auth and a control has no way to
+  supply credentials. Needs somewhere for them to live that isn't the document
+  (an `LCARS_REMOTE_USER`/`PASS` env pair, say) before this is usable against
+  the VPS.
+- [ ] **More triggers than click/load.** `lc-trigger` understands `click` and
+  `load`. `changed`/`keyup` (fire when an editor's text settles) and
+  `every Ns` (polling) are the two that would earn their keep — a
+  live-updating panel is impossible today.
+- [ ] **`lc-vals` can't express a value containing `,` or `=`.** It is a flat
+  `name=value,name=value` list on purpose (a 20-line parser instead of a JSON
+  one), but there is no escaping, so those two characters are unusable in a
+  literal value. `lc-include` has no such limit.
 - [ ] **Decide the fate of elbow orientations 1/2 (top-right/bottom-right
   corners).** `DrawElbow` (`lcars_ui.h`) only ever implemented 0/3;
   `lcars_hypermedia.h`'s orientation parsing rejects 1/2 at parse time and falls
@@ -105,6 +122,32 @@ unimplemented/unreachable paths, not a marker for future work.
 
 ## Done
 
+- [x] **Hypermedia controls beyond GET-style navigation.** The format now has
+  the other verbs: `lc-get`/`lc-post`/`lc-put`/`lc-delete` with `lc-target`,
+  `lc-swap`, `lc-trigger`, `lc-vals` and `lc-include` (HTMX/DataStar-inspired,
+  no scripting language). A path URL is served in-process against `lcars.db`,
+  an `http(s)://` URL goes out over the network as flat JSON matching this
+  app's own HTTP API, and `file://…` documents keep working through `lc-get`.
+  See `lcars_hypermedia_controls.h`, the `Hypermedia controls` section of
+  `ARCHITECTURE.md`, and `controls.html` for a worked example.
+- [x] A plain `<lcars-text-editor>` overwrote the newest default-kind entry
+  with whatever was typed into it, because `FlushEntryContent` routed every
+  non-entry-list editor to `UpdateLogInDB`. That made the URL bar in
+  `main.html` a journal-corrupting input (type a URL, wait 1s, lose the
+  content of the newest `architect_log` entry) and would have made every
+  form field in a document do the same. Persisting is now opt-in per element
+  via `bind="log"`.
+- [x] A click that loaded a new document kept iterating the element array it
+  had just replaced (`Update`/`UpdateElement`/`HandleElementClick`), so the
+  same still-held mouse press could be delivered a second time to whatever
+  the new document put under the cursor — and `UpdateElement`'s own
+  `i < s->numElements` precondition could trip when the new document had
+  fewer elements. All three now stop on a `State.documentGeneration` change.
+- [x] `LoadHypermediaDocument` fetched through its `source` argument *after*
+  resetting `doc_arena` — and `source` is normally an element's `href` or the
+  URL bar's text, i.e. memory that reset just released. It survived only
+  because nothing allocated from that arena in between. The source is copied
+  to the stack before the reset now.
 - [x] Spaces at the start of a line in the text editor were invisible and the
   cursor didn't move (the bytes were really in the gap buffer — deleting them
   worked). `DrawTextBoxedSelectable` inherited raylib's "avoid leading spaces"

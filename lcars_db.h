@@ -16,8 +16,10 @@ static void InitDB(State *s, bool firstInit);
 static inline void GetTodayDateString(char *buf, size_t bufSize);
 static inline int CreateNewEntry(State *s, const char *kind, const char *title,
                                  String content);
+static inline bool EntryExistsInDB(State *s, int id);
 static inline String GetEntryContentFromDB(State *s, int id);
 static inline void UpdateEntryContentInDB(State *s, int id, String content);
+static inline void UpdateEntryTitleInDB(State *s, int id, String title);
 static inline void DeleteEntryFromDB(State *s, int id);
 static KindList GetAllKindsFromDB(State *s);
 static inline void EnsureKindListCache(State *s, Element *e);
@@ -187,6 +189,29 @@ static void InitDB(State *s, bool firstInit) {
   }
 }
 
+// Whether `id` names a live (not soft-deleted) row. Callers that address an
+// entry by id from outside the UI - hypermedia controls, which can be handed
+// any number a document cares to write - need to tell "empty content" apart
+// from "no such entry"; GetEntryContentFromDB answers "" for both.
+static inline bool EntryExistsInDB(State *s, int id) {
+  assert(s != NULL);
+  assert(s->db != NULL);
+
+  sqlite3_stmt *stmt;
+  if (sqlite3_prepare_v2(s->db,
+                         "SELECT 1 FROM entries WHERE id = ?1 AND (deleted IS "
+                         "NULL OR deleted = 0);",
+                         -1, &stmt, NULL) != SQLITE_OK) {
+    fprintf(stderr, "SQL error checking entry %d: %s\n", id,
+            sqlite3_errmsg(s->db));
+    return false;
+  }
+  sqlite3_bind_int(stmt, 1, id);
+  bool exists = (sqlite3_step(stmt) == SQLITE_ROW);
+  sqlite3_finalize(stmt);
+  return exists;
+}
+
 static inline String GetEntryContentFromDB(State *s, int id) {
   assert(s != NULL);
   assert(s->db != NULL);
@@ -236,6 +261,30 @@ static inline void UpdateEntryContentInDB(State *s, int id, String content) {
     return;
   }
   sqlite3_bind_text(stmt, 1, content.data ? content.data : "", -1,
+                    SQLITE_TRANSIENT);
+  sqlite3_bind_int(stmt, 2, id);
+  StepAndFinalize(s, stmt, StringStatic(""));
+}
+
+// Renames an entry. Only reachable from a hypermedia control today
+// (PUT /entries/<id> with a `title` field) - the UI itself has no rename
+// path, and titles are otherwise set once at creation time.
+static inline void UpdateEntryTitleInDB(State *s, int id, String title) {
+  assert(s != NULL);
+  assert(s->db != NULL);
+  assert(StringValid(title));
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(
+      s->db,
+      "UPDATE entries SET title = ?1, last_modified_at_utc = "
+      "strftime('%Y-%m-%d %H:%M:%S', 'now', 'utc') WHERE id = ?2;",
+      -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    UpdateNotification(s, StringStatic("SQL error"));
+    return;
+  }
+  sqlite3_bind_text(stmt, 1, title.data ? title.data : "", -1,
                     SQLITE_TRANSIENT);
   sqlite3_bind_int(stmt, 2, id);
   StepAndFinalize(s, stmt, StringStatic(""));
@@ -527,9 +576,14 @@ static inline void FlushEntryContent(State *s, Element *e) {
     assert(e->entryList != NULL);
     UpdateEntryContentInDB(s, e->entryList->selectedEntryId, e->text);
     InvalidateEntryListCache(e);
-  } else {
+  } else if (e->bindsToLog) {
     UpdateLogInDB(s, e->text);
   }
+  // Anything else - a URL bar, a form field, any editor the document didn't
+  // bind to an entry - is scratch text that belongs to the document, not to
+  // the journal. It still clears the dirty flag: nothing is going to persist
+  // it, so leaving it set would just re-run this every frame. Documents that
+  // want typed text stored say so with a control (lc-put="/entries/...").
   e->contentDirty = false;
 
   assert(!e->contentDirty);
