@@ -16,3 +16,10 @@
 ## Compiler & Tools
 - For file search/grep, prioritize the custom `fff` MCP tools (which hook into `fff-mcp`). Fall back to shell command grep/find only if MCP tools are unavailable.
 - Ensure the code compiles cleanly under the project's warning flags (e.g., `-Wall -Wextra`) after every edit.
+
+## Backlog
+- `TODO.md` is the living backlog of open features, bugs, and refactoring ideas —
+  check it for context before starting open-ended work, and update it (check off
+  finished items, add newly discovered ones) as part of the task, not as an
+  afterthought. It is distinct from `REFACTORING.md`, which is a closed, completed
+  audit kept for history/rationale only.
