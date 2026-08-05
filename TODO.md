@@ -65,26 +65,23 @@ unimplemented/unreachable paths, not a marker for future work.
   drops the extras), but wrong. Now reachable in practice since editor content
   is no longer capped — size the array from the actual line count
   (scratch_arena) instead of a fixed stack array.
-- [ ] **`GET /entries` truncates any entry longer than ~4KB mid-JSON.**
-  `HandleGetEntries` (`lcars_http.h`) formats each row into a 4096-byte stack
-  `row_buf`; `snprintf` truncates, and the response ends up with a row cut off
-  in the middle of a string literal, so the whole payload fails to parse. (The
-  memory-safety half of this is fixed: `row_len` is now clamped to what was
-  actually written, because `snprintf` returns the *would-be* length and the
-  following `memcpy` was reading up to that far past the end of the stack
-  array.) Real fix: build each row straight into the arena-backed response
-  buffer instead of a fixed stack buffer.
-- [ ] **`json_escape` doesn't escape `\b` and `\f`.** (`lcars_http.h`) The
-  measuring pass counts them as two bytes but the writing pass emits the raw
-  control byte, which is invalid inside a JSON string. Over-allocates, so it's
-  memory-safe, but the response can be unparseable for content containing
-  either character.
-- [ ] **A large `Content-Length` aborts the whole API server.**
-  `ReadHTTPRequestBody` (`lcars_http.h`) passes the client-supplied length
-  straight to `arena_alloc` on the connection's 1MB stack arena, and arena OOM
-  is a deliberate `abort()` — so one oversized (or malicious) request takes the
-  process down, UI included. Needs an explicit size cap with a 413 response
-  before it ever reaches the arena.
+- [ ] **An HTTP write doesn't reach the running UI.** The API server has its own
+  SQLite connection and no access to `State`, so creating/editing/deleting an
+  entry over HTTP leaves the UI showing its cached list until something else
+  invalidates it (`EnsureEntryListCache` in `lcars_db.h`). The in-process
+  hypermedia control routes call `Invalidate*Cache` for exactly this reason;
+  the HTTP thread needs an equivalent — a thread-safe "DB changed" flag the
+  frame loop polls.
+- [ ] **The JSON body parser finds keys with `strstr`.** `json_get_string` /
+  `json_get_int` / `json_get_string_arena` (`lcars_http.h`) search for
+  `"key"` anywhere in the body, so an entry whose *content* contains
+  `"title"` can be read as the title field. Fine for the clients this API has
+  (Shortcuts, curl, the app itself); the fix is a real tokenizer, and it should
+  come with the `\uXXXX` decoding those functions also skip.
+- [ ] **No hard delete, on purpose — but nothing prunes either.** Soft-deleted
+  rows accumulate in `lcars.db` forever and there is no route (or UI) to
+  actually remove them. If that ever matters, it wants a deliberate,
+  awkward-to-trigger purge, not a `DELETE ?hard=1`.
 - [ ] **`UpdateNotification` can be handed a dangling stack buffer.**
   `StringDup` returns static Strings by alias rather than copying, so
   `UpdateNotification(s, StringStatic(localBuf))` leaves `s->notification`
@@ -137,6 +134,32 @@ unimplemented/unreachable paths, not a marker for future work.
 
 ## Done
 
+- [x] **The HTTP API can query and edit, not just list and append.**
+  `GET /entries` now filters (`kind`, `q`, `date`, `since`/`until`,
+  `modified_since`/`modified_until`, `done`, `deleted`, `min_id`/`max_id`),
+  sorts (`order`/`dir`), pages (`limit`/`offset`) and can drop entry bodies
+  (`content=0`); `GET /entries/<id>`, `PUT`/`PATCH /entries/<id>` (partial
+  update, `deleted=0` restores) and `DELETE /entries/<id>` (soft) cover a
+  single entry; `GET /kinds`, `GET /stats`, `GET /health` (unauthenticated)
+  and a self-documenting `GET /` round it out. Values are always bound, never
+  interpolated, and an unparseable filter is a 400 instead of being ignored.
+  See the HTTP API section of `ARCHITECTURE.md`.
+- [x] **`GET /entries` truncated any entry longer than ~4KB mid-JSON.** Rows
+  are built straight into an arena-backed growable buffer (`JSONBuf` in
+  `lcars_http.h`) instead of a 4096-byte stack `row_buf` that `snprintf`
+  silently cut in the middle of a string literal.
+- [x] **JSON string escaping missed `\b` and `\f`.** The old measuring/writing
+  two-pass `json_escape` is gone; `jsonbuf_append_json_string` escapes every
+  control byte (`\uXXXX` for the rest) as it streams, so no measuring pass can
+  disagree with the writing pass again.
+- [x] **A large `Content-Length` aborted the whole API server.** Bodies over
+  512KB (`HTTP_MAX_BODY_BYTES`) are refused with 413 before the client-supplied
+  length reaches `arena_alloc` on the connection's 1MB stack arena, where OOM
+  is a deliberate `abort()`. The response side has the matching guard: a
+  response that would outgrow the arena answers 500 "narrow the query" rather
+  than aborting or sending half a document. `send` also passes `MSG_NOSIGNAL`
+  now — a client hanging up mid-response used to be a SIGPIPE that killed the
+  UI process with it.
 - [x] **Edit-mode drag/resize survives a restart.** Moving or resizing an
   element now writes `x`/`y`/`w`/`h` back into the `.html` the document was
   loaded from, half a second after the layout stops changing (and immediately

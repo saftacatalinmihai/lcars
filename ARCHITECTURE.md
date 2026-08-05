@@ -108,13 +108,48 @@ Runs in a background thread next to the UI (or foreground with `--http-only`).
 Port 8080 by default. Basic auth: `--user`/`--password` flags or
 `LCARS_AUTH_USER`/`LCARS_AUTH_PASS` env, falling back to `admin`/`admin`.
 
-- `GET /entries` → all entries as JSON array
-- `POST /entries` → create entry (JSON body: `kind`, `content`, …)
-- `OPTIONS *` → CORS preflight (allows `*`)
-- everything else → 404
+| Route | What it does |
+|---|---|
+| `GET /` | Route index (self-documenting JSON: every route and every filter name) |
+| `GET /health` | `{"status":"ok"}` — **the one unauthenticated route**, so monitoring needs no credentials. It touches nothing but the socket |
+| `GET /entries` | Filtered list (below) as a JSON array |
+| `POST /entries` | Create. JSON body (`kind`, `title`, `content`, `value_int`, `value_float`, `done_bool`) or a plain-text body, which becomes the content |
+| `GET /entries/<id>` | One entry, soft-deleted ones included (a client that named an id wants "deleted", not 404) |
+| `PUT`/`PATCH` `/entries/<id>` | Partial update — only the fields the body mentions. Both verbs behave identically: a `PUT` carrying just `content` must not blank the title. `{"deleted": 0}` restores a soft-deleted entry |
+| `DELETE /entries/<id>` | Soft delete (`deleted = 1`), same as the UI. There is deliberately **no hard-delete route** — this DB is a personal journal, and the PUT above is the undo |
+| `GET /kinds` | Distinct kinds with `count` and newest `last_modified_at_utc` (`?deleted=1` to count deleted rows too) |
+| `GET /stats` | Totals — count, distinct kinds, done, content bytes, oldest/newest. Accepts the same filters as `/entries`, so it is also "how many rows does this query have" |
+| `OPTIONS *` | CORS preflight (allows `*`) |
+| anything else | 404 / 405, as JSON |
 
-Each connection is handled with an on-stack arena; the server opens its own SQLite
-connection (see `lcars_http.h`).
+`GET /entries` (and `/stats`) filters, all optional and combinable:
+
+`kind=<exact>`, `q=<substring of title or content>` (LIKE wildcards in the term
+are escaped, so `%` means a percent sign), `date=YYYY-MM-DD`,
+`since=`/`until=` on `created_at_utc`, `modified_since=`/`modified_until=` on
+`last_modified_at_utc` (each takes `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`; a bare
+date used as an upper bound widens to the end of that day), `done=0|1`,
+`deleted=0|1|all` (**default `0`** — the list excludes soft-deleted entries,
+matching the UI; the old behaviour is `deleted=all`), `min_id=`/`max_id=`,
+`order=id|created|modified|title|kind` + `dir=asc|desc` (default `id desc`),
+`limit=` (default 200, max 1000) + `offset=`, and `content=0` to omit entry
+bodies from the rows (`content_length` is always there).
+
+Every value the client sends is a **bound parameter**; the only pieces of SQL
+built from a request are the fixed clause literals and an `ORDER BY` matched
+against a table of allowed column names.
+
+Errors are JSON (`{"error":…,"status":…}`). A filter the server can't honour is
+a 400 rather than being ignored — silently dropping `?kind=…` would answer with
+rows the client explicitly excluded.
+
+Each connection is handled with an on-stack 1MB arena, and the server opens its
+own SQLite connection (2s busy timeout, so an API write racing the UI's
+debounced save waits its turn instead of failing). Consequences of that arena
+worth knowing, both handled rather than left to abort: a `Content-Length` over
+512KB is refused with 413 before it ever reaches `arena_alloc`, and a response
+that would outgrow the arena mid-build comes back as a 500 telling the client to
+narrow the query (`limit`/`offset`/`content=0`) instead of as truncated JSON.
 
 ## Hypermedia documents
 
