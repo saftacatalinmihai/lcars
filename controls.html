@@ -4,11 +4,12 @@
        Load it from the URL bar with file://controls.html, or from the
        DEMO DOC page. -->
 
-  <!-- URL bar. GO still uses the built-in action, because it reads its
-       target out of another element's text - something a control has no
-       syntax for. -->
-  <lcars-text-editor id="url_input" x="210" y="10" w="500" h="32" size="32">file://controls.html</lcars-text-editor>
-  <lcars-button x="690" y="10" w="90" h="62" color="yellow" action="load_hypermedia">GO</lcars-button>
+  <!-- URL bar, declarative now: lc-get="#url_input" reads the url out of
+       this field's own text, lc-trigger="enter" submits it on Enter, and GO
+       just presses the same control via lc-from. No C-side action left. -->
+  <lcars-text-editor id="url_input" x="210" y="10" w="500" h="32" size="32"
+                     lc-get="#url_input" lc-trigger="enter">file://controls.html</lcars-text-editor>
+  <lcars-button x="690" y="10" w="90" h="62" color="yellow" lc-from="url_input">GO</lcars-button>
 
   <!-- Frame -->
   <lcars-rectangle x="0" y="4" w="200" h="96" color="purple"></lcars-rectangle>

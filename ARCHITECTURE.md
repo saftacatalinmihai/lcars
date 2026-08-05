@@ -131,7 +131,10 @@ LCARS palette), `size` (text), `orientation` (elbow 0-3; only 0 and 3 are
 implemented), `src` (sphere texture), `id` (lookup key), `href` (navigation target),
 `action` (none/debug/edit/reset/voice_input/print_db/load_hypermedia). Inner text
 becomes the element label/content. `action="load_hypermedia"` follows `href`, or
-falls back to the text typed in the element with `id="url_input"` (the URL bar).
+falls back to the text typed in the element with `id="url_input"`. The shipped
+documents no longer use it for the URL bar — that is now expressed with controls
+(`lc-get="#url_input"` + `lc-trigger="enter"` + `lc-from`, below) — but `href`
+links still do.
 
 ### Hypermedia controls (`lc-*`)
 
@@ -142,12 +145,19 @@ what makes it fire:
 
 | Attribute | Meaning |
 |---|---|
-| `lc-get` / `lc-post` / `lc-put` / `lc-delete` | The request; the attribute picks the method |
+| `lc-get` / `lc-post` / `lc-put` / `lc-delete` | The request; the attribute picks the method. A `#id` URL is an indirection: the named element's text *is* the URL, read at fire time |
 | `lc-target` | Element id a text/append swap writes into (a leading `#` is tolerated) |
 | `lc-swap` | `none` / `text` / `append` / `document` / `reload`. Default: `text` with a target, else `document` for GET, else `none` |
-| `lc-trigger` | `click` (default) or `load` (fires once when the document finishes parsing) |
+| `lc-trigger` | `click` (default), `load` (fires once when the document finishes parsing), or `enter` (the focused text editor sees Enter — which then submits instead of inserting a newline) |
 | `lc-vals` | Literal fields, `name=value,name=value` (flat, not JSON — so no commas or `=` inside a value) |
 | `lc-include` | Ids of elements whose text becomes a field; **the id is the field name** |
+| `lc-from` | Not a request: "fire the control declared by *that* element when I'm clicked". Only applies to elements with no `lc-*` method of their own |
+
+Those three — the `#id` URL, `lc-trigger="enter"` and `lc-from` — are what make the
+URL bar a document rather than C code. The field says
+`lc-get="#url_input" lc-trigger="enter"` (the URL is my own text, Enter submits it)
+and the GO button beside it says `lc-from="url_input"`, so one request is declared
+once and has two ways to be pressed.
 
 The URL decides the transport:
 
@@ -178,7 +188,9 @@ TODO.md): LCARS as a hypermedia client, entries editable as documents.
   drawn per element), `Super+R` reset layout, `Ctrl+Shift+R` hot reload (dev build).
 - Text editor: standard cursor movement with key-repeat, shift-selection,
   Ctrl/Super+arrow word jumps, Ctrl/Super+C/V clipboard, mouse drag selection,
-  scrollbar drag.
+  scrollbar drag. Enter inserts a newline unless the element declares
+  `lc-trigger="enter"`, which turns it into a single-line submit field (the URL
+  bar) — Enter then fires its control instead.
 - Entry list panel: collapse/expand toggle, kind selector, `+ NEW ENTRY`,
   keyboard up/down navigation (`NavigateEntryList`).
 

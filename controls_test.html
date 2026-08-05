@@ -10,8 +10,12 @@
        it to hyper_test (click the kind at the top of the list panel) before
        running 2-6. -->
 
-  <lcars-text-editor id="url_input" x="210" y="10" w="500" h="32" size="32">file://controls_test.html</lcars-text-editor>
-  <lcars-button x="690" y="10" w="90" h="62" color="yellow" action="load_hypermedia">GO</lcars-button>
+  <!-- The URL bar is itself two of the controls under test: lc-get="#url_input"
+       (the url is this field's own text) fired by lc-trigger="enter", and a GO
+       button that presses the same control through lc-from. -->
+  <lcars-text-editor id="url_input" x="210" y="10" w="500" h="32" size="32"
+                     lc-get="#url_input" lc-trigger="enter">file://controls_test.html</lcars-text-editor>
+  <lcars-button x="690" y="10" w="90" h="62" color="yellow" lc-from="url_input">GO</lcars-button>
   <lcars-text x="800" y="4" size="48" color="yellow">CONTROL TEST BENCH</lcars-text>
 
   <!-- Frame -->
@@ -96,6 +100,23 @@
   <lcars-button x="1150" y="170" w="190" h="44" color="blue" lc-get="file://controls.html">CONTROLS</lcars-button>
   <lcars-button x="1350" y="120" w="190" h="44" color="orange" action="debug">(SUPER+D)EBUG</lcars-button>
   <lcars-button x="1350" y="170" w="190" h="44" color="blue" lc-get="file://controls_test.html">SELF RELOAD</lcars-button>
+
+  <!-- 13-16: the URL-bar primitives pointed at nothing. All four refuse
+       before any request goes out; the reason is in the status banner
+       (SUPER+D) and on stdout. The working versions of both are the URL bar
+       and its GO button at the top of this page. -->
+  <lcars-text x="1350" y="226" size="20" color="yellow">13-16 URL-BAR MISUSE</lcars-text>
+  <lcars-button id="t13" x="1350" y="254" w="190" h="44" color="orange"
+                lc-from="no_such_element">13 lc-from 404</lcars-button>
+  <lcars-button id="t14" x="1350" y="308" w="190" h="44" color="orange"
+                lc-from="result">14 lc-from no ctl</lcars-button>
+  <lcars-button id="t15" x="1350" y="362" w="190" h="44" color="orange"
+                lc-get="#no_such_element" lc-target="result">15 #id 404</lcars-button>
+  <lcars-button id="t16" x="1350" y="416" w="190" h="44" color="orange"
+                lc-get="#blank_url" lc-target="result">16 #id blank</lcars-button>
+  <!-- Deliberately empty: the source of the url for 16. -->
+  <lcars-text-editor id="blank_url" x="1350" y="470" w="190" h="32"
+                     size="20"></lcars-text-editor>
 
   <!-- Where replies land. -->
   <lcars-text x="860" y="252" size="20" color="yellow">RESULT</lcars-text>

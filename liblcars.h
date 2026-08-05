@@ -606,8 +606,16 @@ static void HandleElementClick(State *s, Element *e) {
   if (s->documentGeneration != generation) {
     return;
   }
-  if (e->control != NULL && e->control->trigger == HYPER_TRIGGER_CLICK) {
-    FireHyperControl(s, e);
+  if (e->control != NULL) {
+    if (e->control->trigger == HYPER_TRIGGER_CLICK) {
+      FireHyperControl(s, e);
+    }
+  } else if (e->controlFrom.len > 0) {
+    // lc-from only applies to elements that declare no request themselves:
+    // an element's own control is what its click means, and firing both
+    // would make one click issue two requests in an order the document has
+    // no way to reason about.
+    FireHyperControlFrom(s, e->controlFrom);
   }
 }
 
@@ -1119,12 +1127,35 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
         }
 
         if (IsKeyPressed(KEY_ENTER)) {
-          if (DeleteSelection(&e->gap, &e->selection)) {
+          bool submits = (e->control != NULL &&
+                          e->control->trigger == HYPER_TRIGGER_ENTER);
+          if (submits) {
+            // Anything the control reads off this element - the "#id" url it
+            // may point at itself, an lc-include field - comes from
+            // Element.text, which only ReconstructText brings up to date
+            // with the gap buffer. Characters typed *this frame* are still
+            // gap-only at this point, so without this the request would use
+            // the text as it was one keystroke ago.
+            if (textChanged) {
+              ReconstructText(&s->doc_arena, &e->gap, &e->text, &e->textLen);
+              assert(e->text.len == e->textLen);
+            }
+            int generation = s->documentGeneration;
+            FireHyperControl(s, e);
+            if (s->documentGeneration != generation) {
+              // The control swapped in a new document: `e`, its gap buffer
+              // and all of doc_arena are gone. Update()'s loop stops for the
+              // same reason - see the generation check there.
+              return;
+            }
+          } else {
+            if (DeleteSelection(&e->gap, &e->selection)) {
+              textChanged = true;
+            }
+            GapInsertChar(&s->doc_arena, &e->gap, '\n');
             textChanged = true;
+            e->snapToCursor = 2;
           }
-          GapInsertChar(&s->doc_arena, &e->gap, '\n');
-          textChanged = true;
-          e->snapToCursor = 2;
         }
 
         // Cursor movements

@@ -27,10 +27,14 @@ unimplemented/unreachable paths, not a marker for future work.
   supply credentials. Needs somewhere for them to live that isn't the document
   (an `LCARS_REMOTE_USER`/`PASS` env pair, say) before this is usable against
   the VPS.
-- [ ] **More triggers than click/load.** `lc-trigger` understands `click` and
-  `load`. `changed`/`keyup` (fire when an editor's text settles) and
+- [ ] **More triggers than click/load/enter.** `lc-trigger` understands `click`,
+  `load` and `enter`. `changed`/`keyup` (fire when an editor's text settles) and
   `every Ns` (polling) are the two that would earn their keep — a
   live-updating panel is impossible today.
+- [ ] **`lc-from` fires exactly one control.** A button delegates to one element's
+  request; there is no way to say "fire all of these" (a form with two fields that
+  each own a request) and no way to chain, since an element carrying `lc-from`
+  declares no control of its own. Fine for the URL bar, thin for anything bigger.
 - [ ] **`lc-vals` can't express a value containing `,` or `=`.** It is a flat
   `name=value,name=value` list on purpose (a 20-line parser instead of a JSON
   one), but there is no escaping, so those two characters are unusable in a

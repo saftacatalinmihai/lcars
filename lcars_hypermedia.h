@@ -398,6 +398,16 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
   if (GetAttributeValue(tag, "href", val, sizeof(val))) {
     href = StringInit(&s->doc_arena, val);
   }
+  // lc-from is not part of HyperControl: it is the *absence* of a request -
+  // "fire the control that element over there declares". Parsed here beside
+  // href because it is the same kind of thing, a reference to somewhere else
+  // in the document.
+  String controlFrom = StringStatic(NULL);
+  if (GetAttributeValue(tag, "lc-from", val, sizeof(val))) {
+    // '#id' is what an HTMX user writes; ids in this format carry no sigil.
+    const char *fromId = (val[0] == '#') ? val + 1 : val;
+    controlFrom = StringInit(&s->doc_arena, fromId);
+  }
   // bind="log" opts a plain <lcars-text-editor> into being the default log
   // entry's editor, i.e. into having its contents saved to the DB. Without
   // it an editor is just typed text the document owns - see
@@ -438,6 +448,7 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
   e.id = id;
   e.href = href;
   e.control = ParseHyperControl(&s->doc_arena, tag);
+  e.controlFrom = controlFrom;
   e.bindsToLog = bindsToLog;
   e.position = (Vector2){x, y};
   e.width = w_val;
@@ -474,7 +485,8 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
   // kind, valid strings, and its side struct allocated if it needs one.
   assert(e.kind == kind);
   assert(e.kind > ELEM_NOTHING && e.kind < ELEM_TOTAL_KINDS);
-  assert(StringValid(e.text) && StringValid(e.id) && StringValid(e.href));
+  assert(StringValid(e.text) && StringValid(e.id) && StringValid(e.href) &&
+         StringValid(e.controlFrom));
   assert(e.kind != ELEM_ENTRY_LIST || e.entryList != NULL);
   assert(e.kind != ELEM_SPHERE || e.sphere != NULL);
   assert((e.kind != ELEM_TEXT_EDITOR && e.kind != ELEM_ENTRY_LIST) ||

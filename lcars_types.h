@@ -113,10 +113,14 @@ typedef enum HyperSwap {
 } HyperSwap;
 
 // What makes the control fire (lc-trigger). LOAD fires once, right after the
-// document that declares it finishes parsing.
+// document that declares it finishes parsing. ENTER fires when the focused
+// text editor that declares it sees the Enter key - which also means Enter
+// stops inserting a newline there, i.e. the element becomes a single-line
+// submit field (the URL bar) rather than a document being typed.
 typedef enum HyperTrigger {
   HYPER_TRIGGER_CLICK = 0,
   HYPER_TRIGGER_LOAD,
+  HYPER_TRIGGER_ENTER,
   HYPER_TRIGGER_TOTAL,
 } HyperTrigger;
 
@@ -147,7 +151,9 @@ typedef struct HyperControl {
   HyperTrigger trigger;
   // Where the request goes: a path starting with '/' is handled in-process
   // against lcars.db (this app is its own origin), http(s):// goes out over
-  // the network.
+  // the network. A '#id' url is an indirection instead of a location - the
+  // named element's text is read at fire time and used as the url, which is
+  // how a document expresses "go wherever this field says" (the URL bar).
   String url;
   String target;  // id of the element a TEXT/APPEND swap writes into
   String vals;    // literal "name=value,name=value" pairs
@@ -312,6 +318,14 @@ typedef struct Element {
   // Only non-NULL if the document gave this element an lc-get/lc-post/
   // lc-put/lc-delete attribute — see HyperControl.
   HyperControl *control;
+  // The hypermedia `lc-from="<id>"` attribute: this element declares no
+  // request of its own, it only names the element whose request a click
+  // fires (the GO button next to a URL field). Empty (data == NULL) unless
+  // the document set one. Kept out of HyperControl on purpose — an element
+  // with only lc-from has no method, and a HyperControl with
+  // HYPER_METHOD_NONE would break the invariant above. See
+  // FireHyperControlFrom() in lcars_hypermedia_controls.h.
+  String controlFrom;
   Vector2 position;
   Vector3 position3;
   float width, height;

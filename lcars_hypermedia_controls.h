@@ -19,16 +19,26 @@
 //        The request. A url starting with '/' is served in-process from
 //        lcars.db (this app is its own origin - see
 //        HyperHandleLocalRequest); an http(s):// url goes out over the
-//        network via lcars_net.h.
+//        network via lcars_net.h. A url of the form "#<element id>" is not
+//        a location at all: the named element's *text* is the url, read at
+//        fire time (see HyperResolveUrl).
 //   lc-target="<element id>"
 //        Element a text/append swap writes into. A leading '#' is accepted
 //        (HTMX habit) and ignored.
 //   lc-swap="none|text|append|document|reload"
 //        What to do with the response. Defaults, when unset: `text` if
 //        lc-target is set, else `document` for GET, else `none`.
-//   lc-trigger="click|load"
+//   lc-trigger="click|load|enter"
 //        Defaults to click. `load` fires once, right after the document
-//        that declares it has finished parsing.
+//        that declares it has finished parsing. `enter` fires when the
+//        element is a focused text editor and Enter is pressed - which also
+//        makes Enter stop inserting a newline there, turning the editor into
+//        a single-line submit field.
+//   lc-from="<element id>"
+//        Not a request: it says "when I am clicked, fire the control that
+//        element declares". An element carrying lc-from has no lc-* method
+//        of its own, which is why it lives on Element rather than in
+//        HyperControl - see FireHyperControlFrom.
 //   lc-vals="name=value,name=value"
 //        Literal request fields. NOT JSON like HTMX's hx-vals: a flat
 //        name=value list needs a 20-line parser here instead of a real JSON
@@ -38,6 +48,13 @@
 //        Fields taken from other elements' text. The element's `id` is the
 //        field name - the id *is* the form-control name, which is why
 //        elements the user types into want short, field-shaped ids.
+//
+// The "#id" url, lc-trigger="enter" and lc-from exist together for one
+// reason: a URL bar. The field declares lc-get="#itself" + lc-trigger=
+// "enter", the GO button next to it declares lc-from="<the field>", and the
+// address the user typed is written down exactly once, in the document,
+// instead of being special-cased in C the way ACTION_LOAD_HYPERMEDIA had to
+// be.
 //
 // The local resource surface deliberately mirrors the HTTP API in
 // lcars_http.h (POST /entries creates an entry), so the same document works
@@ -54,8 +71,12 @@ static HyperSwap ParseHyperSwap(String swapStr);
 static HyperTrigger ParseHyperTrigger(String triggerStr);
 // Issues e's control now, whatever its trigger says - the trigger is the
 // caller's business (a click in HandleElementClick, document load in
-// FireHyperLoadTriggers).
+// FireHyperLoadTriggers, Enter in UpdateElement).
 static void FireHyperControl(State *s, Element *e);
+// Issues the control declared by the element with id `fromId` - the lc-from
+// delegation. Same "whatever its trigger says" rule: lc-from *is* the
+// trigger.
+static void FireHyperControlFrom(State *s, String fromId);
 // Fires every HYPER_TRIGGER_LOAD control in the freshly parsed document.
 static void FireHyperLoadTriggers(State *s);
 
@@ -114,6 +135,8 @@ static HyperTrigger ParseHyperTrigger(String triggerStr) {
     return HYPER_TRIGGER_CLICK;
   if (strcmp(triggerStr.data, "load") == 0)
     return HYPER_TRIGGER_LOAD;
+  if (strcmp(triggerStr.data, "enter") == 0)
+    return HYPER_TRIGGER_ENTER;
   if (strcmp(triggerStr.data, "click") != 0) {
     TraceLog(LOG_WARNING, "Unknown lc-trigger value '%s', using click",
              triggerStr.data);
@@ -168,6 +191,45 @@ static Element *FindEntryListElement(State *s) {
     }
   }
   return NULL;
+}
+
+// Resolves a "#<element id>" url to the text of that element, trimmed. Any
+// other url is returned unchanged. This is the one indirection the url
+// itself is allowed: without it a URL bar is impossible to write down, since
+// the address only exists as text the user typed a moment ago and this
+// format has no scripting language to go and fetch it.
+//
+// The result is copied into scratch_arena rather than aliased from the
+// source element for the usual reason (see FireHyperControl's snapshot): a
+// document swap can reset doc_arena while the url is still in use. Returns
+// the empty string if the id names nothing or the element is blank, which
+// the caller reports and refuses to send.
+static String HyperResolveUrl(State *s, String url) {
+  assert(s != NULL);
+  assert(StringValid(url));
+
+  if (url.len == 0 || url.data == NULL || url.data[0] != '#') {
+    return url;
+  }
+
+  const char *id = url.data + 1;
+  Element *src = FindElementById(s, id);
+  if (src == NULL) {
+    TraceLog(LOG_WARNING,
+             "hypermedia control: no element with id '%s' to take"
+             " the url from",
+             id);
+    return StringStatic("");
+  }
+
+  assert(StringValid(src->text));
+  if (src->text.data == NULL || src->text.len == 0) {
+    return StringStatic("");
+  }
+  // Trimmed because this text was typed by a human into an editor, and a
+  // trailing space or newline would turn a perfectly good url into a 404.
+  return HyperTrimmedSlice(&s->scratch_arena, src->text.data,
+                           src->text.data + src->text.len);
 }
 
 // Builds the request's name=value fields from lc-vals and lc-include. Values
@@ -733,6 +795,15 @@ static void FireHyperControl(State *s, Element *e) {
   ctl = NULL;
   e = NULL;
 
+  // "#id" means the url lives in another element's text. Resolved after the
+  // snapshot and before anything looks at the scheme, so every branch below
+  // sees a real url and nothing has to know this indirection exists.
+  url = HyperResolveUrl(s, url);
+  if (url.len == 0) {
+    UpdateNotification(s, StringStatic("CONTROL: NO URL"));
+    return;
+  }
+
   String body = StringStatic("");
   long status = 0;
   bool transportOk = true;
@@ -806,6 +877,38 @@ static void FireHyperControl(State *s, Element *e) {
   StringFormat(&s->scratch_arena, &msg, "%s %ld", HyperMethodName(method),
                status);
   UpdateNotification(s, msg);
+}
+
+static void FireHyperControlFrom(State *s, String fromId) {
+  assert(s != NULL);
+  assert(StringValid(fromId));
+
+  if (fromId.data == NULL || fromId.len == 0) {
+    return;
+  }
+
+  Element *src = FindElementById(s, fromId.data);
+  if (src == NULL) {
+    TraceLog(LOG_WARNING, "lc-from: no element with id '%s'", fromId.data);
+    UpdateNotification(s, StringStatic("LC-FROM: NO SUCH ELEMENT"));
+    return;
+  }
+  if (src->control == NULL) {
+    TraceLog(LOG_WARNING, "lc-from: element '%s' declares no lc-* control",
+             fromId.data);
+    UpdateNotification(s, StringStatic("LC-FROM: NO CONTROL THERE"));
+    return;
+  }
+
+  // Deliberately ignores src's own lc-trigger: the delegation is the
+  // trigger. A field with lc-trigger="enter" is therefore reachable both by
+  // Enter and by whatever button points at it, which is the whole point -
+  // one request, two ways to press it.
+  //
+  // No recursion is possible here: an element carrying lc-from has no
+  // control of its own (ParseHyperControl returns NULL without a method), so
+  // a chain of lc-from stops at the first hop with the warning above.
+  FireHyperControl(s, src);
 }
 
 static void FireHyperLoadTriggers(State *s) {
