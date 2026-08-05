@@ -67,6 +67,13 @@ static void NavigateEntryList(State *s, Element *e, int direction);
 // the control dispatcher, which is included much earlier, fetches
 // documents through it.
 static String LoadDocumentContent(String source, State *s);
+// Same arrangement for the document *writer*: lcars_doc_writer.h is included
+// after lcars_hypermedia.h because it patches tags with that header's
+// attribute-span finder, but the input handling and the exit-time flush
+// below both sit above it and need these three.
+static void MarkLayoutDirty(State *s);
+static void FlushLayoutChanges(State *s);
+static void UpdateLayoutPersistence(State *s);
 #endif // LCARS_IMPLEMENTATION
 
 // -----------------------------------------------------------------------------
@@ -646,8 +653,16 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
     Element *e = &s->elements[draggingIdx];
     SetMouseCursor(MOUSE_CURSOR_RESIZE_ALL);
     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-      e->position.x = (int)(mPos.x - e->dragOffsetX);
-      e->position.y = (int)(mPos.y - e->dragOffsetY);
+      float newX = (int)(mPos.x - e->dragOffsetX);
+      float newY = (int)(mPos.y - e->dragOffsetY);
+      // Only report a change when there is one: a press-and-release on a
+      // handle without moving the mouse would otherwise dirty the layout and
+      // rewrite the document to exactly itself.
+      if (newX != e->position.x || newY != e->position.y) {
+        e->position.x = newX;
+        e->position.y = newY;
+        MarkLayoutDirty(s);
+      }
     } else {
       e->isDragging = false;
     }
@@ -672,8 +687,11 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
             LoadRenderTexture((int)newWidth, (int)newHeight);
       }
 
-      e->width = newWidth;
-      e->height = newHeight;
+      if (newWidth != e->width || newHeight != e->height) {
+        e->width = newWidth;
+        e->height = newHeight;
+        MarkLayoutDirty(s);
+      }
     } else {
       e->isResizing = false;
     }
@@ -722,6 +740,10 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
           e->position.x += mDelta.x;
           e->position.y += mDelta.y;
         }
+        // Panning the whole document is a layout edit like any other - and
+        // the one that can leave fractional coordinates behind, since it adds
+        // the raw mouse delta rather than an (int)-snapped position.
+        MarkLayoutDirty(s);
       }
     }
   }
@@ -1445,6 +1467,8 @@ void Update(State *s) {
   int draggingIdx = -1;
   int resizingIdx = -1;
   UpdateDragAndResize(s, mPos, mDelta, &draggingIdx, &resizingIdx);
+  // Straight after the drag/resize handling that dirties it.
+  UpdateLayoutPersistence(s);
 
   int generation = s->documentGeneration;
   for (int i = 0; i < s->numElements; i++) {
@@ -1472,6 +1496,11 @@ void FlushPendingSaves(State *s) {
       assert(!e->contentDirty);
     }
   }
+
+  // Layout edits are debounced the same way and would be lost the same way -
+  // drag an element and quit within LAYOUT_SAVE_DEBOUNCE_SECONDS.
+  FlushLayoutChanges(s);
+  assert(!s->layoutDirty);
 }
 
 // Renders any elements that draw into an offscreen texture (currently just
@@ -1975,6 +2004,10 @@ void UpdateDrawFrame(State *s) {
 }
 
 #include "lcars_hypermedia.h"
+// After the parser, not before: saving a document is patching the very tags
+// it parsed, so the writer is built on FindAttributeValueSpan() from that
+// header.
+#include "lcars_doc_writer.h"
 
 #endif // LCARS_IMPLEMENTATION
 

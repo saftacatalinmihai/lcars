@@ -9,10 +9,21 @@ unimplemented/unreachable paths, not a marker for future work.
 
 ## Features
 
-- [ ] **Real-time hypermedia document editor.** An editor that edits the
-  underlying `.html` hypermedia document itself (ideally live), not just entry
-  content. This is the long-term "LCARS as a hypermedia client" direction
-  described in `ARCHITECTURE.md`'s Hypermedia documents section.
+- [ ] **Real-time hypermedia document editor — the rest of it.** Edit mode now
+  persists *geometry* (see the Done entry below), which is the first slice of
+  editing the underlying `.html` from inside the app. Still C-only or not
+  possible at all: changing an element's `color`, `text`, `size` or any other
+  attribute; adding a new element; deleting one; reordering them. The patching
+  machinery in `lcars_doc_writer.h` generalizes to attributes (it already
+  inserts an attribute a tag never had), but adding and removing *tags* needs
+  more than a span rewrite — an element with `srcTagStart == -1` has no tag to
+  patch, and a deleted one leaves a hole nothing tracks. The end state is still
+  the "LCARS as a hypermedia client" direction in `ARCHITECTURE.md`: the
+  document editable as a document.
+- [ ] **No undo for layout edits.** A drag is written to the file half a second
+  after the mouse stops, and the only way back is `git checkout` on the
+  document. `Super+R` used to be that escape hatch — it now reloads the saved
+  file, so it restores nothing.
 - [ ] **Local `GET /entries` list route.** The in-process control routes cover
   one entry at a time (`GET/PUT/DELETE /entries/<id>`, `POST /entries`) but
   there is no way to ask for the list. The interesting version isn't JSON: it
@@ -126,6 +137,24 @@ unimplemented/unreachable paths, not a marker for future work.
 
 ## Done
 
+- [x] **Edit-mode drag/resize survives a restart.** Moving or resizing an
+  element now writes `x`/`y`/`w`/`h` back into the `.html` the document was
+  loaded from, half a second after the layout stops changing (and immediately
+  on exit or before another document loads). It patches the document's own
+  bytes rather than regenerating it, so comments, formatting, quoting style and
+  unknown attributes survive, and a save with nothing dragged reproduces the
+  file exactly. Only local-file documents are writable — `http(s)` documents
+  and control response bodies say `LAYOUT NOT SAVED: READ-ONLY DOC`. See
+  `lcars_doc_writer.h` and the `Editing the document back` section of
+  `ARCHITECTURE.md`.
+- [x] **The URL bar is a document now, not a C special case.** Enter in a field
+  with `lc-trigger="enter"` fires that element's control instead of inserting a
+  newline; a `#id` URL means "the named element's text is the URL"; and
+  `lc-from="<id>"` lets a button press another element's control. `main.html`,
+  `controls.html` and `controls_test.html` express the URL bar + GO with those
+  three instead of `action="load_hypermedia"`, which now only serves `href`
+  links. See `ARCHITECTURE.md`'s Hypermedia controls section; tests 13-16 in
+  `controls_test.html` are the failure cases.
 - [x] **Hypermedia controls beyond GET-style navigation.** The format now has
   the other verbs: `lc-get`/`lc-post`/`lc-put`/`lc-delete` with `lc-target`,
   `lc-swap`, `lc-trigger`, `lc-vals` and `lc-include` (HTMX/DataStar-inspired,

@@ -50,6 +50,7 @@ Everything is a single-header library: declarations always visible, bodies under
 | `lcars_net.h` | Blocking libcurl HTTP client (`NetHttpRequest`), shared by document loading and hypermedia controls |
 | `lcars_hypermedia.h` | Parses `<lcars>` documents (table-driven tag/color/action/control mapping), loads them from file/HTTP or straight from a response body |
 | `lcars_hypermedia_controls.h` | The `lc-*` controls: collects request fields, serves local `/entries` routes in-process, issues remote requests, applies the response swap |
+| `lcars_doc_writer.h` | The other direction: patches the `x`/`y`/`w`/`h` an edit-mode drag produced back into the document's own bytes and rewrites the file |
 | `lcars_http.h` | Threaded HTTP API server (raw sockets, Basic auth, tiny JSON helpers). Per-connection on-stack arena |
 | `liblcars.h` | The app core: `Init`/`Reload`/`Update`/`UpdateDrawFrame`, input handling, element constructors (`make_*`), drawing, voice input plumbing |
 | `lcars.c` | Host process: CLI args, window creation, hot-reload loop, voice init, `--http-only` mode. `#include`s the two host-only `.c` files at the bottom |
@@ -182,10 +183,47 @@ with one numbered button per control variant — including the failure cases —
 writing into kind `hyper_test` so exercising it leaves the journal alone. This is the long-term direction (see
 TODO.md): LCARS as a hypermedia client, entries editable as documents.
 
+### Editing the document back (`lcars_doc_writer.h`)
+
+Edit mode moves and resizes elements; the writer is what makes those edits
+outlive the process. It **patches** rather than serializes: `documentSource`
+(the document's exact bytes, copied into `doc_arena` at load) plus every
+element's `srcTagStart`/`srcTagEnd` (the byte range of its own opening tag) are
+enough to replace nothing but the four geometry attribute *values* in place.
+Comments, indentation, attribute order and quoting style, tags the parser
+doesn't even recognize — all of it survives byte for byte, which a
+regenerate-from-`Element[]` serializer could not manage against these
+hand-written, heavily commented documents.
+
+- An attribute is only touched when its text would actually change, so saving
+  a document nobody dragged rewrites the file to exactly itself. One the
+  document omitted is inserted after the tag name, and only if the element has
+  moved off the default its absence implies (`ELEM_DEFAULT_*` in
+  `lcars_types.h`, shared with the parser for that reason).
+- `x`/`y` are written rounded because `ParseElementTag` reads them with
+  `atoi`; `w`/`h` go through `atof` and may be fractional. `<lcars-text>` sizes
+  itself from its text (`autoSize`), so its `w`/`h` are never written out.
+- Saves are debounced (`LAYOUT_SAVE_DEBOUNCE_SECONDS`, the same shape as
+  content saves) and flushed by `FlushPendingSaves` on exit and by both
+  document loaders before they throw the current document away. The write goes
+  to `<path>.tmp` and is `rename`d over the target — a truncated `main.html`
+  is an app that comes back up blank.
+- Only local-file documents are writable (`State.documentWritable`): an
+  `http(s)` document isn't ours, and a control's response body
+  (`HYPER_SWAP_DOCUMENT`) has no file behind it. Dragging in one of those still
+  works on screen and says `LAYOUT NOT SAVED: READ-ONLY DOC`.
+
+Consequence worth knowing: `Super+R` / `action="reset"` re-`Init`s, which reloads
+`main.html` — so "reset layout" now means "reload the saved document", not "go
+back to how it shipped".
+
 ## Keyboard & mouse
 
 - `Super+D` debug overlay, `Super+E` edit mode (drag/resize elements, handles
   drawn per element), `Super+R` reset layout, `Ctrl+Shift+R` hot reload (dev build).
+  Drag/resize — via the handles, `Super+click`, `Super+right-click`, or the
+  `Super+drag` whole-document pan — is written back to the document file half a
+  second after the mouse stops (see `lcars_doc_writer.h` above).
 - Text editor: standard cursor movement with key-repeat, shift-selection,
   Ctrl/Super+arrow word jumps, Ctrl/Super+C/V clipboard, mouse drag selection,
   scrollbar drag. Enter inserts a newline unless the element declares

@@ -63,6 +63,24 @@
 // switching away from an entry, regardless of this delay.
 #define CONTENT_SAVE_DEBOUNCE_SECONDS 1.0f
 
+// How long the layout must sit still (no dragging, no resizing) before the
+// hypermedia document it came from is rewritten — see lcars_doc_writer.h.
+// Same shape as CONTENT_SAVE_DEBOUNCE_SECONDS above and for the same reason
+// (a drag is hundreds of frames, each save is a whole-file rewrite), shorter
+// because the write is a small local file with no DB transaction behind it,
+// and because a drag ends when the mouse button does — the wait is only ever
+// felt once, after the user has stopped.
+#define LAYOUT_SAVE_DEBOUNCE_SECONDS 0.5f
+
+// What ParseElementTag() assumes when a tag omits x/y/w/h. Named because the
+// document writer needs them too: an attribute the document never wrote only
+// has to be inserted if the element has since moved off the value its
+// absence implies (see WriteTagWithGeometry in lcars_doc_writer.h).
+#define ELEM_DEFAULT_X 0
+#define ELEM_DEFAULT_Y 0
+#define ELEM_DEFAULT_W 100.0f
+#define ELEM_DEFAULT_H 50.0f
+
 // Drag/resize edit-mode handle hit-box: a HANDLE_SIZE square offset by
 // HANDLE_OFFSET from the element's corner.
 #define EDIT_HANDLE_SIZE 16.0f
@@ -308,6 +326,15 @@ typedef struct Element {
   // Empty (data == NULL) unless the document set one. See FindElementById()
   // in lcars_ui.h.
   String id;
+  // Byte range of this element's opening tag ("<lcars-button ...>", both
+  // angle brackets included; srcTagEnd is one past the '>') within
+  // State.documentSource, or -1/-1 for an element that didn't come from a
+  // parsed document. This is what lets edit mode patch x/y/w/h back into the
+  // document's own bytes instead of regenerating it — see
+  // SaveDocumentLayout() in lcars_doc_writer.h. Only valid for as long as
+  // documentSource is, i.e. until the next document load replaces both.
+  int srcTagStart;
+  int srcTagEnd;
   // Optional navigation target from the hypermedia `href="..."` attribute,
   // used by ACTION_LOAD_HYPERMEDIA. Empty (data == NULL) unless the
   // document set one, in which case the click handler falls back to
@@ -419,6 +446,27 @@ typedef struct State {
   // everything in doc_arena the old elements pointed at, is gone by then.
   // See UpdateElement()/Update() in liblcars.h.
   int documentGeneration;
+
+  // The exact bytes of the document currently displayed, copied into
+  // doc_arena by ParseHypermediaElements(). Kept alive for the whole
+  // document lifetime because edit mode saves by *patching* this text —
+  // every element remembers where its own tag sits inside it
+  // (Element.srcTagStart/srcTagEnd) and only the geometry attribute values
+  // are replaced, so comments, indentation and attributes this parser
+  // doesn't know about survive a save untouched. Empty until the first load.
+  String documentSource;
+  // Whether currentDocument names a local file that documentSource was read
+  // from verbatim, i.e. whether saving edits back to it is meaningful. False
+  // for http(s) documents (not ours to rewrite) and for response bodies
+  // swapped in by a control (no file behind them at all).
+  bool documentWritable;
+  // Debounced layout save — the drag/resize equivalent of Element's
+  // contentDirty/lastEditTime pair. Set by MarkLayoutDirty() whenever an
+  // element's position or size actually changes; the document is rewritten
+  // once LAYOUT_SAVE_DEBOUNCE_SECONDS have passed with no further change.
+  // See lcars_doc_writer.h.
+  bool layoutDirty;
+  float layoutLastEditTime;
 } State;
 
 #endif // LCARS_TYPES_H

@@ -7,6 +7,8 @@
 
 #include <ctype.h>
 
+static bool FindAttributeValueSpan(const char *tag, const char *attr,
+                                   int *outStart, int *outLen);
 static bool GetAttributeValue(const char *tag, const char *attr, char *dest,
                               int max_len);
 static ElemKind TagNameToElemKind(const char *tagName);
@@ -17,31 +19,36 @@ static String LoadFromHTTP(String source, State *s);
 static String LoadFromFile(String source, State *s);
 static String LoadDocumentContent(String source, State *s);
 static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
-                           const char *p, const char *tag_end,
-                           Element *outElement);
+                            const char *p, const char *tag_end,
+                            Element *outElement);
 void LoadHypermediaDocument(State *s, String source);
 void LoadHypermediaDocumentFromString(State *s, String content,
                                       const char *source);
 
 #ifdef LCARS_IMPLEMENTATION
 
-// Finds attr="value" (or attr='value') in tag and copies value into dest
-// (truncated to max_len - 1 bytes, always NUL-terminated). Returns whether
-// it was found. A bare strstr(tag, "x=") would also match inside "max=" or
-// a later attribute's value (e.g. an href containing "?x=1") - require the
-// match to start right after whitespace (or the very start of tag) so it
-// can only be a real attribute name. Unquoted values (attr=value, no
-// quotes) are treated the same as a missing attribute: dest is left
-// untouched and this returns false, since nothing in this document format
-// writes unquoted values.
-static bool GetAttributeValue(const char *tag, const char *attr, char *dest,
-                              int max_len) {
+// Finds attr="value" (or attr='value') in tag and reports where the value's
+// bytes sit within it: *outStart is the offset of the first byte after the
+// opening quote, *outLen how many bytes precede the closing one. Returns
+// whether it was found.
+//
+// A bare strstr(tag, "x=") would also match inside "max=" or a later
+// attribute's value (e.g. an href containing "?x=1") - require the match to
+// start right after whitespace (or the very start of tag) so it can only be
+// a real attribute name. Unquoted values (attr=value, no quotes) and
+// unterminated ones (a missing closing quote) are both treated as a missing
+// attribute, since nothing in this document format writes either.
+//
+// Reporting the span rather than just the value is what lets the document
+// writer replace one attribute in place, leaving the rest of the tag's bytes
+// exactly as the author wrote them - see WriteTagWithGeometry() in
+// lcars_doc_writer.h. GetAttributeValue() below is the copy-it-out wrapper
+// every parsing caller uses.
+static bool FindAttributeValueSpan(const char *tag, const char *attr,
+                                   int *outStart, int *outLen) {
   assert(tag != NULL);
   assert(attr != NULL);
-  assert(dest != NULL);
-  // dest[len] = '\0' runs with len bounded by max_len - 1, so a max_len of
-  // 0 writes to dest[-1].
-  assert(max_len > 0);
+  assert(outStart != NULL && outLen != NULL);
 
   char pattern[128];
   // Every attribute name in this format is a short literal; a truncated
@@ -60,16 +67,47 @@ static bool GetAttributeValue(const char *tag, const char *attr, char *dest,
   if (!p)
     return false;
 
-  p += patternLen;
-  char quote = *p;
+  const char *value = p + patternLen;
+  char quote = *value;
   if (quote != '"' && quote != '\'')
     return false;
+  value++;
 
-  p++;
+  const char *close = strchr(value, quote);
+  if (!close)
+    return false;
+
+  *outStart = (int)(value - tag);
+  *outLen = (int)(close - value);
+
+  // The value starts after at least '<' + one name character + '=' + quote,
+  // and strchr searched forward from it.
+  assert(*outStart > 0);
+  assert(*outLen >= 0);
+  return true;
+}
+
+// Copies the value of attr into dest (truncated to max_len - 1 bytes, always
+// NUL-terminated) and returns whether the attribute was there at all. See
+// FindAttributeValueSpan() above for what counts as "there".
+static bool GetAttributeValue(const char *tag, const char *attr, char *dest,
+                              int max_len) {
+  assert(tag != NULL);
+  assert(attr != NULL);
+  assert(dest != NULL);
+  // dest[len] = '\0' runs with len bounded by max_len - 1, so a max_len of
+  // 0 writes to dest[-1].
+  assert(max_len > 0);
+
+  int start = 0;
   int len = 0;
-  while (*p && *p != quote && len < max_len - 1) {
-    dest[len++] = *p++;
+  if (!FindAttributeValueSpan(tag, attr, &start, &len)) {
+    return false;
   }
+  if (len > max_len - 1) {
+    len = max_len - 1;
+  }
+  memcpy(dest, tag + start, (size_t)len);
   dest[len] = '\0';
 
   assert(len >= 0 && len < max_len); // the terminator above must fit
@@ -93,7 +131,7 @@ static const struct {
 static ElemKind TagNameToElemKind(const char *tagName) {
   assert(tagName != NULL);
   for (size_t i = 0; i < sizeof(TAG_KIND_TABLE) / sizeof(TAG_KIND_TABLE[0]);
-      i++) {
+       i++) {
     if (strcmp(tagName, TAG_KIND_TABLE[i].tagName) == 0) {
       // Every table entry must name a real, constructible kind - the
       // caller switches on the result to pick a make_* constructor.
@@ -124,7 +162,7 @@ static Color ParseColor(String colorStr) {
       {"black", BLACK},
   };
   for (size_t i = 0; i < sizeof(colorNameTable) / sizeof(colorNameTable[0]);
-      i++) {
+       i++) {
     if (strcmp(colorStr.data, colorNameTable[i].name) == 0) {
       return colorNameTable[i].color;
     }
@@ -142,12 +180,9 @@ static const struct {
   const char *name;
   ButtonAction action;
 } ACTION_NAME_TABLE[] = {
-    {"debug", ACTION_DEBUG},
-    {"edit", ACTION_EDIT},
-    {"reset", ACTION_RESET},
-    {"voice_input", ACTION_VOICE_INPUT},
-    {"print_db", ACTION_PRINT_DB},
-    {"load_hypermedia", ACTION_LOAD_HYPERMEDIA},
+    {"debug", ACTION_DEBUG},       {"edit", ACTION_EDIT},
+    {"reset", ACTION_RESET},       {"voice_input", ACTION_VOICE_INPUT},
+    {"print_db", ACTION_PRINT_DB}, {"load_hypermedia", ACTION_LOAD_HYPERMEDIA},
 };
 
 static ButtonAction ParseAction(String actionStr) {
@@ -155,7 +190,7 @@ static ButtonAction ParseAction(String actionStr) {
   if (actionStr.data == NULL)
     return ACTION_NONE;
   for (size_t i = 0;
-      i < sizeof(ACTION_NAME_TABLE) / sizeof(ACTION_NAME_TABLE[0]); i++) {
+       i < sizeof(ACTION_NAME_TABLE) / sizeof(ACTION_NAME_TABLE[0]); i++) {
     if (strcmp(actionStr.data, ACTION_NAME_TABLE[i].name) == 0) {
       return ACTION_NAME_TABLE[i].action;
     }
@@ -190,7 +225,7 @@ static HyperControl *ParseHyperControl(Arena *doc_arena, const char *tag) {
   HyperMethod method = HYPER_METHOD_NONE;
   String url = StringStatic("");
   for (size_t i = 0;
-      i < sizeof(HYPER_METHOD_TABLE) / sizeof(HYPER_METHOD_TABLE[0]); i++) {
+       i < sizeof(HYPER_METHOD_TABLE) / sizeof(HYPER_METHOD_TABLE[0]); i++) {
     if (!GetAttributeValue(tag, HYPER_METHOD_TABLE[i].attr, val, sizeof(val))) {
       continue;
     }
@@ -336,8 +371,8 @@ static String LoadDocumentContent(String source, State *s) {
 // inner text and closing tag. Returns false (leaving *outElement
 // untouched) if tag_name doesn't name a known element kind.
 static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
-                           const char *p, const char *tag_end,
-                           Element *outElement) {
+                            const char *p, const char *tag_end,
+                            Element *outElement) {
   assert(s != NULL);
   assert(tag != NULL);
   assert(tag_name != NULL);
@@ -351,9 +386,12 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
   }
 
   char val[256];
-  int x = 0, y = 0;
-  float w_val = 100.0f;
-  float h_val = 50.0f;
+  // The defaults are named constants because the document writer needs the
+  // same numbers: an omitted attribute only has to be written out if the
+  // element has since been dragged off the value its absence implies.
+  int x = ELEM_DEFAULT_X, y = ELEM_DEFAULT_Y;
+  float w_val = ELEM_DEFAULT_W;
+  float h_val = ELEM_DEFAULT_H;
   Color color = LCARS_ORANGE;
   ButtonAction action = ACTION_NONE;
   int orientation = 0;
@@ -379,8 +417,7 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
     // anything else here rather than let a bad value reach those
     // switches.
     if (orientation != 0 && orientation != 3) {
-      TraceLog(LOG_WARNING,
-               "Unsupported elbow orientation %d, defaulting to 0",
+      TraceLog(LOG_WARNING, "Unsupported elbow orientation %d, defaulting to 0",
                orientation);
       orientation = 0;
     }
@@ -446,6 +483,13 @@ static bool ParseElementTag(State *s, const char *tag, const char *tag_name,
 
   Element e = {0};
   e.id = id;
+  // "No known source span" — ParseHypermediaElements() overwrites both with
+  // the real offsets once it has placed the element, since only it knows
+  // where the document buffer starts. Left as -1 here so a future caller
+  // that builds an element some other way can't be mistaken for one sitting
+  // at offset 0 of the document.
+  e.srcTagStart = -1;
+  e.srcTagEnd = -1;
   e.href = href;
   e.control = ParseHyperControl(&s->doc_arena, tag);
   e.controlFrom = controlFrom;
@@ -511,7 +555,16 @@ static void ParseHypermediaElements(State *s, String buf) {
   assert(buf.data != NULL);
   assert(s->numElements == 0); // the caller cleared the previous document
 
-  const char *p = buf.data;
+  // Keep the document's exact bytes for as long as the document is on
+  // screen: edit mode saves by patching x/y/w/h back into *this* text, and
+  // every element below records the byte range of its own tag within it (see
+  // lcars_doc_writer.h). Parsing then walks the copy rather than the
+  // caller's buffer, so the offsets can't drift from what gets rewritten -
+  // `buf` may well be in scratch_arena and gone by the next frame anyway.
+  s->documentSource = StringInitLen(&s->doc_arena, buf.data, buf.len);
+
+  const char *base = s->documentSource.data;
+  const char *p = base;
   while (*p) {
     p = strchr(p, '<');
     if (!p)
@@ -549,6 +602,14 @@ static void ParseHypermediaElements(State *s, String buf) {
     if (s->numElements < MAX_ELEMENTS) {
       Element e;
       if (ParseElementTag(s, tag, tag_name, p, tag_end, &e)) {
+        // Record where this element's opening tag lives in documentSource.
+        // Done here rather than inside ParseElementTag because `base` - the
+        // start of the buffer the offsets are relative to - is this
+        // function's business, not the per-tag parser's.
+        e.srcTagStart = (int)(p - base);
+        e.srcTagEnd = (int)(tag_end - base) + 1;
+        assert(e.srcTagStart >= 0 && e.srcTagEnd > e.srcTagStart);
+        assert(e.srcTagEnd <= s->documentSource.len);
         s->elements[s->numElements++] = e;
         assert(s->numElements <= MAX_ELEMENTS);
       }
@@ -574,9 +635,21 @@ void LoadHypermediaDocumentFromString(State *s, String content,
   assert(StringValid(content));
   assert(arena_valid(&s->doc_arena) && arena_valid(&s->scratch_arena));
 
+  // A layout edit still inside its debounce window belongs to the document
+  // about to be thrown away - write it out while the elements and the source
+  // text it patches are both still here.
+  FlushLayoutChanges(s);
+
   // Reset the document arena to reclaim all memory from the previous document
   arena_reset(&s->doc_arena);
   s->numElements = 0;
+  // The previous document's text lived in that arena too, and every
+  // srcTagStart/srcTagEnd indexing it just went with the elements.
+  StringClear(&s->documentSource);
+  // A response body is not a file: there is nowhere to write layout edits
+  // back to even when `source` names the document that issued the request.
+  s->documentWritable = false;
+  s->layoutDirty = false;
   // Everything the old elements pointed at (text, ids, per-kind state, their
   // controls) just became reclaimable, so nothing may still be referring to
   // them.
@@ -622,8 +695,18 @@ void LoadHypermediaDocument(State *s, String source) {
   char sourceBuf[sizeof(s->currentDocument)];
   snprintf(sourceBuf, sizeof(sourceBuf), "%s", source.data ? source.data : "");
 
+  // Same as in LoadHypermediaDocumentFromString: a debounced layout edit is
+  // written out before the document it applies to disappears.
+  FlushLayoutChanges(s);
+
   arena_reset(&s->doc_arena);
   s->numElements = 0;
+  StringClear(&s->documentSource);
+  // Set only once the read below has actually succeeded, so a failed load
+  // can't leave edit mode believing it may write over the file it couldn't
+  // even read.
+  s->documentWritable = false;
+  s->layoutDirty = false;
   assert(s->doc_arena.curr_offset == 0);
 
   String buf = LoadDocumentContent(StringStatic(sourceBuf), s);
@@ -639,6 +722,10 @@ void LoadHypermediaDocument(State *s, String source) {
 
   ParseHypermediaElements(s, buf);
   StringClear(&buf);
+
+  // An http(s) document is somebody else's file; everything else came off
+  // the local disk through LoadFromFile() and can be written back.
+  s->documentWritable = !IsHttpURL(sourceBuf);
 
   snprintf(s->currentDocument, sizeof(s->currentDocument), "%s", sourceBuf);
   s->documentGeneration++;
