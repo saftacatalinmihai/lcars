@@ -51,6 +51,7 @@ Everything is a single-header library: declarations always visible, bodies under
 | `lcars_hypermedia.h` | Parses `<lcars>` documents (table-driven tag/color/action/control mapping), loads them from file/HTTP or straight from a response body |
 | `lcars_hypermedia_controls.h` | The `lc-*` controls: collects request fields, serves local `/entries` routes in-process, issues remote requests, applies the response swap |
 | `lcars_doc_writer.h` | The other direction: patches the `x`/`y`/`w`/`h` an edit-mode drag produced back into the document's own bytes and rewrites the file |
+| `lcars_inspector.h` | The edit-mode State editor: a raygui property panel for the selected element (`State.selectedElementIdx`). Edits authored `Element` fields live; only geometry persists (through `lcars_doc_writer.h`) |
 | `lcars_http.h` | Threaded HTTP API server (raw sockets, Basic auth, tiny JSON helpers). Per-connection on-stack arena |
 | `liblcars.h` | The app core: `Init`/`Reload`/`Update`/`UpdateDrawFrame`, input handling, element constructors (`make_*`), drawing, voice input plumbing |
 | `lcars.c` | Host process: CLI args, window creation, hot-reload loop, voice init, `--http-only` mode. `#include`s the two host-only `.c` files at the bottom |
@@ -255,7 +256,9 @@ back to how it shipped".
 ## Keyboard & mouse
 
 - `Super+D` debug overlay, `Super+E` edit mode (drag/resize elements, handles
-  drawn per element), `Super+R` reset layout, `Ctrl+Shift+R` hot reload (dev build).
+  drawn per element; clicking an element selects it and opens the inspector
+  property panel — `lcars_inspector.h`), `Super+R` reset layout, `Ctrl+Shift+R`
+  hot reload (dev build).
   Drag/resize — via the handles, `Super+click`, `Super+right-click`, or the
   `Super+drag` whole-document pan — is written back to the document file half a
   second after the mouse stops (see `lcars_doc_writer.h` above).

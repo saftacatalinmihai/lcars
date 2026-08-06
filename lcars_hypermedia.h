@@ -643,6 +643,9 @@ void LoadHypermediaDocumentFromString(State *s, String content,
   // Reset the document arena to reclaim all memory from the previous document
   arena_reset(&s->doc_arena);
   s->numElements = 0;
+  // selectedElementIdx indexes the element array that just went away.
+  s->selectedElementIdx = -1;
+  s->inspectorActiveField = -1;
   // The previous document's text lived in that arena too, and every
   // srcTagStart/srcTagEnd indexing it just went with the elements.
   StringClear(&s->documentSource);
@@ -701,6 +704,9 @@ void LoadHypermediaDocument(State *s, String source) {
 
   arena_reset(&s->doc_arena);
   s->numElements = 0;
+  // selectedElementIdx indexes the element array that just went away.
+  s->selectedElementIdx = -1;
+  s->inspectorActiveField = -1;
   StringClear(&s->documentSource);
   // Set only once the read below has actually succeeded, so a failed load
   // can't leave edit mode believing it may write over the file it couldn't

@@ -353,6 +353,11 @@ static void ToggleVoiceRecording(State *s) {
 #include "lcars_gap_buffer.h"
 #include "lcars_text.h"
 #include "lcars_ui.h"
+// The edit-mode property inspector. After lcars_ui.h (it uses the geometry
+// helpers) and it needs MarkLayoutDirty (forward-declared at the top of this
+// file) and raygui (included above); its click-guard helper
+// InspectorPanelBounds is used by UpdateElement/UpdateDragAndResize below.
+#include "lcars_inspector.h"
 // Included here, not at the end next to lcars_hypermedia.h, because
 // HandleElementClick() below dispatches controls: everything the dispatcher
 // needs (the DB layer, the editor helpers, the HTTP client) is in scope by
@@ -440,6 +445,8 @@ void Init(State *s, bool firstInit) {
 
   s->debug = false;
   s->is_editing = false;
+  s->selectedElementIdx = -1;
+  s->inspectorActiveField = -1;
   s->lcarsColor = (Color){204, 153, 204, 255}; // Purple
   s->posX = 0;
   s->posY = 210;
@@ -696,8 +703,13 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
       e->isResizing = false;
     }
   } else {
+    // A press that landed on the inspector panel belongs to a widget there, not
+    // to whatever element sits behind it: don't let it start a drag/resize. An
+    // in-progress drag (handled above) is unaffected — the mouse may wander
+    // over the panel mid-drag and the drag should still finish.
+    bool overInspector = CheckCollisionPointRec(mPos, InspectorPanelBounds(s));
     // Find which element to interact with (reverse order for top-most)
-    if (s->is_editing) {
+    if (s->is_editing && !overInspector) {
       for (int i = s->numElements - 1; i >= 0; i--) {
         Element *e = &s->elements[i];
         if (e->kind == ELEM_NOTHING)
@@ -720,6 +732,7 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
             e->isResizing = true;
             e->dragOffsetX = mPos.x - (e->position.x + e->width);
             e->dragOffsetY = mPos.y - (e->position.y + e->height);
+            s->selectedElementIdx = i; // starting an edit also selects it
             break;
           }
         } else if (CheckCollisionPointRec(mPos, dragHandle)) {
@@ -728,12 +741,14 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
             e->isDragging = true;
             e->dragOffsetX = mPos.x - e->position.x;
             e->dragOffsetY = mPos.y - e->position.y;
+            s->selectedElementIdx = i; // starting an edit also selects it
             break;
           }
         }
       }
     }
-    if (IsKeyDown(KEY_LEFT_SUPER) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+    if (IsKeyDown(KEY_LEFT_SUPER) && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
+        !overInspector) {
       if (mDelta.x != 0.0f || mDelta.y != 0.0f) {
         for (int i = 0; i < s->numElements; i++) {
           Element *e = &s->elements[i];
@@ -748,7 +763,8 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
     }
   }
 
-  if (IsKeyDown(KEY_LEFT_SUPER)) {
+  if (IsKeyDown(KEY_LEFT_SUPER) &&
+      !CheckCollisionPointRec(mPos, InspectorPanelBounds(s))) {
     for (int i = s->numElements - 1; i >= 0; i--) {
       Element *e = &s->elements[i];
       if (e->kind == ELEM_NOTHING)
@@ -760,12 +776,14 @@ static void UpdateDragAndResize(State *s, Vector2 mPos, Vector2 mDelta,
           e->isDragging = true;
           e->dragOffsetX = mPos.x - e->position.x;
           e->dragOffsetY = mPos.y - e->position.y;
+          s->selectedElementIdx = i; // Super+drag also selects it
           break;
         }
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
           e->isResizing = true;
           e->dragOffsetX = mPos.x - (e->position.x + e->width);
           e->dragOffsetY = mPos.y - (e->position.y + e->height);
+          s->selectedElementIdx = i; // Super+right-drag also selects it
           break;
         }
       }
@@ -803,14 +821,25 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
   bool isHovering = IsHoveringElement(s, e);
   if (isHovering && !e->isDragging && !e->isResizing) {
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-      int generation = s->documentGeneration;
-      HandleElementClick(s, e);
-      if (s->documentGeneration != generation) {
-        // The click navigated (or a control swapped in a new document):
-        // this element, its per-kind side structs and everything else in
-        // doc_arena are gone. Update() stops the whole element loop for the
-        // same reason - see the generation check there.
-        return;
+      if (s->is_editing) {
+        // Edit mode: a click selects the element for the inspector rather than
+        // firing its on_click action (you're arranging the layout, not driving
+        // the UI). A click that landed on the inspector panel itself belongs to
+        // a widget there and must not reselect whatever element sits behind it.
+        if (!CheckCollisionPointRec(mPos, InspectorPanelBounds(s))) {
+          s->selectedElementIdx = i;
+          s->inspectorActiveField = -1;
+        }
+      } else {
+        int generation = s->documentGeneration;
+        HandleElementClick(s, e);
+        if (s->documentGeneration != generation) {
+          // The click navigated (or a control swapped in a new document):
+          // this element, its per-kind side structs and everything else in
+          // doc_arena are gone. Update() stops the whole element loop for the
+          // same reason - see the generation check there.
+          return;
+        }
       }
     }
   }
@@ -1048,8 +1077,14 @@ static void UpdateElement(State *s, int i, Vector2 mPos, int draggingIdx,
       }
     }
 
-    // Keyboard input & editing logic
-    if (e->isFocused) {
+    // Keyboard input & editing logic. Suppressed while an inspector text field
+    // owns keyboard focus (edit mode): the shared GetCharPressed() queue would
+    // otherwise let a keystroke meant for the inspector's id/href/text box also
+    // land in this editor's gap buffer - and for a bind="log" editor that means
+    // typing an element's id silently rewrites a journal entry. In practice the
+    // mouse is over the right-hand panel (so isFocused is already false), but
+    // this makes the guarantee explicit rather than positional.
+    if (e->isFocused && s->inspectorActiveField == INSP_FIELD_NONE) {
       e->textSelectedFramesCounter++;
 
       if (CheckCollisionPointRec(mPos, sb.bounds)) {
@@ -1994,6 +2029,7 @@ void UpdateDrawFrame(State *s) {
   DrawNotification(s);
   DrawDebugOverlay(s, mPos);
   DrawEditHandles(s);
+  DrawInspector(s);
 
   EndDrawing();
   arena_reset(&s->scratch_arena);

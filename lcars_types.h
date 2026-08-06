@@ -467,6 +467,18 @@ typedef struct State {
   // See lcars_doc_writer.h.
   bool layoutDirty;
   float layoutLastEditTime;
+
+  // Edit-mode inspector / State editor (lcars_inspector.h). selectedElementIdx
+  // is the element whose properties the panel shows, or -1 for none; it is an
+  // index into `elements`, so every document load resets it (the array it
+  // indexes is gone). inspectorActiveField is which inspector widget currently
+  // holds raygui's single edit-mode focus (-1 = none). The three char buffers
+  // back the panel's text fields, which raygui edits in place across frames.
+  int selectedElementIdx;
+  int inspectorActiveField;
+  char inspId[128];
+  char inspHref[512];
+  char inspText[512];
 } State;
 
 #endif // LCARS_TYPES_H

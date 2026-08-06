@@ -23,7 +23,8 @@ unimplemented/unreachable paths, not a marker for future work.
 - [ ] **No undo for layout edits.** A drag is written to the file half a second
   after the mouse stops, and the only way back is `git checkout` on the
   document. `Super+R` used to be that escape hatch — it now reloads the saved
-  file, so it restores nothing.
+  file, so it restores nothing. Implement a generalized Undo-Redo system that 
+  will work on edits of the UI but also on the Text Editors.
 - [ ] **Local `GET /entries` list route.** The in-process control routes cover
   one entry at a time (`GET/PUT/DELETE /entries/<id>`, `POST /entries`) but
   there is no way to ask for the list. The interesting version isn't JSON: it
@@ -134,6 +135,21 @@ unimplemented/unreachable paths, not a marker for future work.
 
 ## Done
 
+- [x] **State editor (Unity-style inspector) in edit mode.** In edit mode,
+  clicking an element selects it (`State.selectedElementIdx`) and a right-hand
+  panel (`lcars_inspector.h`, built on raygui) shows its authored properties and
+  edits them live: `kind`, `id`, `x`/`y`/`w`/`h`, `color` (LCARS palette +
+  swatch), `textSize`, elbow `orient`, `on_click` action, `href`, the `text`
+  label, and the `autoSize`/`bindsToLog` toggles. The runtime-only Element
+  fields (gap buffer, focus/selection, KeyRepeat timers, DB caches) are
+  deliberately not shown — they aren't authored properties and hand-editing them
+  only corrupts editor/list state. Two known limits, both already tracked as
+  separate items above: (1) only `x`/`y`/`w`/`h` persist to the `.html` (via the
+  existing `MarkLayoutDirty()` path) — every other edit is session-only until the
+  document writer learns non-geometry attributes ("Real-time hypermedia document
+  editor — the rest of it"); (2) switching to a kind that needs a side struct it
+  doesn't already have (text_editor/entry_list/sphere) is refused rather than
+  running a constructor mid-frame against an element missing its inputs.
 - [x] **The HTTP API can query and edit, not just list and append.**
   `GET /entries` now filters (`kind`, `q`, `date`, `since`/`until`,
   `modified_since`/`modified_until`, `done`, `deleted`, `min_id`/`max_id`),
