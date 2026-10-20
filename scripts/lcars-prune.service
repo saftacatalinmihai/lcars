@@ -1,0 +1,20 @@
+# Removes crew_inbox rows done and untouched for seven days, with their
+# side rows (scripts/db-prune.py --apply): delivery slips, not records -
+# no1_log keeps what mattered. The one hard delete in lcars.db, so it runs
+# only from here or by hand, never from a route. Refuses when the server
+# does not answer /health; each run is a line in
+# ~/.local/state/lcars-eng/prune.jsonl. Run by lcars-prune.timer; installed
+# with the other user units:
+#   for u in lcars-prune.service lcars-prune.timer; do scripts/crew.py unit $u > ~/.config/systemd/user/$u; done
+#   systemctl --user daemon-reload && systemctl --user enable --now lcars-prune.timer
+[Unit]
+Description=LCARS: prune delivered crew_inbox rows
+After=lcars.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/lcars
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Nice=15
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 %h/lcars/scripts/db-prune.py --apply

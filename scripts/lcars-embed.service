@@ -1,0 +1,68 @@
+# The embedding service behind GET /embeddings and POST /embed (lcars_embed.h):
+# llama-server with multilingual-e5-small, on localhost only. The lcars server
+# is its one client, and finds it at LCARS_EMBED_URL's default,
+# http://127.0.0.1:8091/v1/embeddings.
+#
+# It runs only while it is wanted. :8091 is held by lcars-embed.socket;
+# the first connection starts lcars-embed-proxy.service, which pulls this
+# unit up on :8092 and relays to it. After 10 idle minutes the proxy exits
+# and StopWhenUnneeded takes llama-server down with it. --sleep-idle-seconds
+# was the earlier answer, but a "sleeping" server still held ~550MB RSS on a
+# 2GB box whose swap was full; an exited one holds nothing. The cost is a
+# few seconds' cold start, which the indexer and POST /embed (120s curl
+# timeout) absorb: the socket accepts at once and the proxy waits for
+# ExecStartPost's readiness poll.
+#
+# Install (systemd *user* units, like lcars.service):
+#   for u in lcars-embed.service lcars-embed.socket lcars-embed-proxy.service; do
+#     scripts/crew.py unit $u > ~/.config/systemd/user/$u; done
+#   systemctl --user daemon-reload
+#   systemctl --user disable --now lcars-embed.service
+#   systemctl --user enable --now lcars-embed.socket
+#
+# Needs llama.cpp built (its build/bin: LCARS_LLAMA_DIR, default
+# ~/lcars/llama.cpp/build/bin) and the model (LCARS_EMBED_GGUF, default
+# ~/lcars/resources/multilingual-e5-small-q8_0.gguf; 132MB, from
+# huggingface.co/TwinSunsLLC/multilingual-e5-small-gguf - an older
+# conversion of the same model fails to load: "bert model needs to define
+# token type count"). Either is set in ~/.config/lcars/embed.env
+# (KEY=value lines, optional) rather than here.
+#
+# The flags are about memory, on a 2GB box:
+#   -np 1 -c 512            one slot, one sequence of at most 512 tokens (the
+#                           model's own limit)
+#   --cache-ram 0           no prompt cache: embeddings never reuse a prompt
+#   (memory growth)         this llama.cpp reserves a vocabulary-sized row of
+#                           logits per input token even when only embedding -
+#                           250k tokens, so ~1MB a token, ~350MB after a long
+#                           entry. Exiting when idle (above) is what hands it
+#                           back.
+#   Nice=19                 indexing is background work; the API comes first
+#   -lv 2                   errors and warnings only: at info it logs every
+#                           request, which is every batch the indexer sends
+[Unit]
+Description=LCARS embeddings (llama-server, multilingual-e5-small)
+After=network.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=simple
+Environment=LCARS_LLAMA_DIR=%h/lcars/llama.cpp/build/bin
+Environment=LCARS_EMBED_GGUF=%h/lcars/resources/multilingual-e5-small-q8_0.gguf
+EnvironmentFile=-%h/.config/lcars/embed.env
+# through sh, as the binary's path is a setting and systemd takes none for
+# the executable; exec keeps llama-server the unit's main process ($$ is
+# systemd's escape for a $ sh is to see)
+ExecStart=/bin/sh -c 'LD_LIBRARY_PATH="$${LCARS_LLAMA_DIR}" exec "$${LCARS_LLAMA_DIR}/llama-server" \
+  -m "$${LCARS_EMBED_GGUF}" \
+  --embedding --pooling mean -c 512 -b 512 -ub 512 -np 1 -t 1 \
+  --cache-ram 0 --host 127.0.0.1 --port 8092 -lv 2'
+# Started means answering: /health is 503 while the model loads, and the
+# proxy connects the moment this unit counts as up.
+ExecStartPost=/bin/sh -c 'for i in $(seq 120); do curl -sf -o /dev/null http://127.0.0.1:8092/health && exit 0; sleep 0.5; done; exit 1'
+Nice=19
+Restart=on-failure
+RestartSec=10
+MemoryMax=800M
+StandardOutput=null
+StandardError=journal

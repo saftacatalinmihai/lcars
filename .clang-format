@@ -1,0 +1,17 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 80
+BreakBeforeBraces: Attach
+IndentCaseLabels: false
+PointerAlignment: Right
+SpaceBeforeParens: ControlStatements
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+SortIncludes: Never
+Cpp11BracedListStyle: true
+...

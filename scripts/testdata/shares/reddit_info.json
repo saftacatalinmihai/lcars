@@ -1,0 +1,14 @@
+{
+ "kind": "Listing",
+ "data": {
+  "after": null, "dist": 1, "modhash": null, "geo_filter": "", "before": null,
+  "children": [
+   {"kind": "t3", "data": {
+     "subreddit": "ClaudeAI", "id": "1o9xk2q", "name": "t3_1o9xk2q", "title": "I built a Star Trek journal with Claude Code",
+     "author": "radu_popa", "created_utc": 1760860800.0, "score": 312, "ups": 312, "downs": 0,
+     "upvote_ratio": 0.94, "num_comments": 47, "view_count": null, "num_crossposts": 2,
+     "total_awards_received": 0, "permalink": "/r/ClaudeAI/comments/1o9xk2q/i_built_a_star_trek_journal_with_claude_code/",
+     "url": "https://blog.example/posts/lcars_journal/", "removed_by_category": null, "locked": false, "over_18": false}}
+  ]
+ }
+}

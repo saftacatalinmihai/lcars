@@ -1,0 +1,24 @@
+The crew models, textures and animation clips in this directory are derived
+from three packs by Quaternius (https://quaternius.com), all released under
+CC0 1.0 Universal (public domain),
+https://creativecommons.org/publicdomain/zero/1.0/ :
+
+  - Universal Base Characters (Standard)
+    https://quaternius.itch.io/universal-base-characters
+    the bodies, eyes, brows, skin and hair textures, and six hair styles
+  - Universal Animation Library (Standard)
+    https://quaternius.itch.io/universal-animation-library
+    the walks, idles, sitting, talking and reaching clips
+  - Universal Animation Library 2 (Standard)
+    https://quaternius.itch.io/universal-animation-library-2
+    Idle_FoldArms_Loop
+
+Made here from them, and CC0 likewise:
+
+  - hair_Short.glb, hair_Bob.glb, hair_Ponytail.glb: the pack's Simple
+    Parted and Long reshaped (scripts/deck-crew-hair.py)
+  - Idle_HandsBehind_Loop and Idle_PADD_Loop in clips.glb: the library's
+    Idle_Loop with the arms re-posed by IK (scripts/deck-crew-poses.py)
+
+scripts/deck-crew-build.sh fetches the three zips (deck-crew-fetch.py, into
+~/.cache/lcars-deck-models, never the repo) and rebuilds all of it.

@@ -1,0 +1,19 @@
+{
+ "id": "1",
+ "created_at": "2016-03-16T14:44:31.580Z",
+ "visibility": "public",
+ "uri": "https://mastodon.social/users/Gargron/statuses/1",
+ "url": "https://mastodon.social/@Gargron/1",
+ "replies_count": 65,
+ "reblogs_count": 602,
+ "favourites_count": 1152,
+ "quotes_count": 11,
+ "edited_at": null,
+ "content": "<p>Hello world</p>",
+ "account": {
+  "id": "1",
+  "username": "Gargron",
+  "acct": "Gargron",
+  "url": "https://mastodon.social/@Gargron"
+ }
+}

@@ -1,0 +1,33 @@
+# One scheduled crew role: `crew.py run %i` (crew/%i.md). Started by
+# lcars-crew@%i.timer, whose OnCalendar is a drop-in that `crew.py install`
+# writes from the role's front matter. Installed with the other user units:
+#   python3 scripts/crew.py install
+# The runner holds a global lock and waits for free memory itself; this unit
+# keeps a run from crowding the server: last in line for the CPU and the
+# disk, and stopped by the kernel past MemoryMax rather than letting the OOM
+# killer pick a victim (the user manager delegates the memory controller).
+[Unit]
+Description=LCARS crew: %i
+After=lcars.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/lcars
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# an agent run waits for the crew's one Claude Code seat (scripts/seat.py)
+ExecStart=/usr/bin/python3 %h/lcars/scripts/crew.py run %i
+Nice=15
+IOSchedulingClass=idle
+CPUWeight=20
+# On the 8GB box (2026-10-14; 600M/800M on the 2GB one): an agent run peaks
+# at ~300MB, the qa suite at ~540MB, which sat just under the old MemoryHigh.
+# crew.py's default min_free_mb is MemoryHigh, so a run starts only into
+# room to grow to it.
+MemoryHigh=1G
+MemoryMax=1500M
+# lock_wait (30 min) + the seat (lock_wait again) + mem_wait (10 min) +
+# timeout (15 min), and a margin
+TimeoutStartSec=95min
+# 75 is the runner's "skipped" (lock busy, memory short, server down): logged
+# in its run log, not a failure of the unit
+SuccessExitStatus=75

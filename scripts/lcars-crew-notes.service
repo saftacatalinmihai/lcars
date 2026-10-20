@@ -1,0 +1,34 @@
+# The crew notes watcher: `crew.py notes watch` (scripts/crew_notes.py,
+# docs/design/crew-notes.md). It holds GET /events as the crew login and
+# turns an "@yeoman ..." line in one of the captain's entries into a
+# crew_note thread, then runs each queued turn through `crew.py note`, one
+# at a time, under the crew lock and seat like a scheduled run.
+# Not installed by `crew.py install` (which owns the timers); by hand:
+#   for u in lcars-crew-notes.service; do scripts/crew.py unit $u > ~/.config/systemd/user/$u; done
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now lcars-crew-notes.service
+[Unit]
+Description=LCARS crew notes watcher
+After=lcars.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/lcars
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 %h/lcars/scripts/crew.py notes watch
+Restart=always
+RestartSec=10
+Nice=15
+IOSchedulingClass=idle
+CPUWeight=20
+# The watcher itself is a few MB; a turn's claude is its child and is held
+# to what a scheduled run is (lcars-crew@.service)
+MemoryHigh=1G
+MemoryMax=1500M
+# a turn in flight is ended with the watcher; the thread stays "working"
+# and the next start queues it again
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

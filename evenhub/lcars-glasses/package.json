@@ -1,0 +1,28 @@
+{
+  "name": "lcars-glasses",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browse and edit LCARS journal entries on Even Realities G2 glasses",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "simulate": "evenhub-simulator http://localhost:5173",
+    "pack": "npm run build && evenhub pack app.json dist -o lcars-glasses.ehpk",
+    "test": "node --experimental-strip-types test/crud.test.ts"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.15"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.14",
+    "@evenrealities/evenhub-simulator": "^0.9.5",
+    "@types/node": "^26.5.1",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
+  },
+  "engines": {
+    "node": "^20.0.0 || >=22.0.0"
+  }
+}

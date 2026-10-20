@@ -1,0 +1,21 @@
+{
+  "package_id": "com.lcars.glasses",
+  "edition": "202601",
+  "name": "LCARS",
+  "version": "0.1.0",
+  "min_app_version": "2.2.10",
+  "min_sdk_version": "0.0.15",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Reads and writes journal entries on your own LCARS server.",
+      "whitelist": [
+        "https://REPLACE-ME.your-tailnet.ts.net"
+      ]
+    }
+  ],
+  "supported_languages": [
+    "en"
+  ]
+}

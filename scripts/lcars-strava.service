@@ -1,0 +1,22 @@
+# Pulls the captain's Strava activities into the journal as `workout`
+# entries (`lcars-cli strava pull`, lcars_strava.h). Run by
+# lcars-strava.timer. Needs, once, the grant: the API application, its id
+# and secret in ~/.env (LCARS_STRAVA_CLIENT_ID, LCARS_STRAVA_CLIENT_SECRET)
+# and `lcars-cli strava auth` - ARCHITECTURE.md, "Strava". ~/.env also
+# gives lcars-cli the server's login (LCARS_AUTH_USER/LCARS_AUTH_PASS).
+# The CLI is the one the linker uses: ~/lcars/bin/lcars-cli, the link to
+# the one binary (./lcars) the server makes at start, so a deploy that
+# rebuilds the server rebuilds it too; else the copied build it replaced,
+# ~/lcars/lcars-cli/lcars-cli, while that is kept.
+# Installed with the other user units:
+#   for u in lcars-strava.service lcars-strava.timer; do scripts/crew.py unit $u > ~/.config/systemd/user/$u; done
+#   systemctl --user daemon-reload && systemctl --user enable --now lcars-strava.timer
+[Unit]
+Description=LCARS: pull Strava activities into the journal
+After=lcars.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/lcars
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -c 'set -a; . %h/.env; set +a; cli=%h/lcars/bin/lcars-cli; [ -x "$$cli" ] || cli=%h/lcars/lcars-cli/lcars-cli; exec "$${LCARS_CLI:-$$cli}" strava pull'

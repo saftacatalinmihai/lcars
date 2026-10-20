@@ -1,0 +1,10 @@
+# Every five minutes; see lcars-eng-reap.service.
+[Unit]
+Description=LCARS: stop idle deck engineers, every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

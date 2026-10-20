@@ -1,0 +1,13 @@
+# Weekly, Sunday 05:10 in the captain's zone, when nobody is writing; see
+# lcars-prune.service. Persistent: a run missed while the box was down
+# happens at the next boot.
+[Unit]
+Description=LCARS: prune delivered crew_inbox rows, weekly
+
+[Timer]
+# (`crew.py unit` adds the zone, LCARS_TZ, to every OnCalendar= here)
+OnCalendar=Sun *-*-* 05:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

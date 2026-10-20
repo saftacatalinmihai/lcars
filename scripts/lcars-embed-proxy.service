@@ -1,0 +1,9 @@
+# Relays :8091 (lcars-embed.socket) to llama-server on :8092, and exits after
+# 10 idle minutes, which stops lcars-embed.service (StopWhenUnneeded).
+[Unit]
+Description=LCARS embeddings proxy (on-demand llama-server)
+Requires=lcars-embed.service
+After=lcars-embed.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=10min 127.0.0.1:8092

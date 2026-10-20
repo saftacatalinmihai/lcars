@@ -1,0 +1,85 @@
+# A release: on a tag v<CHANGELOG's version>, the static binary for x86_64
+# and arm64, checked as static.yml checks it, packed (scripts/release/
+# package.sh) and published with SHA256SUMS and the CHANGELOG entry as its
+# notes. docs/design/open-source-build.md §4. A tag publishes: pushing one
+# is the captain's call.
+name: Release
+
+on:
+  push:
+    tags: [ "v*" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # As in static.yml: arm64 runners are free for public repositories
+    # only, so a release from the private clone may go out with x86_64
+    # alone; in the public repo arm64 runs, and its tarball ships.
+    continue-on-error: ${{ matrix.arch == 'arm64' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag is CHANGELOG's version
+        run: |
+          want=$(sed -n 's/^## \([0-9][0-9.]*\) .*/\1/p' CHANGELOG.md | head -n 1)
+          if [ "${GITHUB_REF_NAME#v}" != "$want" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, but CHANGELOG.md's top is $want"
+            exit 1
+          fi
+      - name: make lcars-static in alpine:3.20
+        run: scripts/release/build.sh
+      - name: Checks
+        run: scripts/release/check.sh ./lcars-static
+      - name: Checks in bare Debian and Fedora (no curl, no sqlite)
+        run: |
+          for image in debian:stable-slim fedora:latest; do
+            echo "== $image"
+            docker run --rm -v "$PWD:/w:ro" -w /w "$image" \
+              sh /w/scripts/release/check.sh /w/lcars-static --bare
+          done
+      - name: Pack
+        run: scripts/release/package.sh ./lcars-static ${{ matrix.arch }} dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcars-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # this job alone: it creates the release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS and the notes
+        run: |
+          cd dist
+          ls *.tar.gz >/dev/null # at least one architecture built
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          cd ..
+          # the top entry, its heading left out
+          awk '/^## /{n++; next} n==1' CHANGELOG.md > notes.md
+          test -s notes.md
+      - name: gh release create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
+            --title "LCARS ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag

@@ -1,0 +1,13 @@
+{
+ "data": {"viewer": {"accounts": [{"rumPageloadEventsAdaptiveGroups": [
+  {"count": 40, "dimensions": {"date": "2026-10-18", "refererHost": ""}},
+  {"count": 120, "dimensions": {"date": "2026-10-18", "refererHost": "www.reddit.com"}},
+  {"count": 15, "dimensions": {"date": "2026-10-18", "refererHost": "out.reddit.com"}},
+  {"count": 9, "dimensions": {"date": "2026-10-18", "refererHost": "t.co"}},
+  {"count": 30, "dimensions": {"date": "2026-10-19", "refererHost": "old.reddit.com"}},
+  {"count": 200, "dimensions": {"date": "2026-10-19", "refererHost": "news.ycombinator.com"}},
+  {"count": 6, "dimensions": {"date": "2026-10-19", "refererHost": "mastodon.social"}},
+  {"count": 3, "dimensions": {"date": "2026-10-19", "refererHost": "www.google.com"}}
+ ]}]}},
+ "errors": null
+}

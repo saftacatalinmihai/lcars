@@ -1,0 +1,61 @@
+compile_commands.json
+lcars
+lcars-cli
+lcars-one
+lcars-embed
+lcars-static
+build/
+*.so
+# Left in older checkouts by the raylib desktop app's and the web build's
+# toolchains (removed in 0.175.0), and symlinked into engineers' worktrees
+# made before it; ignored so they do not make a tree look dirty.
+emsdk
+vendor/raylib-web
+vendor/libraylib.a
+vendor/libminiaudio.a
+lcars.data
+lcars.js
+lcars.wasm
+sqlite3.web.o
+pages/
+.cache/clangd/index
+redate.sh
+.vscode/
+*dSYM/
+*.db
+*amalgamation*
+resources/
+.env
+# A data directory's settings (lcars init writes one): it holds the password.
+lcars.env
+
+# lcars-ui (web UI copied from the VPS): generated artifacts and vendored
+# binaries live beside the source there and are not tracked.
+lcars-ui/demo/out/
+lcars-ui/test/run.js
+lcars-ui/test/page.js
+lcars-ui/test/shots/
+lcars-ui/test/deckshots/
+lcars-ui/test/qjs
+lcars-ui/test/esbuild
+__pycache__/
+
+# evenhub/ (Even Realities G2 app): npm deps and the Vite build output.
+evenhub/**/node_modules/
+evenhub/**/dist/
+*.ehpk
+
+# Per-machine agent tooling: skill installs and MCP/model config that differ
+# between this laptop and the VPS, so they must not travel with the repo.
+.agents/
+.codex/
+.crush/
+skills-lock.json
+
+# Local scratch: a hand-made backup and a DB copy made while testing.
+# lcars.db_local is not caught by *.db.
+main.html_bkp
+lcars.db_local
+scripts/node_modules
+# A data directory's bin/: the one binary's lcars-cli link, made at start
+/bin/

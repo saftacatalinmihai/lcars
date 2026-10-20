@@ -1,0 +1,10 @@
+# Holds :8091 for the on-demand embedding service; see lcars-embed.service.
+[Unit]
+Description=LCARS embeddings socket (starts llama-server on demand)
+
+[Socket]
+ListenStream=127.0.0.1:8091
+Service=lcars-embed-proxy.service
+
+[Install]
+WantedBy=sockets.target

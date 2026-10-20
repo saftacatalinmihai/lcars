@@ -1,0 +1,14 @@
+# Stops deck engineers that have sat idle (scripts/engineer.py reap): each is
+# a 200-400MB Claude Code process holding the crew's one seat. It
+# also deletes ended Claude sessions' scratch from /tmp, a tmpfs. Run
+# by lcars-eng-reap.timer; installed with the other user units:
+#   for u in lcars-eng-reap.service lcars-eng-reap.timer; do scripts/crew.py unit $u > ~/.config/systemd/user/$u; done
+#   systemctl --user daemon-reload && systemctl --user enable --now lcars-eng-reap.timer
+[Unit]
+Description=LCARS: stop idle deck engineers
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/lcars
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 %h/lcars/scripts/engineer.py reap

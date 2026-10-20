@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>LCARS · G2</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #000;
+        --fg: #f7c77a;
+        --dim: #8a7a63;
+        --accent: #cc99cc;
+        --field: #14100c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 20px 16px 48px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      h1 {
+        font-size: 18px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin: 0 0 4px;
+      }
+      p.sub { color: var(--dim); margin: 0 0 20px; }
+      label { display: block; margin: 14px 0 4px; color: var(--accent); font-size: 13px; }
+      input, textarea {
+        width: 100%;
+        padding: 10px;
+        background: var(--field);
+        color: var(--fg);
+        border: 1px solid #3a2f24;
+        border-radius: 6px;
+        font: inherit;
+      }
+      textarea { min-height: 96px; resize: vertical; }
+      .row { display: flex; gap: 10px; }
+      .row > div { flex: 1; }
+      .buttons { display: flex; gap: 10px; margin-top: 20px; }
+      button {
+        flex: 1;
+        padding: 12px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #1a1016;
+        font: inherit;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      button.secondary { background: #3a2f24; color: var(--fg); }
+      #status { min-height: 1.4em; margin: 14px 0 0; }
+      #status.ok { color: #9ccc9c; }
+      #status.err { color: #e08f8f; }
+      small { color: var(--dim); display: block; margin-top: 6px; line-height: 1.5; }
+      hr { border: 0; border-top: 1px solid #2a2119; margin: 24px 0; }
+    </style>
+  </head>
+  <body>
+    <div id="settings">
+      <h1>LCARS · G2</h1>
+      <p class="sub">Set up here. Browse and edit on the glasses.</p>
+
+      <label for="baseUrl">API base URL</label>
+      <input id="baseUrl" type="url" inputmode="url" autocapitalize="off"
+             autocomplete="off" spellcheck="false"
+             placeholder="https://host.tailnet.ts.net" />
+      <small>
+        Must be https if this page is served over https, and must also appear in
+        <code>app.json</code> → permissions → network → whitelist, or the WebView
+        blocks the request before it is sent.
+      </small>
+
+      <div class="row">
+        <div>
+          <label for="user">User</label>
+          <input id="user" type="text" autocapitalize="off" autocomplete="off"
+                 spellcheck="false" />
+        </div>
+        <div>
+          <label for="pass">Password</label>
+          <input id="pass" type="password" autocomplete="off" />
+        </div>
+      </div>
+      <small>Basic auth, the same credentials the HTTP API already uses.</small>
+
+      <div class="row">
+        <div>
+          <label for="kind">Default kind</label>
+          <input id="kind" type="text" autocapitalize="off" spellcheck="false"
+                 placeholder="personal_log" />
+        </div>
+        <div>
+          <label for="limit">Entries to fetch</label>
+          <input id="limit" type="number" min="1" max="1000" />
+        </div>
+      </div>
+      <small>Leave the kind empty to browse every kind at once.</small>
+
+      <hr />
+
+      <label for="quick">Quick captures</label>
+      <textarea id="quick" autocapitalize="off" spellcheck="false"></textarea>
+      <small>
+        One per line: <code>label | kind | title | content</code>. These are the
+        entries the glasses can create with a single click — the SDK's
+        microphone returns raw audio rather than text, so there is no dictation
+        without a speech-to-text service.
+      </small>
+
+      <div class="buttons">
+        <button id="test" class="secondary" type="button">Test</button>
+        <button id="save" type="button">Save</button>
+      </div>
+      <p id="status"></p>
+    </div>
+
+    <script type="module" src="/src/entry.ts"></script>
+  </body>
+</html>

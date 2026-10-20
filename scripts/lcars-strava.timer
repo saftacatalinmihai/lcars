@@ -1,0 +1,12 @@
+# Hourly; see lcars-strava.service. A pull that meets Strava's rate limit
+# (a long backfill does) stops, and this carries it on an hour later.
+[Unit]
+Description=LCARS: pull Strava activities into the journal, hourly
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

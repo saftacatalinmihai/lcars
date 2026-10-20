@@ -1,0 +1,62 @@
+# The static release binary, built and checked on every push to deb (each
+# deploy pushes it) and on pull requests: the only place lcars-static is
+# proven, since the box that builds everything else has no docker or musl.
+# docs/design/open-source-build.md §4; release.yml is the same build on a
+# tag, with the tarballs. Kept lean - a public repo's minutes are free, but
+# the private clone's are metered: one job per architecture, a superseded
+# push cancelled, no artifacts kept.
+name: Static build
+
+on:
+  push:
+    # deb is the private clone's live branch, main the public repo's
+    branches: [ "deb", "main" ]
+    # Only what the binary is built from, or how: a deploy of the page, the
+    # docs or the python scripts alone runs no metered job. The page is
+    # packed into the binary as bytes, unread by the compile; a tag's run
+    # (release.yml) builds and checks it again with whatever page it has.
+    paths:
+      - "**.c"
+      - "**.h"
+      - "Makefile"
+      - "scripts/ui-pack.py"
+      - "scripts/release/**"
+      - ".github/workflows/static.yml"
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # GitHub's arm64 runners are free for public repositories only: in the
+    # private clone an arm64 failure (or no runner) must not turn a deploy's
+    # CI red, so x86_64 alone decides (TODO.md: let arm64 decide too).
+    continue-on-error: ${{ matrix.arch == 'arm64' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: make lcars-static in alpine:3.20
+        run: scripts/release/build.sh
+      - name: Checks
+        run: scripts/release/check.sh ./lcars-static
+      - name: Checks in bare Debian and Fedora (no curl, no sqlite)
+        run: |
+          for image in debian:stable-slim fedora:latest; do
+            echo "== $image"
+            docker run --rm -v "$PWD:/w:ro" -w /w "$image" \
+              sh /w/scripts/release/check.sh /w/lcars-static --bare
+          done

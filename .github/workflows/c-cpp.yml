@@ -1,0 +1,31 @@
+name: C/C++ CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libcurl4-openssl-dev libsqlite3-dev zlib1g-dev
+    - uses: actions/checkout@v5
+    - name: make
+      run: make lcars-release lcars-cli
+    - name: Run the server and verify it answers
+      run: |
+        mkdir -p /tmp/lcars-ci && cd /tmp/lcars-ci
+        LCARS_EMBED=0 LCARS_CHAT=0 "$GITHUB_WORKSPACE/lcars" --port 8099 --user ci --pass ci &
+        SERVER_PID=$!
+        for i in $(seq 50); do curl -sf http://127.0.0.1:8099/health && break; sleep 0.1; done
+        # a new journal is empty (no seed row): ask the role table instead
+        curl -sf -u ci:ci 'http://127.0.0.1:8099/kinds/roles' | grep -q '"role":"log"'
+        kill $SERVER_PID

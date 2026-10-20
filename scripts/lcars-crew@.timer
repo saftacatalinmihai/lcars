@@ -1,0 +1,14 @@
+# The schedule of one crew role. OnCalendar is not here: `crew.py install`
+# writes lcars-crew@<role>.timer.d/schedule.conf from crew/<role>.md, in
+# the captain's zone, LCARS_TZ (the box may run in another).
+[Unit]
+Description=LCARS crew: %i, on schedule
+
+[Timer]
+# A run missed while the box was down goes once at boot; the runner's lock
+# keeps several missed ones from starting together
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
