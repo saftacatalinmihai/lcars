@@ -256,7 +256,7 @@ def run_tests(src, dest):
     journal (no lcars.db in a fresh tree: run.sh makes one), the script
     tests. Each stage's output goes to the terminal; a failure stops."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("LCARS_TEST_DB")}
-    env.setdefault("PERF", "0")  # perf compares with deb's page, which DEST has not
+    env.setdefault("PERF", "0")  # perf compares with main's page, which DEST has not
     # the suite's two binaries are ignored, a box's own (no fresh clone has
     # them yet): lent from this checkout for the run, then taken back
     lent = []

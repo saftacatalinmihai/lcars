@@ -550,7 +550,9 @@ static int EmbedIndexBatch(Arena *arena, sqlite3 *db, float *vecs,
       "SELECT e.id, e.title, substr(e.content, 1, ?3), "
       "ifnull(e.last_modified_at_utc, '') FROM entries e "
       "LEFT JOIN entry_embeddings m ON m.entry_id = e.id "
-      "WHERE e.deleted = 0 AND (m.entry_id IS NULL OR m.model <> ?1 "
+      // a Secret entry is never embedded: its text is sealed (lcars_vault.h)
+      "WHERE e.deleted = 0 AND ifnull(e.classification, 0) = 0 AND "
+      "(m.entry_id IS NULL OR m.model <> ?1 "
       "OR m.source_modified <> ifnull(e.last_modified_at_utc, '')) "
       "AND ifnull(e.last_modified_at_utc, '') <= "
       "strftime('%Y-%m-%d %H:%M:%S', 'now', ?4) "
@@ -633,8 +635,12 @@ static int EmbedIndexBatch(Arena *arena, sqlite3 *db, float *vecs,
   rc = sqlite3_prepare_v2(
       db,
       "INSERT OR REPLACE INTO entry_embeddings (entry_id, model, "
-      "source_modified, dim, vec, embedded_at_utc) VALUES (?1, ?2, ?3, ?4, "
-      "?5, strftime('%Y-%m-%d %H:%M:%S', 'now'));",
+      "source_modified, dim, vec, embedded_at_utc) SELECT ?1, ?2, ?3, ?4, "
+      "?5, strftime('%Y-%m-%d %H:%M:%S', 'now') "
+      // a row raised to Secret while its text was at the service: its
+      // vector is not kept (lcars_vault.h)
+      "WHERE EXISTS (SELECT 1 FROM entries WHERE id = ?1 AND "
+      "ifnull(classification, 0) = 0);",
       -1, &ins, NULL);
   if (rc != SQLITE_OK) {
     printf("Embed: cannot prepare the insert: %s\n", sqlite3_errmsg(db));
@@ -816,9 +822,11 @@ static int HandleEmbeddings(int client_fd, Arena *arena, const char *query) {
   sqlite3_stmt *st = NULL;
   if (sqlite3_prepare_v2(
           db,
-          "SELECT (SELECT count(*) FROM entries WHERE deleted = 0), "
+          "SELECT (SELECT count(*) FROM entries WHERE deleted = 0 AND "
+          "ifnull(classification, 0) = 0), "
           "(SELECT count(*) FROM entry_embeddings m JOIN entries e "
-          " ON e.id = m.entry_id WHERE e.deleted = 0 AND m.model = ?1 "
+          " ON e.id = m.entry_id WHERE e.deleted = 0 AND "
+          "ifnull(e.classification, 0) = 0 AND m.model = ?1 "
           " AND m.source_modified = ifnull(e.last_modified_at_utc, '')), "
           "(SELECT ifnull(max(dim), 0) FROM entry_embeddings "
           " WHERE model = ?1);",
@@ -836,6 +844,7 @@ static int HandleEmbeddings(int client_fd, Arena *arena, const char *query) {
                          "SELECT m.entry_id, m.vec, m.embedded_at_utc "
                          "FROM entry_embeddings m JOIN entries e "
                          "ON e.id = m.entry_id WHERE e.deleted = 0 "
+                         "AND ifnull(e.classification, 0) = 0 "
                          "AND m.model = ?1 AND m.dim = ?2 "
                          "AND m.embedded_at_utc >= ?3 ORDER BY m.entry_id;",
                          -1, &st, NULL) != SQLITE_OK) {

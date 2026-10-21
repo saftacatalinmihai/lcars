@@ -294,6 +294,20 @@ def run(shard, nshards):
                 calm(500)
                 sweep("an engineer")
 
+            # Number One's threads: the sheet's New fields, and a chip's Rename
+            def no1_threads():
+                home()
+                page.evaluate("chatsOpen(engThread(NO1, NO1_TITLE).id)")
+                calm(500)
+                ths = "[{id: 'main', name: 'Main'}, {id: 'deck', name: 'Deck redesign'}]"
+                page.evaluate(f"() => {{ clearTimeout(chat.eng.timer); chat.eng.st = Object.assign({{}}, chat.eng.st, {{threads: {ths}}}); "
+                              "chatSheet('threads'); }")
+                calm(300)
+                sweep("Number One's threads sheet")
+                page.evaluate("chatSheet('thread', {id: 'deck'})")
+                calm(300)
+                sweep("a thread's sheet (rename)")
+
             # the navigator: the one chat's pane in the course sheet
             def the_navigator():
                 home()
@@ -384,7 +398,7 @@ def run(shard, nshards):
             labels = page.evaluate("paletteRows().map(r => r.label)")
             jobs = [the_list, the_editor, the_reader]
             jobs += [lambda n=n: a_page(n) for n in routes]
-            jobs += [an_engineer, a_long_thread, the_navigator, a_crew_note]
+            jobs += [an_engineer, no1_threads, a_long_thread, the_navigator, a_crew_note]
             jobs += [lambda n=n: the_race(n) for n in routes + ["engineer"]]
             jobs += [lambda l=l: a_row(l) for l in labels if not any(s in l.lower() for s in SKIP_ROWS)]
             for i, job in enumerate(jobs):

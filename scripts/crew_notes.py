@@ -305,11 +305,23 @@ def note_names():
     return names if isinstance(names, dict) else None
 
 
-def engineer_send(to, text):
+def engineer_send(to, text, thread=None):
     """(0 or the exit status, why): an order typed to Number One's inbox or
-    an engineer's session, as the captain's (`say`, never --fresh)."""
-    rc, j = engineer_run("no1-send", text) if to == NO1 else engineer_run("say", to, inp=text)
+    an engineer's session, as the captain's (`say`, never --fresh). `thread`:
+    Number One's thread it is for (no1_thread_of)."""
+    if to == NO1:
+        rc, j = engineer_run("no1-send", *(["--thread", thread] if thread else []), text)
+    else:
+        rc, j = engineer_run("say", to, inp=text)
     return rc, str(j.get("error") or "")[:200]
+
+
+def no1_thread_of(t):
+    """The thread of Number One's a note is for: `@no1 #deck …` names one
+    (its first turn, so the replies follow it), else main (decision 2)."""
+    first = next((x["text"] for x in t["turns"] if captain(x)), "")
+    m = re.match(r"\s*(?:@" + re.escape(t.get("role") or "no1") + r"\b[\s,:]*)?#([a-z][a-z0-9-]{0,23})\b", first, re.I)
+    return m.group(1).lower() if m else "main"
 
 
 def order_text(t, tid, entry, turns):
@@ -677,7 +689,7 @@ class Watcher:
         text = order_text(t, tid, entry, [x for x in t["turns"] if captain(x)][-n:])
         t["sent"] = was + n
         put_thread(tid, t)
-        rc, why = engineer_send(t["to"], text)
+        rc, why = engineer_send(t["to"], text, no1_thread_of(t) if t["to"] == NO1 else None)
         self.log(f"thread #{tid}: {n} turn(s) to {t['to']}: " + ("sent" if rc == 0 else f"exit {rc} {why}"))
         if rc == 0:
             return 0

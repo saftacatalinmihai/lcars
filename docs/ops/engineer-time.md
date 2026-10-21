@@ -358,6 +358,10 @@ What it would cost:
 - **Rebase conflicts**: two engineers landing at once is more of the
   CHANGELOG/APP_VERSION conflicts that were 11 of 29 failed deploys.
 
+(Since 0.286.1 the job line, docs/design/job-queue.md, is the answer
+taken instead: one heavy run on the cores at a time, the seat passing on
+while it runs; an engineer's heavy commands go through `engineer.py job`.)
+
 Recommendation: a second seat is now feasible, at about a fifth longer
 test runs while both test; it is the captain's decision (TODO.md). If it
 is taken, take it with perf serialised across seats, and keep

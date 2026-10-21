@@ -20,6 +20,7 @@ from unittest import mock
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import testguard  # noqa: E402,F401 - no test reaches the live journal
 import engineer as E  # noqa: E402
 
 

@@ -39,12 +39,9 @@ import sys
 # runs it for the yeoman's nightly linker pass, crew/yeoman-linker.md). The
 # paths are the VPS's; the env overrides are for a scratch run on a laptop.
 # The CLI: the one binary's lcars-cli link the server makes in the checkout
-# at start (~/lcars/bin/lcars-cli), else the copied build it replaced, kept
-# for as long as the VPS may roll back to a binary without the CLI in it
-# (vps-rebuild.sh removes the link then).
-CLI = os.environ.get("LCARS_CLI") or next(
-    (p for p in map(os.path.expanduser, ("~/lcars/bin/lcars-cli", "~/lcars/lcars-cli/lcars-cli"))
-     if os.path.isfile(p) and os.access(p, os.X_OK)), os.path.expanduser("~/lcars/bin/lcars-cli"))
+# at start (~/lcars/bin/lcars-cli). The copied build it replaced retired in
+# 0.279.2, once lcars.prev was a one binary too: no fallback.
+CLI = os.environ.get("LCARS_CLI") or os.path.expanduser("~/lcars/bin/lcars-cli")
 LOG_DIR = os.environ.get("LCARS_LINKER_LOG_DIR") or os.path.expanduser("~/lcars/lcars-linker-logs")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

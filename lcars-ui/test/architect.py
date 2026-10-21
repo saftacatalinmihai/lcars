@@ -491,6 +491,20 @@ with sync_playwright() as p:
     check("a patch running when the last load stopped is skipped", ev("window.__deck.patchSkipped.has('t-move')")
           and not ev(WHERE, NAME)[3])
 
+    # ---- classified entries (index.html's "classified" block): no patch while
+    # the console holds the key, and the console told one has run
+    check("no patch has run on this load yet", ev("window.lcarsDeckPatched() === false"))
+    r0 = ev(PATCH, [{"id": "t-cls0", "code": "deck.obj(" + json.dumps(NAME) + ").move([0, 0.05, 0]);"}, "apply"])
+    check("one applies with the console locked", r0["ok"], json.dumps(r0))
+    check("and the deck says a patch ran this load", ev("window.lcarsDeckPatched() === true"))
+    ev(PATCH, [{"id": "t-cls0"}, "delete"])
+    ev("(() => { const w = document.querySelector('#cframe').contentWindow; w.__clsWas = w.lcarsClsUnlocked;"
+       " w.lcarsClsUnlocked = () => true; })()")
+    r = ev(PATCH, [{"id": "t-cls", "code": "deck.obj(" + json.dumps(NAME) + ").move([0, 0.1, 0]);"}, "apply"])
+    check("a patch is refused while the console is unlocked", not r["ok"] and "unlocked" in r.get("err", ""), json.dumps(r))
+    ev("(() => { const w = document.querySelector('#cframe').contentWindow; w.lcarsClsUnlocked = w.__clsWas; })()")
+    ev(PATCH, [{"id": "t-cls"}, "delete"])
+
     # ---- ?nopatch
     boot(URL + "&nopatch")
     check("?nopatch applies none", ev("window.__deck.NOPATCH && window.__deck.patchLive.length === 0") and not ev(WHERE, NAME)[3])

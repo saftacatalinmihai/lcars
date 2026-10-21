@@ -34,17 +34,61 @@ after the folder is replaced, and the demo has no offline use.
 
 ## Upload (Jake's, with the bucket's token)
 
-Upload the folder's contents under `lcars-demo/`, replacing what is there,
-with the types a static host needs (`.mjs` as `text/javascript`, `.glb` as
-`model/gltf-binary`, `.webp`, `.woff2`, `.webmanifest`):
+Upload the folder's contents under `lcars-demo/` in the bucket `test`,
+replacing what is there, with the types a static host needs. The
+credentials are `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in
+`~/.env`: source it into the command's environment (`set -a; . ~/.env;
+set +a`) and never print them.
+
+**With wrangler** (how it is done here: no rclone on the box). Wrangler 3
+through `npx`, because the box has Node 20; nothing installed, telemetry
+off (`WRANGLER_SEND_METRICS=false`). Beside static.py:
 
 ```sh
-rclone sync ~/blog-media/lcars-demo/out r2:<bucket>/lcars-demo --exclude .lcars-demo
+set -a; . ~/.env; set +a
+python3 lcars-ui/demo/r2_sync.py            # the plan: put, same, delete
+python3 lcars-ui/demo/r2_sync.py --apply    # do it
+python3 lcars-ui/demo/live_check.py --base https://<the demo's host>/lcars-demo/
 ```
 
-Then open `<the bucket>/lcars-demo/index.html` (the
-file, not the folder: R2 serves no index document) and the deck from its
-Deck button. A link to the demo names `index.html`.
+`r2_sync.py [OUT]` (`--bucket`, default `test`; `--prefix`, default
+`lcars-demo/`) writes nothing without `--apply`. What it does:
+
+1. Lists what is under the prefix, read-only, from Cloudflare's API
+   (`lcars-ui/demo/r2_list.py`, which prints the listing on its own:
+   `GET /accounts/<id>/r2/buckets/<bucket>/objects?prefix=...`, the cursor
+   followed). Wrangler 3 cannot list a bucket. Each object's `etag` is
+   the MD5 of its bytes (a single-part put's).
+2. Puts each file of the build whose MD5 differs, and each new one, the
+   pages last (everything they name is there before they are), skipping
+   `.lcars-demo`, by
+   `npx --yes wrangler@3 r2 object put <bucket>/<prefix>PATH --file OUT/PATH --content-type TYPE`,
+   with `.html` `text/html; charset=utf-8`, `.js` and `.mjs`
+   `text/javascript; charset=utf-8`, `.css` `text/css; charset=utf-8`,
+   `.json` `application/json`, `.png` `image/png`, `.glb`
+   `model/gltf-binary`, `.webp` `image/webp`, `.woff2` `font/woff2`,
+   `.webmanifest` `application/manifest+json` (`TYPES`; a file of
+   another type stops the run before anything is written).
+3. Deletes each object under the prefix that is not in the build
+   (`wrangler@3 r2 object delete`), and nothing outside it.
+
+The credentials are read from the environment only, never from a file
+of the repo, and never printed. `live_check.py` (`--base`, default
+`$LCARS_DEMO_URL`; `--version`, default the build's) is the check below,
+in headless Chromium from the public URL.
+
+**With rclone**, the alternative, given an `r2` remote with the bucket's
+keys (it sets the types from the extensions itself):
+
+```sh
+rclone sync ~/blog-media/lcars-demo/out r2:test/lcars-demo --exclude .lcars-demo
+```
+
+Then open `https://public.mihai-safta.dev/lcars-demo/index.html` (the
+file, not the folder: R2 serves no index document): it says the version
+built, `GET /kinds/roles` answers in the page, and the deck from its Deck
+button loads its glbs (`model/gltf-binary`, 200). A link to the demo
+names `index.html`.
 
 ## How it works
 

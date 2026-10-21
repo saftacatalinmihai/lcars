@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Which of run.sh's stages a change needs: the files it touches against deb,
+"""Which of run.sh's stages a change needs: the files it touches against main,
 and for index.html the sections its hunks fall in (docs/ops/engineer-time.md).
 
     python3 test/changed.py            # what to run, said in words
@@ -8,7 +8,7 @@ and for index.html the sections its hunks fall in (docs/ops/engineer-time.md).
     python3 test/changed.py --json     # for engineer.py's deploy: stages, why, page
 
 The change is the worktree (committed, staged, unstaged and untracked)
-against its merge-base with deb, so it is what this branch would deploy.
+against its merge-base with main, so it is what this branch would deploy.
 
 Stages: parse, structure and the version check always run (seconds). deck
 runs for deck.html; audit, behaviour and keyboard for index.html; perf only
@@ -65,6 +65,8 @@ PERF = {
     "the chat dock": DOCK, "voice in the chats": ["chat-thread"], "speech queue": [], "hold to talk": ["chat-thread"],
     "plot a course": ["course-zoom", "course-turn"], "crew reports": [], "crew notes": [], "open questions": CHAT, "crew notes, the rule": [], "the yeoman's proposals": [], "engineers": ["eng-thread"],
     "alert conditions": IDLE,
+    # Secret entries: its row flag and placeholder are drawn by the list, its chip by the editor
+    "classified": LIST + EDIT,
     "keyboard": ["palette", "open"],
     # the style
     "scrollbars": ALL, "header": ALL, "layout": ALL, "collapsible columns": ALL, "focus mode": ALL,
@@ -91,6 +93,7 @@ ADVICE = {
     "editor": ["test/editor.py"], "drafts": ["test/editor.py"], "editor action bar": ["test/editor.py"],
     "read pane": ["test/editor.py"],
     "plot a course": ["test/turn.py"],
+    "classified": ["test/classified.py"],
     "the computer": ["test/back.py", "test/qa_chat.py"], "one chat": ["test/qa_chat.py"],
     "engineers": ["test/back.py", "test/qa_chat.py"], "voice in the chats": ["test/qa_chat.py"],
     "the computer's marks, shared": ["test/qa_chat.py"],
@@ -269,7 +272,7 @@ def worktree_changes(base, root=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="deb")
+    ap.add_argument("--base", default="main")
     ap.add_argument("--shell", action="store_true")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()

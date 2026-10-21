@@ -3,7 +3,7 @@
 #
 #   ./test/run.sh             every stage: before a hand-over, and what a deploy runs
 #   ./test/run.sh --changed   only the stages this branch's change needs, by the
-#                             files and page sections it touches against deb
+#                             files and page sections it touches against main
 #                             (test/changed.py; docs/ops/engineer-time.md)
 #
 # esbuild parses the page script, QuickJS runs it against a DOM shim small
@@ -15,13 +15,13 @@ set -e
 cd "$(dirname "$0")/.."
 T=test
 
-# --changed: test/changed.py sets SEL_* from the diff against deb
+# --changed: test/changed.py sets SEL_* from the diff against main
 # (CHANGED_BASE: another ref, the deploy's live branch); the full
 # run leaves them all on. A stage left out says so where it would have run.
 SEL_DECK=1 SEL_AUDIT=1 SEL_BEHAVIOUR=1 SEL_KB=1 SEL_PERF=1 SEL_PERF_ONLY=
 if [ "${1:-}" = --changed ]; then
-  echo "== what the change needs (--changed, against deb) =="
-  eval "$(python3 "$T/changed.py" --shell --base "${CHANGED_BASE:-deb}")"
+  echo "== what the change needs (--changed, against main) =="
+  eval "$(python3 "$T/changed.py" --shell --base "${CHANGED_BASE:-main}")"
 fi
 off() { echo "   skipped (--changed: not touched)"; }
 
@@ -164,7 +164,7 @@ finish keyboard
 # journal the size of the real one (see test/perf.py for what is measured and
 # why). Its scenarios run four at a time on a laptop (~30s), two at a time
 # on the 4-core VPS (~90s; ~1 minute more for each scenario over budget
-# that is run again against deb's page); it starts only once the stages
+# that is run again against main's page); it starts only once the stages
 # above are done, so they do not share the cores. PERF=0 skips it while
 # iterating; run it before committing a page change.
 echo "== frame budget (p99 main-thread <= 16.7ms) =="

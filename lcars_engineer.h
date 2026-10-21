@@ -29,15 +29,25 @@
 //                                   &before=<b>: the page ending at byte <b>;
 //                                   &past=<session>: one of their earlier
 //                                   conversations (kept by a clear) instead,
-//                                   read-only
+//                                   read-only; &thread=<id>: only the events
+//                                   of that thread of Number One's (docs/
+//                                   design/no1-threads.md, 13). Number One's
+//                                   events each carry `th`, its answer the
+//                                   open `threads` (id, name)
 //   GET  /engineer/<role>/brief     a scheduled role's brief, crew/<role>.md
 //                                   (read-only; the console's chat as that
 //                                   role)
 //   POST /engineer/<name>/start     {title, who}: worktree, herdr tab, session
-//   POST /engineer/<name>/say       {message, attachments?}: typed into
-//                                   their session; attachments as POST /chat
-//                                   takes them (lcars_chat.h), one line each
-//                                   with the file's path and URL
+//   POST /engineer/<name>/say       {message, attachments?, thread?}: typed
+//                                   into their session; attachments as POST
+//                                   /chat takes them (lcars_chat.h), one line
+//                                   each with the file's path and URL.
+//                                   `thread`, Number One's: typed under that
+//                                   thread's tag line; an unknown one a 404,
+//                                   a closed one reopened
+//   POST /engineer/number-one/thread
+//                                   {op, id, name?}: new, rename, close -
+//                                   labels only, the list in the answer
 //   POST /engineer/<name>/key       {key}: answer a dialog (1-9, enter, esc…)
 //   POST /engineer/<name>/stop      end the session; worktree and branch stay
 //   POST /engineer/<name>/deploy    ship eng/<name> (detached; poll for it)
@@ -48,14 +58,18 @@
 //                                   off; a question on screen is a 409. The
 //                                   poll and the list say model,
 //                                   model_pending and model_used
+//   POST /engineer/<name>/job-cancel
+//                                   {id?}: their job taken back, out of the
+//                                   job line or a running one stopped
+//                                   (docs/design/job-queue.md); none is a 409
 //   POST /engineer/number-one/refresh
 //                                   Number One writes a handover note, is
 //                                   cleared, and reads it back (detached)
 //   POST /engineer/rollback         undo the last deploy (detached)
 //
 // The script's exit status picks the HTTP one: 0 is 200, 2 a 400, 3 a 409
-// ("not now": busy, at a dialog, a deploy already running), anything else
-// a 500.
+// ("not now": busy, at a dialog, a deploy already running), 4 a 404 (no
+// such thread), anything else a 500.
 //
 // Security. This is a shell on the VPS by design - an engineer can do what
 // the captain can at a terminal - so the API password is not enough. Every
@@ -359,7 +373,11 @@ static int EngineerRun(int client_fd, Arena *arena, const char *const *args,
     return SendJSONError(client_fd, 500, "engineer.py answered nothing usable");
   }
   int code = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : 1;
-  int status = code == 0 ? 200 : code == 2 ? 400 : code == 3 ? 409 : 500;
+  int status = code == 0   ? 200
+               : code == 2 ? 400
+               : code == 3 ? 409
+               : code == 4 ? 404
+                           : 500;
   return SendJSON(client_fd, status, buf, len);
 }
 
@@ -441,6 +459,21 @@ static int EngineerQueueEdit(int client_fd, Arena *arena, const char *op,
   return EngineerRun(client_fd, arena, args, NULL, 0);
 }
 
+// A thread id of Number One's, NAME_RE's shape ([a-z][a-z0-9-]{0,23}): an
+// argv element, so checked here; whether it exists is the script's (a 404).
+static bool EngineerThreadId(const char *t) {
+  size_t n = strlen(t);
+  if (n == 0 || n > 24 || !(t[0] >= 'a' && t[0] <= 'z')) {
+    return false;
+  }
+  for (const char *c = t; *c; c++) {
+    if (!((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '-')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static int HandleEngineer(int client_fd, Arena *arena, const char *method,
                           const char *path, const char *query,
                           const char *req_buf, const char *body) {
@@ -480,11 +513,18 @@ static int HandleEngineer(int client_fd, Arena *arena, const char *method,
     }
     // `before`: the page of the transcript ending at that byte, which is
     // how a client walks back to the start of a long conversation
-    char off[24] = "-1", before[24] = "-1", past[48] = "-";
+    char off[24] = "-1", before[24] = "-1", past[48] = "-", thread[32] = "-";
     if (query != NULL) {
       query_get(query, "off", off, sizeof(off));
       query_get(query, "before", before, sizeof(before));
       query_get(query, "past", past, sizeof(past));
+      query_get(query, "thread", thread, sizeof(thread));
+    }
+    if (thread[0] == '\0') {
+      strcpy(thread, "-");
+    } else if (strcmp(thread, "-") != 0 && !EngineerThreadId(thread)) {
+      return SendJSONError(client_fd, 400,
+                           "thread must be [a-z][a-z0-9-]{0,23}");
     }
     // a session id (hex and dashes): an argv element, and the script takes
     // only one of the engineer's own earlier ones
@@ -507,7 +547,7 @@ static int HandleEngineer(int client_fd, Arena *arena, const char *method,
         }
       }
     }
-    const char *args[] = {"poll", name, off, before, past, NULL};
+    const char *args[] = {"poll", name, off, before, past, thread, NULL};
     return EngineerRun(client_fd, arena, args, NULL, 0);
   }
   // not an engineer's: <name> is a scheduled role, which the script checks
@@ -549,8 +589,16 @@ static int HandleEngineer(int client_fd, Arena *arena, const char *method,
       return SendJSONError(client_fd, 413, "message over %d bytes",
                            ENGINEER_MAX_INPUT);
     }
+    // Number One's thread: an argv element after --thread, or nothing
+    char thread[32] = "";
+    if (json_get_string(json, "thread", thread, sizeof(thread)) &&
+        thread[0] != '\0' && !EngineerThreadId(thread)) {
+      return SendJSONError(client_fd, 400,
+                           "thread must be [a-z][a-z0-9-]{0,23}");
+    }
+    const char *flag = thread[0] ? "--thread" : NULL;
     if (file_count == 0) {
-      const char *args[] = {"say", name, NULL};
+      const char *args[] = {"say", name, flag, thread, NULL};
       return EngineerRun(client_fd, arena, args, msg, n);
     }
     // With files the script is handed JSON (say --json): the message and
@@ -575,8 +623,19 @@ static int HandleEngineer(int client_fd, Arena *arena, const char *method,
       return SendJSONError(client_fd, 413, "message and files over %d bytes",
                            ENGINEER_MAX_INPUT);
     }
-    const char *args[] = {"say", name, "--json", NULL};
+    const char *args[] = {"say", name, "--json", flag, thread, NULL};
     return EngineerRun(client_fd, arena, args, in.data, in.len);
+  }
+  // the chips' thread labels: the body is handed to the script as it
+  // is (stdin, never argv), which checks every field
+  if (strcmp(verb, "thread") == 0) {
+    size_t n = strlen(json);
+    if (n > ENGINEER_MAX_INPUT) {
+      return SendJSONError(client_fd, 413, "body over %d bytes",
+                           ENGINEER_MAX_INPUT);
+    }
+    const char *args[] = {"thread-req", name, NULL};
+    return EngineerRun(client_fd, arena, args, json, n);
   }
   if (strcmp(verb, "key") == 0) {
     char key[16];
@@ -604,6 +663,20 @@ static int HandleEngineer(int client_fd, Arena *arena, const char *method,
           "body needs {\"model\": \"sonnet|haiku|opus|fable\"}");
     }
     const char *args[] = {"model", name, ChatModelFor(model), NULL};
+    return EngineerRun(client_fd, arena, args, NULL, 0);
+  }
+  if (strcmp(verb, "job-cancel") == 0) {
+    // the job id is <name>-<yyyymmdd-hhmmss>: an argv element, so only
+    // that alphabet; which job it is, and whose, is the script's
+    char id[64] = "";
+    json_get_string(json, "id", id, sizeof(id));
+    for (const char *c = id; *c; c++) {
+      if (!((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') ||
+            *c == '-')) {
+        return SendJSONError(client_fd, 400, "not a job id");
+      }
+    }
+    const char *args[] = {"job-cancel", name, id, NULL};
     return EngineerRun(client_fd, arena, args, NULL, 0);
   }
   // dismiss/recall: out of the console's list and back; nothing is removed

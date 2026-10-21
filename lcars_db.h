@@ -215,6 +215,11 @@ static void InitDB(sqlite3 *db) {
   // predates it. These two calls are what actually migrate it.
   EnsureEntryColumn(db, "start_date", "start_date TEXT DEFAULT ''");
   EnsureEntryColumn(db, "end_date", "end_date TEXT DEFAULT ''");
+  // Classified entries (lcars_vault.h): the level, 0 Unclassified and 2
+  // Secret, and a Secret row's envelope - its title, text and numbers,
+  // encrypted in the browser. Every row there is reads as Unclassified.
+  EnsureEntryColumn(db, "classification", "classification INTEGER DEFAULT 0");
+  EnsureEntryColumn(db, "sealed", "sealed TEXT DEFAULT ''");
 
   // A new journal holds nothing: no seed row (docs/design/kinds.md, 4).
   // The page draws an empty journal's own empty states, and the first

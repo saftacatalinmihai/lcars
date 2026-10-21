@@ -624,6 +624,25 @@ def kinds_entry(s):
           "the kinds entry is untouched")
 
 
+def classified(s):
+    """The vault and the classified columns are the owner's alone
+    (lcars_vault.h): no limited login reads the wrapped key or writes it,
+    nor classifies or declassifies a row, even one of its own kinds."""
+    print("\nclassified entries")
+    for who, login, kind in (("crew", CREW, "crew_note"), ("Number One", NO1, "no1_log"),
+                             ("the steward", STEWARD, "journal")):
+        check(s.req(login, "GET", "/vault")[0] == 403, f"{who}: GET /vault 403")
+        check(s.req(login, "PUT", "/vault", {"vault": {}, "token": "a" * 64, "version": 0})[0] == 403,
+              f"{who}: PUT /vault 403")
+        st, _ = s.req(login, "POST", "/entries", {"kind": kind, "classification": 2,
+                                                   "sealed": "lcs1.aGk.aGk"})
+        check(st == 403, f"{who}: a Secret create of its own kind 403 ({st})")
+    own = s.req(CREW, "POST", "/entries", {"kind": "crew_note", "title": "mine"})[1]["id"]
+    st, _ = s.req(CREW, "PATCH", f"/entries/{own}", {"classification": 2, "sealed": "lcs1.aGk.aGk"})
+    check(st == 403, f"crew: raising its own row 403 ({st})")
+    check(s.req(MAIN, "GET", "/vault")[0] == 200, "the main login reads /vault")
+
+
 def main():
     tmp = pathlib.Path(killclean.mkdtemp(prefix="lcars-logins-"))
     binary = os.environ.get("LCARS_TEST_BIN")
@@ -646,6 +665,7 @@ def main():
         run_steward(s)
         kinds_entry(s)
         patches(s, tmp)
+        classified(s)
         check(s.req(("crew", "wrong-password-0123456"), "GET", "/entries")[0] == 401,
               "a wrong crew password is a 401")
         check(s.proc.poll() is None, "the server is still up")

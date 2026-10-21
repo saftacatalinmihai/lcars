@@ -161,7 +161,11 @@ Then the log:
 
 - **Captain's bubbles** right, `--panel2`, rounded 18/18/4/18, the delivery
   mark under the last one: `sending…` → `✓ delivered` → `✓✓ read` (person) /
-  `⏳ queued · #2 for the seat` / `✕ not sent · tap to retry`.
+  `⏳ queued · #2 for the seat` / `✕ not sent · tap to retry`. Number
+  One's thread chips (no1-threads.md, section 13: All, then each thread)
+  filter his conversation at the tap, with no fetch, and a bubble sent
+  with one picked carries that thread (the say's `thread`, typed under
+  a `[thread <id>]` line); its marks are any bubble's.
 - **Their bubbles** left, black with a 4 px left bar in their colour
   (today's `.cm.a`), markdown, `#123` as a link chip to the entry.
 - **Tool steps** collapsed to one chip per turn: `⚙ 6 steps` (amber while one

@@ -24,6 +24,7 @@ void SetHTTPServerCredentials(const char *username, const char *password);
 #include <strings.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 #include <zlib.h>
 
@@ -94,9 +95,22 @@ void SetHTTPServerCredentials(const char *username, const char *password);
 // client can hold open indefinitely.
 #define HTTP_MAX_REQUESTS_PER_CONNECTION 100
 // Ceiling on connections being served at once. Each costs a thread with a
-// 1MB request arena on its stack, so this is the memory bound as much as the
-// concurrency one.
-#define HTTP_MAX_CONCURRENT_CONNECTIONS 32
+// 1MB request arena on its stack (up to ~1.5MB touched with CalDAV's below
+// it) and a sqlite handle whose page cache grows to 2MB: ~3.5MB at worst, so
+// 64 is ~225MB, a bound the 8GB VPS carries beside the chat's claude
+// sessions and the embedder; 128 would be ~450MB for nothing a single owner
+// does. It was 32, and a phone opening a page of tapes (~52 range requests
+// at once) filled it; 64 holds that burst outright, and an idle keep-alive
+// is given up for a new connection when it does not (HTTPSlotAcquire), so
+// this bounds requests in flight, not sockets a browser keeps warm.
+#define HTTP_MAX_CONCURRENT_CONNECTIONS 64
+// How long the accept loop waits for an evicted connection's thread to let go
+// of its slot: shutdown() wakes its recv() at once, so this is a ceiling
+// for a box under load, not a delay anyone sees.
+#define HTTP_EVICT_WAIT_MS 2000
+// A refusal (every slot mid-request) is logged at once, then at most one
+// line per this many seconds, carrying the count since the last line.
+#define HTTP_REFUSAL_LOG_SECONDS 10
 // Explicit rather than inherited: HandleHTTPConnection puts a 1MB arena on
 // the stack and CalDAV another 512KB below it, which is fine but should not
 // depend on whatever the platform's default thread stack happens to be.
@@ -114,6 +128,63 @@ static _Thread_local bool g_conn_keep_alive = false;
 // - but those are headers any client can send, so nothing may ever decide
 // anything on them; auth stays Basic auth alone.
 static _Thread_local char g_conn_peer[INET6_ADDRSTRLEN] = "?";
+
+// The connection slots, HTTP_MAX_CONCURRENT_CONNECTIONS of them. A slot is
+// taken by the accept loop before the connection's thread starts and let go
+// by the thread as it ends. While its thread waits for the next request to
+// start - a kept-alive connection between requests, or a preconnect that has
+// not spoken - the slot is `idle`, and the accept loop, finding every slot
+// taken, evicts the longest-idle one rather than answering 503: it marks it
+// `evicted` and shutdown()s the socket, which wakes the thread's recv() with
+// nothing read, the way a client's own goodbye ends a connection. shutdown(),
+// never close(): the fd is the thread's, and closing it from here could
+// close whatever the number is reused for next. A thread whose first bytes
+// arrive as it is being evicted gives the request up (HTTPSlotBusy): the
+// client sees a kept-alive connection closed under a request, which HTTP
+// clients retry, exactly as they do when an idle timeout races them.
+// Only when every slot is mid-request is a connection refused.
+typedef struct {
+  int fd;
+  bool used, idle, evicted;
+  double idle_since; // CLOCK_MONOTONIC seconds
+} HTTPSlot;
+static HTTPSlot g_http_slots[HTTP_MAX_CONCURRENT_CONNECTIONS];
+static pthread_mutex_t g_http_slots_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_http_slots_freed = PTHREAD_COND_INITIALIZER;
+// The slot of the connection this thread serves; -1 for none.
+static _Thread_local int g_conn_slot = -1;
+
+static double HTTPMonotonicSeconds(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+// The connection is about to wait for a request to start: it may be evicted.
+static void HTTPSlotIdle(void) {
+  if (g_conn_slot < 0)
+    return;
+  pthread_mutex_lock(&g_http_slots_mu);
+  HTTPSlot *s = &g_http_slots[g_conn_slot];
+  assert(s->used);
+  s->idle = true;
+  s->idle_since = HTTPMonotonicSeconds();
+  pthread_mutex_unlock(&g_http_slots_mu);
+}
+
+// A request has started arriving. False if the connection was evicted first:
+// its socket is already shut down, so there is no answering the request.
+static bool HTTPSlotBusy(void) {
+  if (g_conn_slot < 0)
+    return true;
+  pthread_mutex_lock(&g_http_slots_mu);
+  HTTPSlot *s = &g_http_slots[g_conn_slot];
+  assert(s->used);
+  s->idle = false;
+  bool ok = !s->evicted;
+  pthread_mutex_unlock(&g_http_slots_mu);
+  return ok;
+}
 
 // The Connection (and, when keeping, Keep-Alive) header every response
 // carries. Sending nothing at all was the bug: HTTP/1.1 says a connection
@@ -166,6 +237,10 @@ static LimitedLogin *const g_limited_logins[] = {&g_login_no1, &g_login_crew,
 // Per request, like g_conn_accepts_gzip: reset before anything else reads
 // it, since a keep-alive connection's next request may carry another login.
 static _Thread_local const LimitedLogin *g_conn_login = NULL;
+// The request's X-LCARS-Vault header, the vault token (lcars_vault.h): set
+// with g_conn_login after the auth check, empty when absent, and read by the
+// entry writes that touch a row's classification.
+static _Thread_local char g_conn_vault_token[72] = "";
 // The port the server bound, for the one thing that needs to call it back:
 // the chat subprocess's lcars-cli (lcars_chat.h), via LCARS_URL.
 static int g_http_port = 0;
@@ -1080,6 +1155,10 @@ static bool ReadHTTPRequestLine(int client_fd, char *req_buf,
   assert(idle_timeout_seconds > 0);
   SetSocketTimeout(client_fd, idle_timeout_seconds);
   bool started = (carry > 0);
+  // Evictable only while nothing of the next request is in hand: with a
+  // carry, it has already started.
+  if (!started)
+    HTTPSlotIdle();
   while (total_read < (int)req_buf_size - 1 &&
          strstr(req_buf, "\r\n\r\n") == NULL) {
     int n =
@@ -1089,11 +1168,20 @@ static bool ReadHTTPRequestLine(int client_fd, char *req_buf,
     if (!started) {
       SetSocketTimeout(client_fd, HTTP_IO_TIMEOUT_SECONDS);
       started = true;
+      if (!HTTPSlotBusy()) {
+        // Evicted as the request arrived: shut down under it, so there is
+        // no answering it. Ended quietly, as a goodbye is.
+        *out_total_read = total_read;
+        *out_idle = true;
+        return false;
+      }
     }
     total_read += n;
     req_buf[total_read] = '\0';
   }
   SetSocketTimeout(client_fd, HTTP_IO_TIMEOUT_SECONDS);
+  if (!started)
+    (void)HTTPSlotBusy(); // nothing came: idle no more, whatever ends it
   assert(total_read >= 0 && total_read < (int)req_buf_size);
   *out_total_read = total_read;
 
@@ -1395,6 +1483,11 @@ static bool OpenHTTPDB(int client_fd, sqlite3 **out_db) {
     return false;
   }
   sqlite3_busy_timeout(db, 2000);
+  // What an UPDATE or DELETE frees is zeroed rather than left in the file:
+  // a Secret entry's plaintext, on the write that seals it, must not
+  // survive as free space in lcars.db (lcars_vault.h, ClassifiedCheckpoint
+  // for the WAL). Per connection, so it is set on every one.
+  sqlite3_exec(db, "PRAGMA secure_delete = ON;", NULL, NULL, NULL);
   *out_db = db;
   return true;
 }
@@ -1407,7 +1500,8 @@ static bool OpenHTTPDB(int client_fd, sqlite3 **out_db) {
 #define HTTP_ENTRY_COLUMNS                                                     \
   "id, kind, title, content, value_int, value_float, done_bool, deleted, "     \
   "created_at_utc, last_modified_at_utc, length(content), start_date, "        \
-  "end_date"
+  "end_date, ifnull(classification, 0), ifnull(sealed, ''), "                  \
+  "length(ifnull(sealed, ''))"
 
 static void AppendEntryJSON(JSONBuf *b, sqlite3_stmt *stmt,
                             bool include_content) {
@@ -1421,6 +1515,16 @@ static void AppendEntryJSON(JSONBuf *b, sqlite3_stmt *stmt,
   const char *last_modified = (const char *)sqlite3_column_text(stmt, 9);
   const char *start_date = (const char *)sqlite3_column_text(stmt, 11);
   const char *end_date = (const char *)sqlite3_column_text(stmt, 12);
+  int classification = sqlite3_column_int(stmt, 13);
+  const char *sealed = (const char *)sqlite3_column_text(stmt, 14);
+  // A Secret row's envelope goes to the main login only: a limited login
+  // gets the placeholder - kind, dates, done, and nothing sealed - so an
+  // agent holds no ciphertext to keep or guess at. content_length counts
+  // the envelope for the main login, as it is that row's body: the page's
+  // lazy body load (content=0, then the bodies) asks for it by that length.
+  bool give_sealed = sealed && sealed[0] && g_conn_login == NULL;
+  int content_length = sqlite3_column_int(stmt, 10) +
+                       (give_sealed ? sqlite3_column_int(stmt, 15) : 0);
 
   jsonbuf_appendf(b, "{\"id\":%d,\"kind\":", sqlite3_column_int(stmt, 0));
   jsonbuf_append_json_string(b, kind);
@@ -1433,7 +1537,7 @@ static void AppendEntryJSON(JSONBuf *b, sqlite3_stmt *stmt,
   jsonbuf_appendf(b,
                   ",\"content_length\":%d,\"value_int\":%d,\"value_float\":%f,"
                   "\"done_bool\":%d,\"deleted\":%d,\"created_at_utc\":",
-                  sqlite3_column_int(stmt, 10), sqlite3_column_int(stmt, 4),
+                  content_length, sqlite3_column_int(stmt, 4),
                   sqlite3_column_double(stmt, 5), sqlite3_column_int(stmt, 6),
                   sqlite3_column_int(stmt, 7));
   jsonbuf_append_json_string(b, created_at);
@@ -1446,8 +1550,19 @@ static void AppendEntryJSON(JSONBuf *b, sqlite3_stmt *stmt,
   jsonbuf_append_json_string(b, start_date);
   jsonbuf_append(b, ",\"end_date\":");
   jsonbuf_append_json_string(b, end_date);
+  jsonbuf_appendf(b, ",\"classification\":%d", classification);
+  if (include_content && give_sealed) {
+    jsonbuf_append(b, ",\"sealed\":");
+    jsonbuf_append_json_string(b, sealed);
+  }
   jsonbuf_append(b, "}");
 }
+
+// Classified entries: the vault and the envelope rules (lcars_vault.h). Here,
+// ahead of the entry writes that use them, and after OpenHTTPDB and the
+// JSON helpers it uses.
+#define LCARS_VAULT_IMPLEMENTATION
+#include "lcars_vault.h"
 
 // A WHERE clause built from query parameters plus the values to bind into
 // it, in order. Nothing the client sends is ever pasted into the SQL text -
@@ -2258,8 +2373,14 @@ static int HandlePostEntry(int client_fd, Arena *arena, const char *body,
   // for a default: an entry nobody scheduled has no start and no end.
   char start_date[HTTP_MAX_TIMESTAMP_LEN + 1] = {0};
   char end_date[HTTP_MAX_TIMESTAMP_LEN + 1] = {0};
+  // Classified (lcars_vault.h): a create may be born Secret, its envelope
+  // made by the page before it was sent.
+  int classification = 0;
+  char *sealed = NULL;
 
   if (is_json) {
+    json_get_int(body, "classification", &classification);
+    json_get_string_arena(arena, body, "sealed", &sealed);
     json_get_string(body, "kind", kind, sizeof(kind));
     json_get_string(body, "title", title, sizeof(title));
     // Arena-backed: entry content is a journal entry, and a fixed buffer
@@ -2331,13 +2452,51 @@ static int HandlePostEntry(int client_fd, Arena *arena, const char *body,
     memcpy(modified_at, created_at, sizeof(modified_at));
   }
 
-  if (title[0] == '\0') {
+  bool secret = classification == CLASSIFIED_SECRET;
+  if (!ClassifiedLevelKnown(classification)) {
+    return SendJSONError(client_fd, 400,
+                         "classification is 0 (Unclassified) or 2 (Secret)");
+  }
+  if (classification != 0 && g_conn_login != NULL) {
+    return SendJSONError(client_fd, 403,
+                         "only the owner's page classifies an entry");
+  }
+  if (secret) {
+    if (title[0] != '\0' || content[0] != '\0' || value_int != 0 ||
+        value_float != 0.0f) {
+      return SendJSONError(client_fd, 400,
+                           "a Secret entry's title, text and numbers are "
+                           "sealed: send them empty, inside `sealed`");
+    }
+    if (sealed == NULL || !ClassifiedEnvelopeValid(sealed)) {
+      return SendJSONError(client_fd, 400,
+                           "a Secret entry takes its envelope in `sealed` "
+                           "(" CLASSIFIED_ENVELOPE_PREFIX "...)");
+    }
+  } else if (sealed != NULL && sealed[0] != '\0') {
+    return SendJSONError(client_fd, 400,
+                         "`sealed` is for a Secret entry (classification 2)");
+  }
+
+  // A Secret entry's title is sealed, so it stays empty rather than becoming
+  // the default every other untitled create gets.
+  if (title[0] == '\0' && !secret) {
     strcpy(title, "HTTP Entry");
   }
 
   sqlite3 *db;
   if (!OpenHTTPDB(client_fd, &db)) {
     return 500;
+  }
+  if (secret) {
+    int t = VaultTokenCheck(db, g_conn_vault_token);
+    if (t != 1) {
+      sqlite3_close(db);
+      return t < 0 ? SendJSONError(client_fd, 409,
+                                   "there is no vault: set a password first")
+                   : SendJSONError(client_fd, 403,
+                                   "X-LCARS-Vault is not the vault's token");
+    }
   }
 
   sqlite3_stmt *stmt;
@@ -2346,11 +2505,12 @@ static int HandlePostEntry(int client_fd, Arena *arena, const char *body,
   // the backdated one without the two drifting apart.
   const char *sql =
       "INSERT INTO entries (kind, title, content, value_int, value_float, "
-      "done_bool, created_at_utc, last_modified_at_utc, start_date, end_date) "
+      "done_bool, created_at_utc, last_modified_at_utc, start_date, end_date, "
+      "classification, sealed) "
       "VALUES (?, ?, ?, ?, "
       "?, ?, COALESCE(NULLIF(?, ''), strftime('%Y-%m-%d %H:%M:%S', 'now', "
       "'utc')), COALESCE(NULLIF(?, ''), strftime('%Y-%m-%d %H:%M:%S', "
-      "'now', 'utc')), ?, ?);";
+      "'now', 'utc')), ?, ?, ?, ?);";
   // The two scheduling columns are bound plainly, with no COALESCE: there is
   // no default to fall back to, and '' is the value meant.
   int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -2366,6 +2526,8 @@ static int HandlePostEntry(int client_fd, Arena *arena, const char *body,
     sqlite3_bind_text(stmt, 8, modified_at, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 9, start_date, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 10, end_date, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 11, classification);
+    sqlite3_bind_text(stmt, 12, secret ? sealed : "", -1, SQLITE_STATIC);
 
     rc = sqlite3_step(stmt);
     if (rc == SQLITE_DONE) {
@@ -2490,6 +2652,13 @@ static int HandleUpdateEntry(int client_fd, Arena *arena, int id,
   char end_date[HTTP_MAX_TIMESTAMP_LEN + 1] = {0};
   char since[HTTP_MAX_TIMESTAMP_LEN + 1] = {0};
   bool has_deleted = false;
+  // Classified (lcars_vault.h): what the body says of the level and the
+  // envelope, and of the four columns a Secret row keeps empty
+  int classification = 0;
+  bool has_class = false;
+  char *sealed = NULL;
+  bool has_sealed = false;
+  bool has_title = false, has_values = false;
 
   if (is_json) {
     if (json_get_string(body, "if_modified", since, sizeof(since)) &&
@@ -2502,6 +2671,7 @@ static int HandleUpdateEntry(int client_fd, Arena *arena, int id,
       filter_push_text(&values, kind);
     }
     if (json_get_string(body, "title", title, sizeof(title))) {
+      has_title = true;
       ADD_SET_COLUMN("title");
       filter_push_text(&values, title);
     }
@@ -2511,10 +2681,12 @@ static int HandleUpdateEntry(int client_fd, Arena *arena, int id,
       filter_push_text_ptr(&values, content);
     }
     if (json_get_int(body, "value_int", &value_int)) {
+      has_values = has_values || value_int != 0;
       ADD_SET_COLUMN("value_int");
       filter_push_int(&values, value_int);
     }
     if (json_get_float(body, "value_float", &value_float)) {
+      has_values = has_values || value_float != 0.0f;
       ADD_SET_COLUMN("value_float");
       filter_push_real(&values, (double)value_float);
     }
@@ -2526,6 +2698,16 @@ static int HandleUpdateEntry(int client_fd, Arena *arena, int id,
       has_deleted = true;
       ADD_SET_COLUMN("deleted");
       filter_push_int(&values, deleted ? 1 : 0);
+    }
+    if (json_get_int(body, "classification", &classification)) {
+      has_class = true;
+      ADD_SET_COLUMN("classification");
+      filter_push_int(&values, classification);
+    }
+    if (json_get_string_arena(arena, body, "sealed", &sealed)) {
+      has_sealed = true;
+      ADD_SET_COLUMN("sealed");
+      filter_push_text_ptr(&values, sealed);
     }
     // Same reason POST accepts it: an importer replaying history needs to
     // correct a date it got wrong on a first pass without deleting the row.
@@ -2582,12 +2764,98 @@ static int HandleUpdateEntry(int client_fd, Arena *arena, int id,
     return SendJSONError(client_fd, 400,
                          "No updatable fields in body (kind, title, content, "
                          "value_int, value_float, done_bool, deleted, "
-                         "created_at_utc, start_date, end_date)");
+                         "created_at_utc, start_date, end_date, "
+                         "classification, sealed)");
+  }
+  if ((has_class || has_sealed) && g_conn_login != NULL) {
+    return SendJSONError(client_fd, 403,
+                         "only the owner's page classifies an entry");
+  }
+  if (has_class && !ClassifiedLevelKnown(classification)) {
+    return SendJSONError(client_fd, 400,
+                         "classification is 0 (Unclassified) or 2 (Secret)");
   }
 
   sqlite3 *db;
   if (!OpenHTTPDB(client_fd, &db)) {
     return 500;
+  }
+  // The level the row has and the one it will have, read in the write's own
+  // transaction so no other writer can raise or lower it in between.
+  if (sqlite3_exec(db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK) {
+    int status = SendJSONError(client_fd, 503, "the journal is busy: %s",
+                               sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return status;
+  }
+  int cur_class = 0;
+  {
+    sqlite3_stmt *cs = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT ifnull(classification, 0) FROM entries "
+                           "WHERE id = ?1;",
+                           -1, &cs, NULL) == SQLITE_OK) {
+      sqlite3_bind_int(cs, 1, id);
+      if (sqlite3_step(cs) == SQLITE_ROW) {
+        cur_class = sqlite3_column_int(cs, 0);
+      }
+      sqlite3_finalize(cs);
+    }
+  }
+  int new_class = has_class ? classification : cur_class;
+  bool secret = new_class == CLASSIFIED_SECRET;
+  bool raising = secret && cur_class != CLASSIFIED_SECRET;
+  bool lowering = !secret && cur_class == CLASSIFIED_SECRET;
+  const char *refusal = NULL;
+  int refusal_status = 400;
+  if (secret && !is_json) {
+    refusal = "a Secret entry's text is sealed: send its envelope as JSON";
+  } else if (secret &&
+             ((has_title && title[0] != '\0') ||
+              (content != NULL && content[0] != '\0') || has_values)) {
+    refusal = "a Secret entry's title, text and numbers are sealed: send "
+              "them empty, inside `sealed`";
+  } else if (raising && !has_sealed) {
+    refusal = "raising an entry to Secret takes its envelope in `sealed`";
+  } else if (secret && has_sealed && !ClassifiedEnvelopeValid(sealed)) {
+    refusal = "`sealed` is an envelope (" CLASSIFIED_ENVELOPE_PREFIX "...)";
+  } else if (!secret && has_sealed && sealed[0] != '\0') {
+    refusal = "`sealed` is for a Secret entry (classification 2)";
+  }
+  if (refusal == NULL && raising) {
+    // its files are on the media root in the clear (lcars_media.h refuses
+    // a Secret entry new ones): raising it would promise what they break
+    sqlite3_stmt *ms = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT count(*) FROM entry_media WHERE "
+                           "entry_id = ?1;",
+                           -1, &ms, NULL) == SQLITE_OK) {
+      sqlite3_bind_int(ms, 1, id);
+      if (sqlite3_step(ms) == SQLITE_ROW && sqlite3_column_int(ms, 0) > 0) {
+        refusal = "this entry has files, which are not encrypted: remove "
+                  "them before marking it Secret";
+        refusal_status = 409;
+      }
+      sqlite3_finalize(ms);
+    }
+  }
+  // Any write that moves the level or the envelope proves it holds the key
+  // (lcars_vault.h's guard): a lowering, above all, as it is what would
+  // otherwise let a login destroy a Secret entry by declassifying it.
+  if (refusal == NULL && (has_class || has_sealed || raising || lowering)) {
+    int t = VaultTokenCheck(db, g_conn_vault_token);
+    if (t < 0) {
+      refusal = "there is no vault: set a password first";
+      refusal_status = 409;
+    } else if (t == 0) {
+      refusal = "X-LCARS-Vault is not the vault's token";
+      refusal_status = 403;
+    }
+  }
+  if (refusal != NULL) {
+    sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(db);
+    return SendJSONError(client_fd, refusal_status, "%s", refusal);
   }
 
   // The guard: the stamp as read, and the deleted state the change needs
@@ -2621,21 +2889,54 @@ static int HandleUpdateEntry(int client_fd, Arena *arena, int id,
 
   int status;
   rc = sqlite3_step(stmt);
+  int changes = rc == SQLITE_DONE ? sqlite3_changes(db) : 0;
+  sqlite3_finalize(stmt);
+  if (rc == SQLITE_DONE && changes > 0 && (secret || lowering)) {
+    // A Secret row's own columns are emptied whatever the body said of them
+    // (it may not have named them: a raise sends the envelope and the
+    // level), and a lowered one loses its envelope, its text now in the
+    // clear columns.
+    const char *fix =
+        secret ? "UPDATE entries SET title = '', content = '', value_int = 0, "
+                 "value_float = 0 WHERE id = ?1;"
+               : "UPDATE entries SET sealed = '' WHERE id = ?1;";
+    sqlite3_stmt *fs = NULL;
+    rc = sqlite3_prepare_v2(db, fix, -1, &fs, NULL);
+    if (rc == SQLITE_OK) {
+      sqlite3_bind_int(fs, 1, id);
+      rc = sqlite3_step(fs);
+      sqlite3_finalize(fs);
+    }
+    if (rc == SQLITE_DONE && raising) {
+      ClassifiedRaiseCleanup(db, id);
+    }
+  }
   if (rc != SQLITE_DONE) {
     printf("HTTP Database Error: Update failed: %s\n", sqlite3_errmsg(db));
     status =
         SendJSONError(client_fd, 400, "Update failed: %s", sqlite3_errmsg(db));
-  } else if (sqlite3_changes(db) == 0) {
+    sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+  } else if (changes == 0) {
+    sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
     status = GuardedMissAnswer(client_fd, db, id, since, restore);
+  } else if (sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
+    status = SendJSONError(client_fd, 500, "Update not committed: %s",
+                           sqlite3_errmsg(db));
+    sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
   } else {
+    if (raising) {
+      ClassifiedCheckpoint(db);
+      printf("Classified: entry %d raised to Secret\n", id);
+    } else if (lowering) {
+      printf("Classified: entry %d declassified\n", id);
+    }
     char resp_body[128];
     int resp_len = snprintf(resp_body, sizeof(resp_body),
                             "{\"status\":\"success\",\"id\":%d,\"updated\":%d}",
-                            id, sqlite3_changes(db));
+                            id, changes);
     assert(resp_len > 0 && resp_len < (int)sizeof(resp_body));
     status = SendJSON(client_fd, 200, resp_body, (size_t)resp_len);
   }
-  sqlite3_finalize(stmt);
   sqlite3_close(db);
   return status;
 }
@@ -2754,7 +3055,7 @@ static int HandleAppendEntry(int client_fd, Arena *arena, int id,
       "UPDATE entries SET content = COALESCE(content, '') || ?1, "
       "last_modified_at_utc = strftime('%Y-%m-%d %H:%M:%S', 'now', 'utc') "
       "WHERE id = ?2 AND (deleted IS NULL OR deleted = 0) AND "
-      "last_modified_at_utc = ?3;",
+      "last_modified_at_utc = ?3 AND ifnull(classification, 0) = 0;",
       -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     int status = SendJSONError(client_fd, 500, "Failed to prepare append: %s",
@@ -2772,13 +3073,14 @@ static int HandleAppendEntry(int client_fd, Arena *arena, int id,
   // What the row is now: its stamp for the answer, or why nothing was done
   int status = 0;
   char now_stamp[HTTP_MAX_TIMESTAMP_LEN + 1] = {0};
-  int deleted = 0;
+  int deleted = 0, classification = 0;
   bool found = false;
   if (rc != SQLITE_DONE) {
     status =
         SendJSONError(client_fd, 400, "Append failed: %s", sqlite3_errmsg(db));
   } else if (sqlite3_prepare_v2(db,
-                                "SELECT last_modified_at_utc, deleted FROM "
+                                "SELECT last_modified_at_utc, deleted, "
+                                "ifnull(classification, 0) FROM "
                                 "entries WHERE id = ?1;",
                                 -1, &stmt, NULL) == SQLITE_OK) {
     sqlite3_bind_int(stmt, 1, id);
@@ -2786,6 +3088,7 @@ static int HandleAppendEntry(int client_fd, Arena *arena, int id,
       const unsigned char *t = sqlite3_column_text(stmt, 0);
       snprintf(now_stamp, sizeof(now_stamp), "%s", t ? (const char *)t : "");
       deleted = sqlite3_column_int(stmt, 1);
+      classification = sqlite3_column_int(stmt, 2);
       found = true;
     }
     sqlite3_finalize(stmt);
@@ -2808,6 +3111,12 @@ static int HandleAppendEntry(int client_fd, Arena *arena, int id,
   }
   if (deleted) {
     return SendJSONError(client_fd, 409, "entry %d is deleted", id);
+  }
+  // The WHERE above refuses a Secret row: text appended to it would sit in
+  // the clear beside its envelope (lcars_vault.h)
+  if (classification != 0) {
+    return SendJSONError(client_fd, 409,
+                         "entry %d is Secret: its text is sealed", id);
   }
   return SendJSONError(client_fd, 412,
                        "entry %d changed since it was read (now %s, read %s)",
@@ -2879,7 +3188,8 @@ static int HandleTitleEntry(int client_fd, Arena *arena, int id,
   char now_stamp[HTTP_MAX_TIMESTAMP_LEN + 1] = {0};
   sqlite3_stmt *stmt = NULL;
   if (sqlite3_prepare_v2(db,
-                         "SELECT title, last_modified_at_utc, deleted FROM "
+                         "SELECT title, last_modified_at_utc, deleted, "
+                         "ifnull(classification, 0) FROM "
                          "entries WHERE id = ?1;",
                          -1, &stmt, NULL) != SQLITE_OK) {
     status = SendJSONError(client_fd, 500, "Failed to prepare read: %s",
@@ -2890,6 +3200,10 @@ static int HandleTitleEntry(int client_fd, Arena *arena, int id,
       status = SendJSONError(client_fd, 404, "No entry with id %d", id);
     } else if (sqlite3_column_int(stmt, 2) != 0) {
       status = SendJSONError(client_fd, 409, "entry %d is deleted", id);
+    } else if (sqlite3_column_int(stmt, 3) != 0) {
+      // a Secret row's title is sealed (lcars_vault.h)
+      status = SendJSONError(client_fd, 409,
+                             "entry %d is Secret: its title is sealed", id);
     } else {
       const unsigned char *t = sqlite3_column_text(stmt, 0);
       size_t n = t ? strlen((const char *)t) : 0;
@@ -3845,6 +4159,7 @@ static bool ServeHTTPRequest(int client_fd, Arena *arena, char *req_buf,
   // the routes before the auth check never set it; nothing may read the last
   // request's login
   g_conn_login = NULL;
+  g_conn_vault_token[0] = '\0';
 
   // Split "/entries?kind=task" into path and query string in place.
   char *path = req_line.path;
@@ -3956,6 +4271,8 @@ static bool ServeHTTPRequest(int client_fd, Arena *arena, char *req_buf,
     status_code = 401;
     goto end;
   }
+  CopyHeaderValue(req_buf, "X-LCARS-Vault:", g_conn_vault_token,
+                  sizeof(g_conn_vault_token));
 
   // Media uploads are dispatched before the body is read: the body is a
   // photo or a video, far past HTTP_MAX_BODY_BYTES, and is streamed to the
@@ -4027,6 +4344,8 @@ static bool ServeHTTPRequest(int client_fd, Arena *arena, char *req_buf,
                       ? HandleIndex(client_fd)
                       : SendJSONError(client_fd, 405,
                                       "Method %s not allowed on /", method);
+  } else if (PathIs(path, "/vault")) {
+    status_code = HandleVault(client_fd, arena, method, body, content_type);
   } else if (PathIs(path, "/entries")) {
     if (strcmp(method, "GET") == 0) {
       status_code = HandleGetEntries(client_fd, arena, query);
@@ -4253,18 +4572,100 @@ static void HandleHTTPConnection(int client_fd) {
   close(client_fd);
 }
 
-// Connections currently being served, against HTTP_MAX_CONCURRENT_CONNECTIONS.
-// Each one owns a thread with a 1MB request arena on its stack, so this is the
-// memory ceiling as much as the concurrency one.
-static _Atomic int g_http_active_connections = 0;
+// A slot for a new connection (the accept loop's, so one at a time): a free
+// one, else the longest-idle connection's once its thread has let go of it.
+// -1 when every slot is mid-request. The cap stays a real memory bound: the
+// evicted thread is gone before its slot is handed on.
+static int HTTPSlotAcquire(int client_fd) {
+  pthread_mutex_lock(&g_http_slots_mu);
+  int slot = -1;
+  for (int i = 0; i < HTTP_MAX_CONCURRENT_CONNECTIONS && slot < 0; i++) {
+    if (!g_http_slots[i].used)
+      slot = i;
+  }
+  if (slot < 0) {
+    int victim = -1;
+    bool pending = false; // one evicted before, still letting go
+    for (int i = 0; i < HTTP_MAX_CONCURRENT_CONNECTIONS; i++) {
+      HTTPSlot *s = &g_http_slots[i];
+      pending = pending || s->evicted;
+      if (s->idle && !s->evicted &&
+          (victim < 0 || s->idle_since < g_http_slots[victim].idle_since))
+        victim = i;
+    }
+    if (victim >= 0) {
+      g_http_slots[victim].evicted = true;
+      shutdown(g_http_slots[victim].fd, SHUT_RDWR);
+    }
+    if (victim >= 0 || pending) {
+      struct timespec until;
+      clock_gettime(CLOCK_REALTIME, &until);
+      until.tv_sec += HTTP_EVICT_WAIT_MS / 1000;
+      until.tv_nsec += (long)(HTTP_EVICT_WAIT_MS % 1000) * 1000000L;
+      if (until.tv_nsec >= 1000000000L) {
+        until.tv_sec++;
+        until.tv_nsec -= 1000000000L;
+      }
+      while (slot < 0) {
+        for (int i = 0; i < HTTP_MAX_CONCURRENT_CONNECTIONS && slot < 0; i++) {
+          if (!g_http_slots[i].used)
+            slot = i;
+        }
+        if (slot < 0 && pthread_cond_timedwait(&g_http_slots_freed,
+                                               &g_http_slots_mu, &until) != 0)
+          break;
+      }
+    }
+  }
+  if (slot >= 0) {
+    g_http_slots[slot] = (HTTPSlot){.fd = client_fd, .used = true};
+  }
+  pthread_mutex_unlock(&g_http_slots_mu);
+  return slot;
+}
+
+static void HTTPSlotRelease(int slot) {
+  assert(slot >= 0 && slot < HTTP_MAX_CONCURRENT_CONNECTIONS);
+  pthread_mutex_lock(&g_http_slots_mu);
+  assert(g_http_slots[slot].used);
+  g_http_slots[slot] = (HTTPSlot){.fd = -1};
+  pthread_cond_signal(&g_http_slots_freed);
+  pthread_mutex_unlock(&g_http_slots_mu);
+}
+
+// A refusal, in the journal's log (journalctl): the first at once, then at
+// most one line per HTTP_REFUSAL_LOG_SECONDS with the count since the last.
+// The accept loop's alone, so its state needs no lock. Before 0.278.5 a
+// refusal said nothing at all, which hid the 0.275.1 deploy's 503s.
+static void HTTPLogRefusal(void) {
+  static double last = -1e9;
+  static long unlogged = 0;
+  unlogged++;
+  double now = HTTPMonotonicSeconds();
+  if (now - last < HTTP_REFUSAL_LOG_SECONDS)
+    return;
+  printf("HTTP: refused %ld connection%s with 503: all %d slots mid-request\n",
+         unlogged, unlogged == 1 ? "" : "s", HTTP_MAX_CONCURRENT_CONNECTIONS);
+  fflush(stdout);
+  last = now;
+  unlogged = 0;
+}
+
+static void HTTPServeInSlot(int client_fd, int slot) {
+  g_conn_slot = slot;
+  HandleHTTPConnection(client_fd);
+  g_conn_slot = -1;
+  HTTPSlotRelease(slot);
+}
 
 static void *HTTPConnectionThread(void *arg) {
-  // The fd travels as the pointer rather than through an allocation: there is
-  // nothing to free on a path that must not fail, and nothing to leak if the
-  // thread dies.
-  int client_fd = (int)(intptr_t)arg;
-  HandleHTTPConnection(client_fd);
-  atomic_fetch_sub(&g_http_active_connections, 1);
+  // The slot travels as the pointer rather than through an allocation: there
+  // is nothing to free on a path that must not fail, and nothing to leak if
+  // the thread dies. Its fd was written before pthread_create, which orders
+  // that write before this read.
+  int slot = (int)(intptr_t)arg;
+  assert(slot >= 0 && slot < HTTP_MAX_CONCURRENT_CONNECTIONS);
+  HTTPServeInSlot(g_http_slots[slot].fd, slot);
   return NULL;
 }
 
@@ -4350,22 +4751,23 @@ void RunHTTPServer(int port) {
       continue;
     }
 
-    if (atomic_load(&g_http_active_connections) >=
-        HTTP_MAX_CONCURRENT_CONNECTIONS) {
-      // Refused rather than queued, so the memory ceiling above is real. A
-      // personal journal reaching 32 concurrent connections is a client gone
-      // wrong, and 503 tells it so instead of hanging.
+    int slot = HTTPSlotAcquire(client_fd);
+    if (slot < 0) {
+      // Every slot is mid-request (an idle keep-alive would have been given
+      // up): refused rather than queued, so the memory ceiling above is
+      // real, and 503 tells the client so instead of hanging.
       static const char busy[] = "HTTP/1.1 503 Service Unavailable\r\n"
                                  "Connection: close\r\n"
                                  "Content-Length: 0\r\n\r\n";
       send(client_fd, busy, sizeof(busy) - 1, MSG_NOSIGNAL);
       close(client_fd);
+      HTTPLogRefusal();
       continue;
     }
 
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0) {
-      HandleHTTPConnection(client_fd);
+      HTTPServeInSlot(client_fd, slot);
       continue;
     }
     // Explicit rather than inherited: HandleHTTPConnection puts a 1MB arena on
@@ -4373,18 +4775,16 @@ void RunHTTPServer(int port) {
     pthread_attr_setstacksize(&attr, HTTP_THREAD_STACK_BYTES);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
-    // Counted up before the thread starts, so the ceiling cannot be crossed
-    // by connections that have been accepted but not yet begun.
-    atomic_fetch_add(&g_http_active_connections, 1);
+    // The slot was taken above, before the thread starts, so the ceiling
+    // cannot be crossed by connections accepted but not yet begun.
     pthread_t tid;
     if (pthread_create(&tid, &attr, HTTPConnectionThread,
-                       (void *)(intptr_t)client_fd) != 0) {
+                       (void *)(intptr_t)slot) != 0) {
       // Out of threads: serve it here rather than drop it. Slower, and it
       // blocks the accept loop for the length of one connection - which is
       // exactly the old behaviour, and still better than refusing.
-      atomic_fetch_sub(&g_http_active_connections, 1);
       pthread_attr_destroy(&attr);
-      HandleHTTPConnection(client_fd);
+      HTTPServeInSlot(client_fd, slot);
       continue;
     }
     pthread_attr_destroy(&attr);

@@ -34,8 +34,8 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
 - **The C code has no unit tests**; its behaviour is covered by the
   functional tests below, each against a scratch server. CI
   (`.github/workflows/c-cpp.yml`, on `main`) builds the server and the CLI
-  and asks a started server `/health`. `static.yml`, on every push to deb
-  (each deploy; main in the public repo) and pull request, builds
+  and asks a started server `/health`. `static.yml`, on every push to main
+  (each deploy, here and in the public repo) and pull request, builds
   `lcars-static` in Alpine for x86_64 and arm64 (arm64 may fail without
   failing the run: the private clone's arm64 runners are metered) and
   runs `scripts/release/check.sh` on it, also in bare Debian and Fedora; `release.yml` does the same on a `v*` tag and
@@ -56,15 +56,15 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
   4000-row synthetic journal in headless Chromium (`PERF=0` skips it while
   iterating; run it in full before committing a page change;
   `perf.py --profile <scenario>` names the heavy functions; a scenario
-  over budget is rerun and compared with deb's page, and passes if deb is
+  over budget is rerun and compared with main's page, and passes if main is
   as slow - see "judging" in perf.py; one this change cannot reach, by
-  `test/changed.py`, is not rerun, and deb's numbers measured on this box
+  `test/changed.py`, is not rerun, and main's numbers measured on this box
   are reused - the output says which, `--fresh` measures again). It also fails if
   `APP_VERSION` and `CHANGELOG.md` disagree. The slow stages run in
   parallel (~18s with `PERF=0`, ~50s in full on the laptop); `KB_JOBS=1`
   and `perf.py --jobs 1` run one at a time.
 - **`run.sh --changed`** runs only what this branch's change needs, from
-  its diff against deb (worktree included; `python3 test/changed.py` says
+  its diff against main (worktree included; `python3 test/changed.py` says
   what it would pick, and why): parse, structure and the version check
   always; `deck.html` the deck; `index.html` the audit, behaviour and
   keyboard, and perf only for the scenarios whose sections moved (the map
@@ -73,13 +73,27 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
   the Chromium checks outside `run.sh` the touched sections call for.
   Use it while iterating. On the VPS (4 cores since 2026-10-14) the full
   run is ~2-3 minutes (perf ~1.5 of them, ~5 when three scenarios are
-  compared with deb) and `PERF=0` ~40s, inside one tool call's 10
+  compared with main) and `PERF=0` ~40s, inside one tool call's 10
   minutes (docs/ops/engineer-time.md). **The full `run.sh` is still
   required** once before you report a page change done (with perf if a
   measured view's code moved, which `--changed` tells you), whenever a
   change touches shared code (`helpers`, `state`, `load`, the markup, the
   phone CSS: `--changed` then runs everything anyway), and it is what a
   deploy runs.
+- **Heavy commands go through the job line** (docs/design/job-queue.md):
+  the cores take one heavy run at a time. Heavy: `run.sh` (full or
+  `PERF=0`; `--changed` too when it picks the behaviour, keyboard or perf
+  stages), `perf.py`, `buttons.py`, `qa_chat.py`, `keyboard.py`,
+  `dates.sh`, `architect.py`, `deckvoice.py`, `editor.py`, `classified.py`,
+  `deckshots.py`, `shots.py`, `scripts/deck-models/build.sh`, and `make
+  lcars-release|lcars-one|lcars-embed|lcars-static`. Light, run bare: `make
+  check`, `make lcars`, `make lcars-cli`, a `--changed` run of no slow
+  stage, one functional test under ~30s, every `scripts/test_*.py`. A
+  seated engineer runs a heavy one as `scripts/engineer.py job <name>
+  [--label T] -- <command>` (a `PreToolUse` hook refuses it bare): inline
+  when nobody waits; "queued" means end the turn at once and edit nothing,
+  and the result comes back as a `[job]` message at the head of the seat's
+  line. `engineer.py jobs` shows the line, `job-cancel <name>` takes it back.
 - Functional tests outside `run.sh`, each against a scratch server built
   from the `lcars-release` compile line to a temp path (never `./lcars`), an
   empty database and temp directories. Run the one matching what you touched:
@@ -170,6 +184,21 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     `lcars-cli` symlink and one of the user's own answering exactly as the
     separate `lcars-cli` does, the link kept, replaced or left alone, init
     and version through it; `lcars-release` refusing `cli`.
+  - `test/classified.py` (~1 min; `CHROMIUM=0` the server only): Secret
+    entries (docs/design/confidential-entries.md, `lcars_vault.h`, the
+    page's "classified" block) - `lcars_sha256.h` against the NIST
+    vectors; `GET/PUT /vault` and its token guard; a Secret row's
+    envelope-only writes, the limited logins' placeholders, append, title
+    and uploads refused; a raise (the plaintext in no byte of lcars.db or
+    its WAL, the vector and the CalDAV row gone) and a lowering; the
+    embedder with a stand-in service. Then the page in Chromium
+    (`classified_ui.py`): the password set, a Secret entry written,
+    raised, locked, unlocked, searched, offline, declassified, and every
+    request, localStorage and IndexedDB scanned for the password and the
+    entry's words; then at localhost with CDP's virtual authenticator
+    (hasPrf) the page's CSP, a passkey registered, unlocking, removed, one
+    without PRF refused, the recovery code's round trip and a one-wrap
+    vault. After touching any of those, or a reader of entries.
   - `test/dedupe.py` (~15s): the keyless twin guard on `POST /entries`
     (`HandlePostEntryDeduped` in `lcars_http.h`) - twins in 2s one row
     and `X-LCARS-Deduped: 1`, another body, after the window, a keyed
@@ -217,6 +246,10 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     PATCH with `if_modified`: the answer at the top, done 1) and Undo.
   - `test/metrics.py` (~40s): `lcars_metrics.h`, `GET /metrics` - the
     readings by the UI's rule, the text format, who may read it.
+  - `test/conncap.py` (~40s): the connection cap in `lcars_http.h`
+    (`HTTPSlotAcquire`) - every slot an idle keep-alive and a new
+    connection answered, the longest-idle one closed; every slot
+    mid-request a 503 and one rate-limited log line.
   - `test/framing.py` (~40s): Content-Length and the header lookup in
     `lcars_http.h` — what a malformed, huge, chunked or short body is
     answered, and pipelined requests on one connection.
@@ -274,6 +307,15 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     CHANGES (create, append and title only), applied by the steward or refused.
   - `python3 scripts/test_seat.py` (~7s): `scripts/seat.py` and the seat's
     use in `engineer.py`/`crew.py` - the crew's one Claude Code at a time.
+  - `python3 scripts/test_jobs.py` (~13s): the job queue
+    (docs/design/job-queue.md) - seat.py's job line (inline or queued,
+    held for the turn's end, one at a time, a deploy first, the result at
+    the head with the cap) and engineer.py's `job`, `job-run`,
+    `job-cancel` and the runner on scratch state and a stand-in journal,
+    `job-run` a direct child (`LCARS_JOB_RUNNER=direct`,
+    `LCARS_ENG_SPAWN=0`): the message, a huge log, a timeout, HEAD or the
+    tree moved, a runner killed, dismiss; `heavy_command`; crew.py's
+    `heavy: true`.
   - `python3 scripts/test_reap.py` (~5s): `engineer.py`'s `reap_scratch`,
     which deletes ended Claude sessions' scratch, never a running one's;
     `reap_test_tmp`, killed test runs' scratch, and `reap_test_servers`,
@@ -287,6 +329,17 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     test_seat's stand-in server) - each note typed once, even when what
     started the flusher ends or it is stopped mid-note; one sent while the
     journal is down is written when it is back.
+  - `python3 scripts/test_no1_threads.py` (~1s): Number One's threads
+    as tags (docs/design/no1-threads.md, section 13) - `engineer.py
+    thread` and `thread-req` (labels: new, rename, close, reopen), the
+    session-era state read into labels, the flusher typing every
+    thread's notes at once under their `[thread <id>]` line, a say with a
+    thread, each event's thread from a transcript (a message's tag, the
+    reply after it, a paragraph's override, `thread_at` reading back),
+    the turn's thread an order, an ask, a deploy and a refresh record,
+    the poll's `th` and `thread=` filter, and the Stop hook switching
+    nothing. `test_no1.py` has `no1.py thread`. Every test that imports
+    engineer.py imports `scripts/testguard.py` first: no live journal.
   - `python3 scripts/test_engineer_model.py` (~40s; `LCARS_TEST_BIN`
     skips the build, `SKIP_ROUTE=1` the server): the model per engineer -
     `engineer.py model`/`model-apply` and `POST /engineer/<name>/model`;
@@ -301,7 +354,9 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
   - `python3 scripts/test_deploy_suite.py` (~3s): the deploy's web suite
     (`web_suite`, `suite_scope`): a page deploy runs the full `PERF=0`
     run.sh, a deck-, test- or docs-only one `run.sh --changed` (an
-    `APP_VERSION` bump is not a page change), and the log says why.
+    `APP_VERSION` bump is not a page change), and the log says why; and
+    `classified_touches`, the deploy's "CLASSIFIED:" flag (the classified
+    block, the CSP block, `sw.js`).
   - `python3 scripts/test_vps_rebuild.py` (~1s): `scripts/vps-rebuild.sh`
     in a scratch checkout with make, systemctl and curl stood in for - the
     one binary (`make lcars-one`) built and swapped in, one without the CLI

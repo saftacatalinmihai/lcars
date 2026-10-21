@@ -415,6 +415,33 @@ def run(s):
     _, kinds = s.json("GET", "/kinds")
     names = [k["kind"] for k in kinds] if isinstance(kinds, list) else []
     check("task_groceries" in names, "the list's kind is in /kinds")
+
+    print("a Secret task (lcars_vault.h) leaves the lists as a deleted one does")
+    tasks = HOME + "tasks/"
+    st, row = s.json("POST", "/entries", {"kind": "task", "title": "Secret errand"})
+    sid = row["id"]
+    href = f"{tasks}lcars-{sid}.ics"
+    check(s.req("GET", href)[0] == 200, "the task is published")
+    before = token_of(s, tasks)
+    tok = "ab" * 32
+    # a vault keeps exactly one password wrap (lcars_vault.h, 0.287.0)
+    wrap = {"type": "password", "kdf": "PBKDF2-SHA256", "iter": 600000,
+            "salt": "c2FsdA", "iv": "aXY", "wrapped": "d3JhcHBlZA"}
+    st, _ = s.json("PUT", "/vault", {"vault": {"v": 1, "wraps": [wrap]}, "token": tok, "version": 0})
+    check(st == 200, f"the vault is set ({st})")
+    st, _, _ = s.req("PATCH", f"/entries/{sid}", json.dumps({"classification": 2, "sealed": "lcs1.aGk.aGk"}),
+                     {"X-LCARS-Vault": tok}, "application/json")
+    check(st == 200, f"raised to Secret ({st})")
+    check(s.req("GET", href)[0] == 404, "its object is gone")
+    st, resp, _ = sync(s, tasks, before)
+    gone = [r for r in resp if r[0] == href]
+    check(st == 207 and gone and gone[0][1] == 404, f"a sync from before names it removed ({gone})")
+    _, _, body = s.req("PROPFIND", tasks, PROPFIND, {"Depth": "1"}, "application/xml")
+    check(href not in body and "Secret errand" not in body, "the collection lists it no longer")
+    st, _, _ = s.req("PUT", href, vtodo(f"lcars-{sid}@lcars", "Secret errand, edited"), {}, "text/calendar")
+    got = entry(s, sid)
+    check(got.get("title") == "" and got.get("classification") == 2,
+          f"a stale client's PUT writes no title into it ({st})")
     check(s.proc.poll() is None, "the server is still up")
 
 

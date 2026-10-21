@@ -66,6 +66,9 @@ typedef struct EntryRow {
   // ARCHITECTURE.md, "The local database").
   const char *start_date;
   const char *end_date;
+  // 0 Unclassified, 2 Secret: a Secret row's title and text are sealed, so
+  // they arrive empty (lcars_vault.h); 0 from a server older than the field.
+  int classification;
 } EntryRow;
 
 typedef struct EntryRows {
@@ -583,6 +586,9 @@ static inline void CliParseEntryObject(Arena *arena, JsonSpan obj,
   }
   if (json_member(obj, "end_date", &v)) {
     row->end_date = json_span_string(arena, v);
+  }
+  if (json_member(obj, "classification", &v)) {
+    row->classification = (int)json_span_long(v);
   }
 }
 

@@ -60,11 +60,14 @@ for (const room of rooms) {
   console.log(`[deck-model-assets] ${room}: ${r.listNodes().length} props, ${tris} triangles, ${(bytes / 1024).toFixed(0)} kB with its atlas (${n}²)`);
 }
 // LICENSE.txt: one section per room, from the rooms built now and the ones
-// already there (a build of one room keeps the others' sections)
-const L = `${OUT}LICENSE.txt`, sect = new Map();
+// already there (a build of one room keeps the others' sections). A section
+// that is not a room's (a texture of the page's own, bridge_skylight.webp)
+// keeps its heading as written: only a room's is made from its name.
+const L = `${OUT}LICENSE.txt`, sect = new Map(), head = new Map();
 if (fs.existsSync(L)) for (const part of fs.readFileSync(L, 'utf8').split(/^== /m).slice(1)) {
-  const nl = part.indexOf('\n');
-  sect.set(part.slice(0, nl).replace(/\.glb.*$/, '').trim(), part.slice(nl + 1).trim());
+  const nl = part.indexOf('\n'), h = part.slice(0, nl).trim(), k = h.replace(/\.glb.*$/, '');
+  sect.set(k, part.slice(nl + 1).trim());
+  if (!h.includes('.glb')) head.set(k, h);
 }
 for (const room of rooms) {
   const f = `${RAW}/${room}.LICENSE.txt`;
@@ -77,4 +80,4 @@ for (const room of rooms) {
 }
 fs.writeFileSync(L, 'The deck\'s models in this directory, one section per glb and its atlas.\n' +
   'scripts/deck-models/build.sh rebuilds them (docs/design/deck-pipeline.md).\n\n' +
-  [...sect].sort().map(([k, v]) => `== ${k}.glb, ${k}_{base,norm,orm}.webp\n${v}\n`).join('\n'));
+  [...sect].sort().map(([k, v]) => `== ${head.get(k) ?? `${k}.glb, ${k}_{base,norm,orm}.webp`}\n${v}\n`).join('\n'));

@@ -10,7 +10,12 @@ phone's size against a scratch server with Number One's login:
   3. Answer and close: the server's row has the answer at the top of its
      content and done 1 (the real PATCH and its if_modified), the card
      leaves; Undo puts the content back and opens it again;
-  4. the answer box is 16px (no iOS zoom), the page no wider than the phone.
+  4. the answer box is 16px (no iOS zoom), the page no wider than the phone;
+  5. a question's references to entries are links: a bare #id in its title
+     and its context, [[a title]] and ((id)) each open the entry, and Back
+     (the browser's, the reader's ‹, Escape) brings the questions again with
+     the card scrolled into view as it was and its typed draft in its box; a
+     #id the journal does not hold is drawn gone, says so, and goes nowhere.
 
     python3 test/questions_ui.py               # builds the server first (~30s)
     LCARS_TEST_BIN=/path/to/lcars python3 test/questions_ui.py
@@ -111,6 +116,62 @@ def run(b, srv, qa, qb):
         ctx.close()
 
 
+def links(b, srv, qc, target):
+    ctx = b.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+    cfg = {"base": f"http://127.0.0.1:{srv.port}", "user": F.USER, "pass": F.PASS}
+    ctx.add_init_script(f"localStorage.setItem('lcars.cfg', {json.dumps(json.dumps(cfg))});")
+    p = ctx.new_page()
+    errs = []
+    p.on("pageerror", lambda e: errs.append(str(e)))
+    cc = f'#oqrows [data-oqid="{qc}"]'
+    try:
+        p.goto(cfg["base"] + "/ui/")
+        p.wait_for_function(f"typeof oqCount === 'function' && st.byId.has({qc}) && st.byId.has({target})", timeout=20000)
+        p.evaluate("openQuestions()")
+        p.wait_for_selector(cc + " .oqctx", timeout=5000)
+        check(p.query_selector(cc + " .oqmeta a") is None, "the card's own #id stays plain")
+        check(p.query_selector(f'{cc} .oqq a.eref[data-id="{target}"]') is not None, "the title's #id is an entry link")
+        n = p.eval_on_selector_all(f'{cc} .oqctx a.eref[data-id="{target}"]', "l => l.length")
+        check(n == 2, f"the context's #id and ((id)) are entry links ({n})")
+        check(p.query_selector(cc + " .oqctx a.wiki") is not None, "[[a title]] a wiki link")
+        check(p.query_selector(cc + ' .oqctx a.eref.gone[data-id="999999999"]') is not None, "a #id not in the journal drawn gone")
+        p.fill(cc + " .oqa", DRAFT)
+
+        def leave(sel, how, nth=0):
+            p.evaluate(f"document.querySelector('{cc}').scrollIntoView()")
+            top = p.evaluate("$('#oqrows').scrollTop")
+            p.locator(sel).nth(nth).tap()
+            p.wait_for_function(f"st.sel && st.sel.id === {target} && !$('#ov').classList.contains('on')", timeout=5000)
+            check(True, f"{sel.split(' ', 2)[-1]}: the entry opens")
+            if how == "back":
+                p.go_back()
+            elif how == "button":
+                check(p.text_content("#bBack").strip() == "‹ Questions", f"the reader's ‹ says Questions ({p.text_content('#bBack')!r})")
+                p.tap("#bBack")
+            else:
+                p.keyboard.press("Escape")
+            p.wait_for_selector(cc + " .oqa", timeout=5000)
+            p.wait_for_timeout(300)
+            back = p.evaluate("$('#oqrows').scrollTop")
+            check(top > 0 and abs(back - top) <= 2, f"{how}: the questions again, scrolled as left ({back} of {top})")
+            check(p.input_value(cc + " .oqa") == DRAFT, f"{how}: the draft still in its box")
+            check("/questions" in p.url, f"{how}: the questions' url ({p.url})")
+
+        leave(f'{cc} .oqq a.eref[data-id="{target}"]', "back")
+        leave(f'{cc} .oqctx a.eref[data-id="{target}"]', "button")
+        leave(f'{cc} .oqctx a.eref[data-id="{target}"]', "escape", 1)  # the ((id))
+        leave(f"{cc} .oqctx a.wiki", "back")
+
+        u = p.url
+        p.tap(cc + ' .oqctx a.eref.gone')
+        p.wait_for_selector("#toast.on", timeout=3000)
+        check("not in the journal" in p.inner_text("#toast"), f"the gone link toasts ({p.inner_text('#toast')!r})")
+        check(p.url == u and p.query_selector(cc) is not None, "and goes nowhere")
+        check(errs == [], f"no page errors ({errs[:2]})")
+    finally:
+        ctx.close()
+
+
 def main():
     try:
         from playwright.sync_api import sync_playwright
@@ -137,6 +198,15 @@ def main():
         with sync_playwright() as pw:
             b = pw.chromium.launch(headless=True)
             run(b, srv, qa, qb)
+            # the links' part: a page to name, asks enough to scroll, the oldest linking
+            target = post(srv, (F.USER, F.PASS), {"kind": "note", "title": "Deck pins plan", "content": "the plan",
+                                                  "created_at_utc": "2026-10-18 07:00:00"})
+            qc = post(srv, NO1, {"kind": "task_no1", "title": f"Pins as in #{target}?", "created_at_utc": "2026-10-18 08:00:00",
+                                 "content": f"See #{target}, [[Deck pins plan]] and (({target})).\nNot #999999999."})
+            for i in range(4):
+                post(srv, (F.USER, F.PASS), {"kind": "task_crew", "title": f"Filler ask {i}?",
+                                             "created_at_utc": f"2026-10-18 1{i}:00:00", "content": "line\n" * 3})
+            links(b, srv, qc, target)
             b.close()
     finally:
         srv.stop()

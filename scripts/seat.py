@@ -44,6 +44,9 @@ How the seat moves:
   their undelivered messages cancelled, kept for `restore`, the undo).
   Checked against the line as the editor read it (`Changed`: a 409), and
   only the line: never the one seated, never a turn.
+- Beside the seat, the job line (docs/design/job-queue.md): a heavy job
+  submitted by the one seated runs outside any session, one at a time; the
+  submitter yields, and its result queues them at the head of the line.
 
 The state is the journal's, not a file's: one entry of kind crew_seat whose
 text says who is seated, who is queued and who waits on an answer, over a
@@ -109,7 +112,12 @@ REMOVED_MAX = 10
 
 
 def empty():
-    return {"holder": None, "queue": [], "waiting": {}, "preempt": None, "note": "", "log": [], "removed": []}
+    return {"holder": None, "queue": [], "waiting": {}, "preempt": None, "note": "", "log": [], "removed": [],
+            "jobs": jobs_empty()}
+
+
+def jobs_empty():
+    return {"running": None, "queue": [], "recent": [], "note": ""}
 
 
 def is_crew(name):
@@ -254,6 +262,7 @@ def turn_ended(s, name, now):
     if not h or h["name"] != name:
         return
     h["idle"] = int(now)
+    job_release(s, name)
     turn = h.pop("turn", None)
     if h.get("yielded"):
         return
@@ -343,6 +352,164 @@ def step(s, facts, now):
     return s, acts
 
 
+# ---- the job line (docs/design/job-queue.md) -----------------------------------
+#
+# Beside the seat, a line of heavy jobs (a full run.sh, perf, buttons.py, a
+# release build): one on the cores at a time, run outside any session, so
+# the engineer who submits one stops while another takes the seat, and the
+# result brings them back. It lives in this same block, under the same lock:
+# a job's end and its engineer's place in the seat's line are one write.
+# A job: {id, name, cmd, label, wt, head, tree, t, timeout} and, as it goes,
+# hold (the submitter's turn is not over), started, unit, inline.
+
+RECENT_MAX = 5
+# who queues a job's result, as the seat's `by` (the inbox's sender too)
+JOB = "job"
+# those a completion goes in behind, at the front of the line: the captain's
+# word, a handover (as good as it), and earlier completions
+JOB_AHEAD = ("captain", "handover", JOB)
+
+
+def job_busy(s):
+    j = s.get("jobs") or jobs_empty()
+    return bool(j["running"] or j["queue"])
+
+
+def job_find(s, name):
+    """`name`'s job: (job, "running" | place in the line from 1) or (None, None)."""
+    j = s.get("jobs") or jobs_empty()
+    if j["running"] and j["running"]["name"] == name:
+        return j["running"], "running"
+    for i, x in enumerate(j["queue"]):
+        if x["name"] == name:
+            return x, i + 1
+    return None, None
+
+
+def job_submit(s, job, now):
+    """The seated engineer's job: run inline ("inline") when nobody wants the
+    seat and no job runs or waits - yielding would hand the seat to nobody -
+    else queued ("queued"), held until their turn ends (nothing edits under
+    a job), and the holder yielded as `yield` does, so the seat passes."""
+    j = s["jobs"]
+    job = dict(job, t=int(now))
+    if not s["queue"] and not job_busy(s):
+        j["running"] = dict(job, inline=True, started=int(now))
+        log(s, now, f"{job['name']} runs {job['label']} inline")
+        return "inline"
+    j["queue"].append(dict(job, hold=True))
+    yielded(s, job["name"], None, now)
+    log(s, now, f"{job['name']} queued a job, {job['label']} (#{len(j['queue'])})")
+    return "queued"
+
+
+def job_release(s, name):
+    """`name`'s turn is over: their held job may start."""
+    for x in (s.get("jobs") or jobs_empty())["queue"]:
+        if x["name"] == name:
+            x.pop("hold", None)
+
+
+def job_next(s, facts, now, deploying=False, mem_ok=True):
+    """The job to start now, or (None, why not). Nothing while one runs or a
+    deploy is queued or running (a deploy is the head of this line), nor
+    into too little memory. A held job (its submitter's turn not yet over)
+    starts once their session is idle or off by `facts` - the Stop hook's
+    word lost, reap's move still starts it. The first that may start goes;
+    a held one does not block the line behind it. Pure; job_started records it."""
+    j = s["jobs"]
+    if j["running"]:
+        return None, f"{j['running']['name']}'s job is running"
+    if not j["queue"]:
+        return None, ""
+    if deploying:
+        return None, "a deploy has the cores first"
+    if not mem_ok:
+        return None, "waiting for memory"
+    for x in j["queue"]:
+        if not x.get("hold") or facts.get(x["name"], "off") in ("idle", "off"):
+            return x, ""
+    return None, "waiting for the submitter's turn to end"
+
+
+def job_started(s, jid, now, unit=""):
+    j = s["jobs"]
+    x = next((x for x in j["queue"] if x["id"] == jid), None)
+    if not x:
+        return None
+    j["queue"].remove(x)
+    x.pop("hold", None)
+    j["running"] = dict(x, started=int(now), **({"unit": unit} if unit else {}))
+    log(s, now, f"{x['name']}'s job started: {x['label']}")
+    return j["running"]
+
+
+def job_back(s, name, now):
+    """A job's result for `name`: to the front of the seat's line, behind
+    the captain's word, a handover and earlier completions - they are
+    mid-task, the context hot. Except behind anyone who has waited SLICE:
+    without that cap an engineer submitting a job every turn would never
+    let the seat go, and the stuck rule does not catch them (never stuck).
+    Nothing when they hold the seat (recalled while it ran)."""
+    s["waiting"].pop(name, None)
+    h = s.get("holder")
+    if h and h["name"] == name:
+        return
+    q = [e for e in s["queue"] if e["name"] != name]
+    i = 0
+    while i < len(q) and q[i].get("by") in JOB_AHEAD:
+        i += 1
+    for k, e in enumerate(q):
+        if now - e.get("t", now) >= SLICE:
+            i = max(i, k + 1)
+    q.insert(i, {"name": name, "t": int(now), "by": JOB})
+    s["queue"] = q
+    log(s, now, f"{name} queued, #{i + 1} (their job's result)")
+
+
+def job_done(s, jid, outcome, now, back=True):
+    """The job `jid` ended (or was refused, or cancelled): out of the lines,
+    into `recent`, and its engineer back in the seat's line unless `back`
+    is false (cancelled: nobody waits on it). The job, or None if it is not
+    in the block (already done: the caller reports nothing twice)."""
+    j = s["jobs"]
+    x = j["running"] if j["running"] and j["running"]["id"] == jid else \
+        next((x for x in j["queue"] if x["id"] == jid), None)
+    if not x:
+        return None
+    if x is j["running"]:
+        j["running"] = None
+    else:
+        j["queue"].remove(x)
+    rec = {k: x[k] for k in ("id", "name", "label", "t", "started") if k in x}
+    j["recent"] = (j["recent"] + [dict(rec, ended=int(now), outcome=outcome)])[-RECENT_MAX:]
+    log(s, now, f"{x['name']}'s job {outcome}: {x['label']}")
+    if back:
+        job_back(s, x["name"], now)
+    return x
+
+
+def jobs_normal(j):
+    """The job block as read back (the captain may have edited it): its
+    fields present and of their type; a job without an id or name dropped."""
+    out = jobs_empty()
+    if not isinstance(j, dict):
+        return out
+    ok = lambda x: isinstance(x, dict) and all(isinstance(x.get(k), str) and x[k] for k in ("id", "name", "cmd"))
+    fix = lambda x: dict(x, label=str(x.get("label") or x["cmd"])[:80], t=int(x.get("t") or time.time()),
+                         timeout=int(x.get("timeout") or 0))
+    if ok(j.get("running")):
+        out["running"] = fix(j["running"])
+    seen = {out["running"]["id"]} if out["running"] else set()
+    for x in j.get("queue") or []:
+        if ok(x) and x["id"] not in seen:
+            seen.add(x["id"])
+            out["queue"].append(fix(x))
+    out["recent"] = [x for x in (j.get("recent") or []) if isinstance(x, dict)][-RECENT_MAX:]
+    out["note"] = str(j.get("note") or "")
+    return out
+
+
 def normal(s):
     """A state read back from the entry, which the captain may have edited:
     every field present and of its type, the queue without duplicates or
@@ -369,6 +536,7 @@ def normal(s):
     out["removed"] = [r for r in (s.get("removed") or []) if isinstance(r, dict) and isinstance(r.get("name"), str)
                       and isinstance(r.get("entry"), dict) and isinstance(r.get("at"), int)
                       and isinstance(r.get("orders"), list)][-REMOVED_MAX:]
+    out["jobs"] = jobs_normal(s.get("jobs"))
     return out
 
 
@@ -406,6 +574,16 @@ def render(s, now, host=""):
     if s.get("waiting"):
         lines.append("- **Waiting on an answer:** " + ", ".join(f"{k} (since {when(v)})"
                                                                for k, v in sorted(s["waiting"].items())))
+    j = s.get("jobs") or jobs_empty()
+    if j["running"]:
+        r = j["running"]
+        lines.append(f"- **Job running:** {r['name']}, {r['label']}, since {when(r.get('started') or r['t'])} "
+                     f"({max(0, int(now - (r.get('started') or r['t']))) // 60} min)" + (" (inline)" * bool(r.get("inline"))))
+    if j["queue"]:
+        lines.append("- **Jobs queued:** " + " · ".join(f"{i + 1}. {x['name']}, {x['label']}"
+                                                         + (" (turn not over)" if x.get("hold") else "")
+                                                         for i, x in enumerate(j["queue"]))
+                     + (f" ({j['note']})" if j.get("note") else ""))
     if s.get("note"):
         lines.append(f"- **Note:** {s['note']}")
     if s.get("log"):
@@ -455,18 +633,22 @@ def write(rid, s, now, host=""):
 # ---- the inbox -----------------------------------------------------------------
 
 FRESH = " [fresh]"
+# Number One's threads (docs/design/no1-threads.md): the thread a note is for,
+# on the sender, "number-one ← crew#deck: …", where the captain can read it
+THREAD_MARK = re.compile(r"#([a-z][a-z0-9-]{0,23})$")
 
 
-def inbox_title(to, sender, text, fresh=False):
+def inbox_title(to, sender, text, fresh=False, thread=None):
     first = (text.strip().splitlines() or [""])[0]
-    return f"{to} ← {sender}{FRESH if fresh else ''}: {first[:90]}"
+    return f"{to} ← {sender}{'#' + thread if thread else ''}{FRESH if fresh else ''}: {first[:90]}"
 
 
-def inbox_add(to, sender, text, fresh=False):
+def inbox_add(to, sender, text, fresh=False, thread=None):
     """A message for `to`. `fresh`: an order for a new task, delivered into a
     cleared conversation - marked on the title (the content is what is
-    typed), where the captain can see it and take it off."""
-    r = _http("POST", "/entries", {"kind": INBOX_KIND, "title": inbox_title(to, sender, text, fresh),
+    typed), where the captain can see it and take it off. `thread`: the one
+    of Number One's threads it is for (typed under that thread's tag line)."""
+    r = _http("POST", "/entries", {"kind": INBOX_KIND, "title": inbox_title(to, sender, text, fresh, thread),
                                    "content": text})
     return (r or {}).get("id")
 
@@ -495,14 +677,27 @@ def inbox_delivered(limit=300):
     return [r for r in rows if not r.get("deleted")]
 
 
+def inbox_sender(row):
+    """The sender as the title has it, marks and all: "crew#deck [fresh]"."""
+    t = row.get("title") or ""
+    return t.split(" ← ", 1)[1].split(": ", 1)[0] if " ← " in t else ""
+
+
 def inbox_to(row):
-    """(to, sender) from an inbox row's title, "to ← sender[ [fresh]]: …"."""
+    """(to, sender) from an inbox row's title, "to ← sender[#thread][ [fresh]]: …"."""
     t = row.get("title") or ""
     if " ← " not in t:
         return "", ""
-    to, rest = t.split(" ← ", 1)
-    sender = rest.split(": ", 1)[0]
-    return to, sender[:-len(FRESH)] if sender.endswith(FRESH) else sender
+    sender = inbox_sender(row)
+    sender = sender[:-len(FRESH)] if sender.endswith(FRESH) else sender
+    return t.split(" ← ", 1)[0], THREAD_MARK.sub("", sender)
+
+
+def inbox_thread(row):
+    """The thread of Number One's an inbox row is for, or None (main's)."""
+    sender = inbox_sender(row)
+    m = THREAD_MARK.search(sender[:-len(FRESH)] if sender.endswith(FRESH) else sender)
+    return m.group(1) if m else None
 
 
 # The mark a sender's message is typed with, so the one it reaches knows whose

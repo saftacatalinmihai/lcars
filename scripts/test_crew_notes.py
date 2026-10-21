@@ -697,7 +697,8 @@ class People(PeopleBase):
         self.assertEqual(self.drain(w), [t["id"]])
         w.work_one(t["id"])
         [c] = self.calls("no1-send")
-        text = c["argv"][1]
+        self.assertEqual(c["argv"][1:3], ["--thread", "main"], "no #thread named: main's (decision 2)")
+        text = c["argv"][-1]
         self.assertTrue(text.startswith("[captain] A note to you, written in the captain's journal entry #%d" % e["id"]), text)
         self.assertIn(f"(crew note #{t['id']})", text)
         self.assertIn("look at why the deploy failed", text)
@@ -869,7 +870,7 @@ class Answer(PeopleBase):
         self.note(w, "@no1 how did the deploy go")
         tid = self.drain(w)[0]
         w.work_one(tid)
-        text = self.calls("no1-send")[-1]["argv"][1]
+        text = self.calls("no1-send")[-1]["argv"][-1]
         E.note_typed(E.NO1, "(held since 2026-10-18 09:00 UTC, while you were off duty) " + text)
         self.said(text)
         out = io.StringIO()

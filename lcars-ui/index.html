@@ -7,7 +7,52 @@
 // both together (minor for a feature, patch for a fix) - test/run.sh fails
 // when they disagree. It stays in the file's first kilobyte: that is all the
 // update check reads of the server's copy (updFetchVersion, a ranged GET).
-const APP_VERSION = "0.278.4";
+const APP_VERSION = "0.287.7";
+</script>
+<script>
+/* ===================== csp =====================
+   The page's Content-Security-Policy: what it may connect to (fetch, XHR,
+   WebSocket, beacons). The plaintext of a Secret entry and the classified
+   password live in this page (docs/design/confidential-entries.md, section
+   7), so code that should not be here - a patch, an injection - cannot send
+   them to just anywhere: only to the journal's own server and to the outside
+   services the page itself uses, each named below. It limits connections
+   only; images, styles and scripts are as they were.
+
+   Set here, by script, rather than as a server header, because the page is
+   served from more places than the server: the service worker's cache, the
+   embedded build, the static demo on a bucket, a file. A policy put in by a
+   <meta> holds for the document's life once inserted (removing the element
+   lifts nothing), and the configured server (Config's base url, read from
+   lcars.cfg) is allowed by name, so a page pointed at another server, or
+   opened from a file, still reaches it. A new outside service the page calls
+   goes in CSP_CONNECT, or the call is refused (test/check.py holds the two
+   together). A change here is the deploy report's "classified" flag. */
+(function () {
+  const CSP_CONNECT = [
+    "wss://api.deepgram.com",                 // dictation, push-to-talk
+    "https://api.open-meteo.com", "https://archive-api.open-meteo.com",
+    "https://feeds.meteoalarm.org",           // weather, its warnings
+    "https://api.rainviewer.com", "https://tilecache.rainviewer.com",
+    "https://api.mapy.com",                   // maps, routes, places, pictures
+    "https://nominatim.openstreetmap.org", "https://brouter.de",
+    "https://maps.mail.ru", "https://overpass-api.de", "https://overpass.kumi.systems",
+    "https://tile.openstreetmap.org", "https://tile.opentopomap.org",
+    "https://tile.waymarkedtrails.org",       // tiles kept for offline (fetched)
+  ];
+  let base = "";
+  try {
+    const c = JSON.parse(localStorage.getItem("lcars.cfg") || "{}");
+    if (c && typeof c.base === "string" && /^https?:\/\//.test(c.base)) base = new URL(c.base).origin;
+  } catch (e) { /* no stored base: the page's own origin */ }
+  const m = document.createElement("meta");
+  const policy = "connect-src 'self' blob: data: " + (base ? base + " " : "") + CSP_CONNECT.join(" ");
+  m.setAttribute("http-equiv", "Content-Security-Policy");
+  m.setAttribute("content", policy);
+  (document.head || document.documentElement).appendChild(m);
+  window.LCARS_CSP = policy;
+})();
+/* ===================== /csp ===================== */
 </script>
 <script>
 /* Every view is a page with a path of its own — /ui/tasks, /ui/entry/123,
@@ -2427,6 +2472,7 @@ body.caldrag .calgrip{background:transparent}
 .qband{--qc:var(--blue)}
 .qb-work{--qc:var(--amber)}
 .qb-wait{--qc:var(--purple)}
+.qb-jobs{--qc:var(--green)}
 .qday{margin-left:22px;padding:8px 14px 2px;font:11px var(--mono);color:var(--dim);border-left:3px solid var(--qc)}
 .qitem{display:flex;gap:12px;width:calc(100% - 22px);margin-left:22px;padding:8px 14px 10px 0;background:none;border:0;
   border-left:3px solid var(--qc);color:var(--txt);text-align:left;font:inherit;position:relative}
@@ -2535,6 +2581,23 @@ button.qitem:hover,button.qitem:focus-visible{background:#0f0f14}
 .chsys.bad{color:var(--red)}
 .chmark.queued{color:var(--purple)}
 .chsbody input{display:block;width:100%;margin-top:8px;height:40px;border-radius:20px;padding:0 14px;font-size:16px}
+/* Number One's threads (engThreadsPaint): a row of chips under the header,
+   sideways on a phone, never wrapping; All and each thread, the one shown lit */
+.chthr{flex:0 0 auto;display:flex;flex-wrap:nowrap;gap:6px;overflow-x:auto;overflow-y:hidden;padding:0 8px 6px;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.chthr::-webkit-scrollbar{display:none}
+.chthr[hidden]{display:none}
+.chthc{flex:0 0 auto;display:flex;align-items:center;gap:6px;min-height:34px;max-width:60vw;padding:0 12px;border-radius:17px;
+  border:1px solid var(--line);background:var(--panel2);color:var(--dim);font:14px var(--sans);white-space:nowrap;cursor:pointer;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.chthc>span{overflow:hidden;text-overflow:ellipsis}
+.chthc[aria-selected="true"]{border-color:var(--gold);color:var(--txt);background:#1a1508}
+.chthc.pend{opacity:.6;font-style:italic}
+.chthc:active,.chthc.press{opacity:.6}
+.chthplus{padding:0 14px;color:var(--gold);font-weight:700}
+.chsheet h4{margin:12px 6px 4px;font:600 13px var(--disp);letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+.chsheet .chthf{display:block;width:100%;margin:6px 0;border-radius:14px;padding:8px 14px;font:16px var(--sans)}
+.chsheet input.chthf{height:40px;border-radius:20px}
 .chsbody{margin:0 6px 12px;color:var(--txt);font-size:14px;line-height:1.5;overflow-wrap:anywhere}
 .chopt:disabled{opacity:.4;cursor:default}
 .chtitle{font:700 17px var(--disp);letter-spacing:.12em;text-transform:uppercase;color:var(--orange);
@@ -3179,6 +3242,29 @@ button.qitem:hover,button.qitem:focus-visible{background:#0f0f14}
 .oqacts{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
 .oqst{flex:1;min-width:0;font-family:var(--mono);font-size:12px;color:var(--orange)}
 .oqst.bad{color:var(--red)}
+/* an ask in the shape: a block per question, choices a thumb wide (44px) */
+.oqb{border-top:1px solid #333;padding-top:8px;display:flex;flex-direction:column;gap:8px}
+.oqbh{display:flex;gap:8px;align-items:baseline;font-size:16px;line-height:1.35}
+/* .md only for its links' look (oqLine): the line keeps the block's size */
+.oqbh .md{font-size:inherit;line-height:inherit}
+.oqn{font-family:var(--mono);font-size:12px;color:var(--orange);flex:none}
+.oqbctx{font-size:14px;color:var(--dim)}
+.oqchs{display:flex;flex-wrap:wrap;gap:8px}
+.oqc{flex:1 1 calc(50% - 8px);min-height:44px;padding:8px 12px;border:1px solid var(--blue);border-radius:22px;background:transparent;
+  color:var(--txt);font-size:15px;text-align:left;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;touch-action:manipulation}
+.oqc.rec{border-width:2px;border-color:var(--orange)}
+.oqc.on{background:var(--orange);border-color:var(--orange);color:#000}
+.oqc[data-oqc$=":skip"]{flex:0 1 auto;border-color:#555;color:var(--dim)}
+.oqc[data-oqc$=":skip"].on{background:#555;color:var(--txt)}
+.oqrec{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--orange)}
+.oqc.on .oqrec{color:#000}
+.oqsum{display:flex;gap:8px;align-items:baseline;min-height:44px;width:100%;text-align:left;background:transparent;border:0;color:var(--txt);
+  padding:4px 0;font-size:15px;cursor:pointer}
+.oqst1{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+.oqpick{flex:none;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--orange);font-weight:600}
+.oqpick.skip{color:var(--dim);font-weight:400}
+.oqnote{width:100%;box-sizing:border-box;font-size:16px;min-height:44px;resize:none;overflow:hidden;line-height:1.35}
+.oqsend:disabled{opacity:.45}
 /* a yeoman report's proposals (yeoHtml): a row per change, Apply · Dismiss */
 .yeobox{margin:12px 0 6px;border:1px solid var(--blue);border-radius:10px;padding:8px 12px;display:flex;flex-direction:column;gap:6px}
 .yeoh{font-family:var(--mono);font-size:11px;color:var(--blue);letter-spacing:.06em;text-transform:uppercase}
@@ -4048,6 +4134,25 @@ input[type=range].fine::-moz-range-track{
   /* no room for the seconds beside four buttons and ⋯: HH:MM */
   .clk .s{display:none}
 }
+
+/* classified entries (the "classified" block) */
+.clschip{font:inherit;font-size:12px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--line, #444);
+  background:transparent;color:var(--dim, #999);border-radius:10px;padding:2px 9px;margin-left:6px;cursor:pointer}
+.clschip[data-s="on"],.clschip[data-s="busy"]{background:var(--red);border-color:var(--red);color:#000}
+.clschip[data-s="busy"]{opacity:.75}
+.clschip[data-s="failed"]{border-color:var(--red);color:var(--red)}
+.clsf{color:var(--red);font-weight:700;letter-spacing:.06em}
+.clsf.bad{text-decoration:underline}
+.clslock{border:1px solid var(--red);border-radius:12px;padding:12px 14px;margin:8px 0}
+.clswarn{color:var(--red)}
+.clsw{margin:10px 0 0}
+.clspk{list-style:none;margin:6px 0;padding:0}
+.clspk li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #333}
+.clscode{font:700 22px/1.4 ui-monospace,monospace;letter-spacing:.08em;text-align:center;user-select:all;word-break:break-all}
+#clsMsg.bad{color:var(--red)}
+#bCls.on{background:var(--red);border-color:var(--red);color:#000}
+.clsvmark{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;background:var(--red);color:#000;
+  font-weight:700;border-radius:12px;padding:4px 12px;font-size:13px;pointer-events:none}
 </style>
 </head>
 <body>
@@ -4081,6 +4186,9 @@ input[type=range].fine::-moz-range-track{
   <button class="pill" id="bCourse" aria-label="Plot a course"
           title="Plot a course &mdash; trips on a map, with the weather and a navigator (O)"><span class="lg">&#10148; Course</span><span class="sm">&#10148;</span></button>
   <button class="pill" id="bCfg" aria-label="Connection settings" title="Connection settings"><span class="lg">Config</span><span class="sm">⚙</span></button>
+  <!-- classified entries, shown once a password is set (clsHeadPaint) -->
+  <button class="pill" id="bCls" hidden aria-label="Unlock the classified entries" aria-pressed="false"
+          title="Classified entries &mdash; unlock or lock them (L)"><span class="lg">&#9646; Locked</span><span class="sm">&#9646;</span></button>
   <!-- phones only: stand-ins for the filters column's buttons, shown when
        chosen as header buttons (quickPaint) -->
   <button class="pill qx qoff" data-q="#bMonth" aria-label="Calendar" title="Month">&#9638;</button>
@@ -4346,6 +4454,10 @@ input[type=range].fine::-moz-range-track{
         <div class="edmeta">
           <button type="button" class="kbadge edkind" id="edkind" aria-haspopup="dialog"
                   title="the kind · tap to change it (K picks from every kind)"></button>
+          <!-- the classification (the "classified" block): Unclassified or
+               Secret, the latter sealed on this device before it is sent -->
+          <button type="button" class="clschip" id="edcls" aria-pressed="false" data-s="off"
+                  title="Unclassified · tap to mark it Secret">Unclassified</button>
         </div>
         <input type="hidden" id="e_kind">
         <datalist id="kindlist"></datalist>
@@ -4666,7 +4778,9 @@ function lsGet(k, dflt) {
     return v == null ? dflt : v;
   } catch (e) { return dflt; }
 }
-const lsSet = (k, v) => lsSetStr(k, JSON.stringify(v));
+// an editor draft of a Secret entry is never written down (clsDraftSecret)
+const lsSet = (k, v) => k === "lcars.draft" && clsDraftSecret(v) ? (lsDel(k), true)
+  : lsSetStr(k, JSON.stringify(v));
 
 /* ===================== sound =====================
    The console answers back. Every sound in here is two or three short tones
@@ -5033,6 +5147,13 @@ function kindsLoad(force) {
    it, which is the point — there are thirty write paths and none of them had
    to learn a second way to save. */
 async function api(path, opts = {}) {
+  // a Secret entry is sealed before the outbox or the wire can hold it, and
+  // opened as it comes back (the "classified" block)
+  if (clsWrite(path, opts)) opts = await clsSealOpts(path, opts);
+  const d = await apiOb(path, opts);
+  return clsSecretIn(d) ? clsOpenAnswer(d) : d;
+}
+async function apiOb(path, opts) {
   const r = obRoute(path, opts);
   if (r && r.create && !keyOf(opts))
     opts = Object.assign({}, opts, { headers: Object.assign({}, opts.headers, { "Idempotency-Key": createKey() }) });
@@ -5063,6 +5184,7 @@ async function apiNet(path, opts = {}) {
   const headers = {};
   headers["X-LCARS-Client"] = "web";
   if (opts.headers) Object.assign(headers, opts.headers);   // the engineers' key (engApi)
+  clsHeaders(opts, headers);                               // a classifying write's proof
   if (cfg.user) headers.Authorization = "Basic " + b64(cfg.user + ":" + cfg.pass);
   const init = { method: opts.method || "GET", headers };
   if (opts.raw !== undefined) {
@@ -6141,6 +6263,978 @@ async function keepShare() {
   mediaPaintBars();
 }
 
+/* ===================== classified =====================
+   Secret entries (docs/design/confidential-entries.md; the server's half is
+   lcars_vault.h). A Secret entry's title, text and numbers are encrypted
+   here, in the page, before they leave it: AES-256-GCM under the journal's
+   master key, the envelope ("lcs1.<header>.<ciphertext>") in its `sealed`
+   column and its own columns empty. The server, every agent and every copy
+   of lcars.db see the kind, the dates, done, and nothing else.
+
+   The key. A random master key, wrapped (AES-GCM) by a key derived from the
+   password (PBKDF2-SHA-256, CLS_ITER rounds, a salt of its own), is the
+   server's vault (GET/PUT /vault). Unlocking unwraps it into two
+   non-extractable CryptoKeys, one for the entries and one (HKDF) for the
+   vault token, the proof the server asks of a write that classifies (its
+   X-LCARS-Vault header) - so the key's bytes are never in script. A wrong
+   password fails the unwrap's tag: that is the whole verifier. `wraps` is a
+   list: the password's (always exactly one: the server refuses a vault
+   without it), a recovery code's (a random 128-bit code, HKDF), and one per
+   passkey (the WebAuthn PRF extension's 32 bytes, HKDF). Each wraps the same
+   key, so changing the password rewraps it, touching no entry. A new wrap
+   needs the key's bytes, which an unlocked page does not have (its keys are
+   non-extractable), so adding a passkey or a recovery code asks for the
+   password once more and unwraps an extractable copy only for that write.
+
+   Where plaintext may be: in memory while unlocked (cls.plain, keyed by
+   envelope, and laid over the rows in st.all by clsApply), and nowhere else.
+   api() is the one way to the server, so it seals every write of a Secret
+   entry (clsSealOpts) before the outbox can keep it, and opens every answer
+   that carries one (clsOpenAnswer). plainRow - the mirror, the outbox's
+   bases, srvSeen - keeps a Secret row's columns empty; the warm-boot cache
+   (saveCache) and the editor's draft (lsSet's guard) never hold its text.
+   Locking (the header's button, L, "computer, lock", 15 minutes idle, 5
+   hidden, a reload) drops the key and the plaintext and repaints.
+
+   What it does not guard: the code of this page itself (the design's
+   section 7). So no deck patch - code an agent wrote, running beside this
+   page - may run while it is unlocked, and a page that has run one this
+   load is not unlocked at all. */
+const CLS_SECRET = 2;
+// OWASP's 2023 figure for PBKDF2-SHA-256; stored per wrap, so it can move
+const CLS_ITER = 600000;
+const CLS_TOKEN_INFO = "lcars vault token v1";
+// HKDF's info for the two high-entropy wraps (the design's section 8)
+const CLS_REC_INFO = "lcars vault recovery v1";
+const CLS_PK_INFO = "lcars vault passkey v1";
+// Crockford's base32: no I, L, O or U, so a code read off paper is not misread
+const CLS_B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const CLS_IDLE_MS = 15 * 60000;
+const CLS_HIDDEN_MS = 5 * 60000;
+const CLS_PW_MIN = 8;
+const CLS_TEXT = ["title", "content", "value_int", "value_float"];
+const cls = {
+  vault: undefined,   // the server's vault: undefined not read yet, null none set
+  version: 0,
+  err: "",            // why it could not be read
+  key: null,          // the master key (AES-GCM), while unlocked
+  token: "",          // the vault token (hex), while unlocked
+  plain: new Map(),   // envelope -> {title, content, value_int, value_float}
+  busy: new Set(),    // ids being sealed or opened by the chip
+  failed: new Map(),  // id -> why the chip's last change failed (its Retry)
+  lastInput: Date.now(), hiddenAt: 0, timer: 0,
+};
+const clsOn = () => !!cls.key;
+const clsSecret = e => !!e && Number(e.classification) === CLS_SECRET;
+// a Secret row whose text is not in memory: shown as its placeholder
+const clsLocked = e => clsSecret(e) && !(clsOn() && e.sealed && cls.plain.has(e.sealed));
+// the entry being written or read here is Secret (a draft marked so included)
+const clsHere = () => st.isNew ? !!(st.newTok && st.newTok.level === CLS_SECRET) : clsSecret(st.sel);
+
+const clsUtf8 = s => new TextEncoder().encode(s);
+const clsStr = u8 => new TextDecoder().decode(u8);
+function clsB64(u8) {
+  let s = "";
+  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function clsUnb64(s) {
+  s = String(s || "").replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const b = atob(s), u = new Uint8Array(b.length);
+  for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+  return u;
+}
+const clsHex = u8 => Array.from(u8, b => b.toString(16).padStart(2, "0")).join("");
+
+/* The cryptography, in one object so the QuickJS suite (no WebCrypto) can
+   stand in for it; test/classified.py runs the real one in Chromium. */
+const clsCrypto = {
+  ok: () => typeof crypto === "object" && !!crypto && !!crypto.subtle &&
+            typeof TextEncoder === "function" && (typeof isSecureContext === "undefined" || isSecureContext),
+  async kek(password, salt, iter) {
+    const base = await crypto.subtle.importKey("raw", clsUtf8(password), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iter }, base,
+                                   { name: "AES-GCM", length: 256 }, false, ["wrapKey", "unwrapKey"]);
+  },
+  // the master key out of its wrap: for the entries, and as HKDF for the token
+  async unwrap(kek, w, extractable) {
+    const iv = clsUnb64(w.iv), data = clsUnb64(w.wrapped);
+    const key = await crypto.subtle.unwrapKey("raw", data, kek, { name: "AES-GCM", iv }, { name: "AES-GCM" },
+                                              !!extractable, ["encrypt", "decrypt"]);
+    const hk = await crypto.subtle.unwrapKey("raw", data, kek, { name: "AES-GCM", iv }, "HKDF", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0),
+                                                  info: clsUtf8(CLS_TOKEN_INFO) }, hk, 256);
+    return { key, token: clsHex(new Uint8Array(bits)) };
+  },
+  // a new master key, extractable only so it can be wrapped, and then dropped
+  fresh: () => crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]),
+  async wrap(kek, mk) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const w = await crypto.subtle.wrapKey("raw", mk, kek, { name: "AES-GCM", iv });
+    return { iv: clsB64(iv), wrapped: clsB64(new Uint8Array(w)) };
+  },
+  salt: () => clsB64(crypto.getRandomValues(new Uint8Array(16))),
+  bytes: n => crypto.getRandomValues(new Uint8Array(n)),
+  // a wrapping key from a secret that is random already (a recovery code, a
+  // passkey's PRF output): HKDF, not PBKDF2 - there is nothing to stretch
+  async hkek(secret, salt, info) {
+    const base = await crypto.subtle.importKey("raw", secret, "HKDF", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt, info: clsUtf8(info) }, base,
+                                   { name: "AES-GCM", length: 256 }, false, ["wrapKey", "unwrapKey"]);
+  },
+  /* WebAuthn with the PRF extension: the authenticator's secret for `salt`
+     is the key's material. No server is asked and no signature checked (the
+     challenge is random and thrown away): the PRF output itself is the
+     proof, so it works offline and on the static demo. */
+  pkOk: () => typeof PublicKeyCredential === "function" && !!navigator.credentials,
+  async pkCreate(salt, name, exclude) {
+    const cred = await navigator.credentials.create({ publicKey: {
+      rp: { name: "LCARS classified" },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: "classified · " + name, displayName: name },
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+      authenticatorSelection: { residentKey: "preferred", userVerification: "required" },
+      excludeCredentials: exclude.map(id => ({ type: "public-key", id: clsUnb64(id) })),
+      extensions: { prf: { eval: { first: salt } } } } });
+    const x = cred.getClientExtensionResults().prf || {};
+    const first = x.results && x.results.first;
+    return { id: clsB64(new Uint8Array(cred.rawId)), enabled: x.enabled === true || !!first,
+             prf: first ? new Uint8Array(first) : null };
+  },
+  // one ceremony for every passkey the vault knows, each with its own salt
+  async pkGet(list) {
+    const by = {};
+    for (const w of list) by[w.cred] = { first: clsUnb64(w.prf_salt) };
+    const cred = await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: list.map(w => ({ type: "public-key", id: clsUnb64(w.cred) })),
+      userVerification: "required", extensions: { prf: { evalByCredential: by } } } });
+    const x = cred.getClientExtensionResults().prf || {};
+    const first = x.results && x.results.first;
+    return { id: clsB64(new Uint8Array(cred.rawId)), prf: first ? new Uint8Array(first) : null };
+  },
+  // the authenticator told the credential is gone (Chrome's Signal API, where there is one)
+  pkForget(id) {
+    try {
+      if (typeof PublicKeyCredential.signalUnknownCredential === "function")
+        PublicKeyCredential.signalUnknownCredential({ rpId: location.hostname, credentialId: id }).catch(() => {});
+    } catch (e) { /* only a courtesy */ }
+  },
+  // the header is the additional data: a header edited by hand fails the tag
+  async seal(key, plain) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const head = clsB64(clsUtf8(JSON.stringify({ kid: "k1", alg: "A256GCM", iv: clsB64(iv) })));
+    const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: clsUtf8("lcs1." + head) },
+                                           key, clsUtf8(JSON.stringify(plain)));
+    return "lcs1." + head + "." + clsB64(new Uint8Array(ct));
+  },
+  async open(key, env) {
+    const p = String(env || "").split(".");
+    if (p.length !== 3 || p[0] !== "lcs1") throw new Error("not an envelope");
+    const head = JSON.parse(clsStr(clsUnb64(p[1])));
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: clsUnb64(head.iv),
+                                             additionalData: clsUtf8("lcs1." + p[1]) }, key, clsUnb64(p[2]));
+    return JSON.parse(clsStr(new Uint8Array(pt)));
+  },
+};
+
+/* ---------- the vault ---------- */
+async function clsVaultRead(force) {
+  if (cls.vault !== undefined && !force) return cls.vault;
+  try {
+    const d = await apiNet("/vault");
+    cls.vault = d && d.vault ? d.vault : null;
+    cls.version = (d && d.version) || 0;
+    cls.err = "";
+  } catch (e) {
+    cls.err = e.http === 404 ? "this server is older than classified entries" : e.message;
+  }
+  clsPaint();
+  return cls.vault;
+}
+const clsPwWrap = v => ((v && v.wraps) || []).find(w => w.type === "password");
+
+// The first vault; with `rec`, a recovery code too, whose text is returned once
+async function clsSetup(pw, rec) {
+  if (pw.length < CLS_PW_MIN) throw new Error("at least " + CLS_PW_MIN + " characters");
+  await clsVaultRead(true);
+  if (cls.vault) throw new Error("a password is set already (another device?)");
+  const salt = clsCrypto.salt();
+  const kek = await clsCrypto.kek(pw, clsUnb64(salt), CLS_ITER);
+  const mk = await clsCrypto.fresh();
+  const w = await clsCrypto.wrap(kek, mk);
+  const vault = { v: 1, kid: "k1",
+                  wraps: [Object.assign({ type: "password", kdf: "PBKDF2-SHA256", iter: CLS_ITER, salt }, w)] };
+  const r = rec ? await clsRecWrap(mk) : null;
+  if (r) vault.wraps.push(r.w);
+  const u = await clsCrypto.unwrap(kek, w, false);
+  const put = await apiNet("/vault", { method: "PUT", body: { vault, token: u.token, version: 0 } });
+  cls.vault = vault;
+  cls.version = put.version || 1;
+  clsTake(u);
+  return r ? r.code : "";
+}
+
+async function clsUnwrapPw(pw, extractable) {
+  const w = clsPwWrap(cls.vault);
+  if (!w) throw new Error("the vault has no password");
+  const kek = await clsCrypto.kek(pw, clsUnb64(w.salt), Number(w.iter) || CLS_ITER);
+  try { return await clsCrypto.unwrap(kek, w, extractable); }
+  catch (e) { throw new Error("wrong password"); }
+}
+
+function clsTake(u) {
+  cls.key = u.key;
+  cls.token = u.token;
+  cls.lastInput = Date.now();
+  clearInterval(cls.timer);
+  cls.timer = setInterval(clsTick, 30000);
+}
+
+async function clsUnlock(pw) {
+  if (clsPatched()) throw new Error("a deck patch ran in this page: open it again with ?nopatch to unlock");
+  await clsVaultRead(true);
+  if (!cls.vault) throw new Error("no password is set");
+  clsTake(await clsUnwrapPw(pw, false));
+  await clsOpenRows(st.all);
+  clsRepaint();
+}
+
+async function clsChange(old, pw) {
+  if (pw.length < CLS_PW_MIN) throw new Error("at least " + CLS_PW_MIN + " characters");
+  await clsVaultRead(true);
+  const u = await clsUnwrapPw(old, true);
+  const salt = clsCrypto.salt();
+  const kek = await clsCrypto.kek(pw, clsUnb64(salt), CLS_ITER);
+  const w = Object.assign({ type: "password", kdf: "PBKDF2-SHA256", iter: CLS_ITER, salt }, await clsCrypto.wrap(kek, u.key));
+  const vault = Object.assign({}, cls.vault, { wraps: cls.vault.wraps.map(x => x.type === "password" ? w : x) });
+  const r = await apiNet("/vault", { method: "PUT", body: { vault, token: u.token, version: cls.version } });
+  cls.vault = vault;
+  cls.version = r.version;
+}
+
+/* ---------- the other wraps: a recovery code, the passkeys ---------- */
+const clsWrapsOf = (v, type) => ((v && v.wraps) || []).filter(w => w.type === type);
+const clsDay = () => new Date().toISOString().slice(0, 10);
+// 16 random bytes as 26 base32 characters (130 bits, the last two zero), in groups
+function clsCodeOf(u8) {
+  let bits = 0, n = 0, out = "";
+  for (const b of u8) {
+    n = (n << 8) | b; bits += 8;
+    while (bits >= 5) { out += CLS_B32[(n >> (bits - 5)) & 31]; bits -= 5; }
+    n &= (1 << bits) - 1;
+  }
+  if (bits) out += CLS_B32[(n << (5 - bits)) & 31];
+  return out.match(/.{1,5}/g).join("-").replace(/-(\w)$/, "$1");
+}
+// what was typed back: any case, spaces or dashes, O for 0, I or L for 1
+function clsCodeBytes(s) {
+  const t = String(s || "").toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+  if (t.length !== 26 || /[^0-9A-HJKMNP-TV-Z]/.test(t)) throw new Error("a recovery code is 26 letters and digits");
+  const out = new Uint8Array(16);
+  let bits = 0, n = 0, k = 0;
+  for (const c of t) {
+    n = (n << 5) | CLS_B32.indexOf(c); bits += 5;
+    if (bits >= 8) { if (k < 16) out[k++] = (n >> (bits - 8)) & 255; bits -= 8; n &= (1 << bits) - 1; }
+  }
+  if (n !== 0) throw new Error("that is not a recovery code (a character is wrong)");
+  return out;
+}
+async function clsRecWrap(mk) {
+  const raw = clsCrypto.bytes(16), salt = clsCrypto.salt();
+  const kek = await clsCrypto.hkek(raw, clsUnb64(salt), CLS_REC_INFO);
+  const w = Object.assign({ type: "recovery", kdf: "HKDF-SHA256", info: CLS_REC_INFO, salt, created: clsDay() },
+                          await clsCrypto.wrap(kek, mk));
+  return { w, code: clsCodeOf(raw) };
+}
+// the vault rewritten with the token in hand: the version guards a race
+async function clsPut(vault, token) {
+  const r = await apiNet("/vault", { method: "PUT", body: { vault, token, version: cls.version } });
+  cls.vault = vault;
+  cls.version = r.version;
+  clsPaint();
+}
+const clsWithout = (v, keep) => Object.assign({}, v, { wraps: v.wraps.filter(keep) });
+
+// A new recovery code (replacing any old one): the code, to be shown once
+async function clsRecoveryMake(pw) {
+  await clsVaultRead(true);
+  const u = await clsUnwrapPw(pw, true);
+  const { w, code } = await clsRecWrap(u.key);
+  const v = clsWithout(cls.vault, x => x.type !== "recovery");
+  v.wraps.push(w);
+  await clsPut(v, u.token);
+  return code;
+}
+// The lost password's door: the code unlocks, and a new password is set with it
+async function clsRecoveryUse(code, pw) {
+  if (pw.length < CLS_PW_MIN) throw new Error("the new password: at least " + CLS_PW_MIN + " characters");
+  if (clsPatched()) throw new Error("a deck patch ran in this page: open it again with ?nopatch to unlock");
+  const raw = clsCodeBytes(code);
+  await clsVaultRead(true);
+  const r = clsWrapsOf(cls.vault, "recovery")[0];
+  if (!r) throw new Error("this vault has no recovery code");
+  const kek = await clsCrypto.hkek(raw, clsUnb64(r.salt), r.info || CLS_REC_INFO);
+  let u;
+  try { u = await clsCrypto.unwrap(kek, r, true); }
+  catch (e) { throw new Error("that recovery code does not open this vault"); }
+  const salt = clsCrypto.salt();
+  const pk = await clsCrypto.kek(pw, clsUnb64(salt), CLS_ITER);
+  const pwWrap = Object.assign({ type: "password", kdf: "PBKDF2-SHA256", iter: CLS_ITER, salt }, await clsCrypto.wrap(pk, u.key));
+  await clsPut(Object.assign({}, cls.vault, { wraps: cls.vault.wraps.map(x => x.type === "password" ? pwWrap : x) }), u.token);
+  // held from here as every unlock is: the extractable copy is not kept
+  clsTake(await clsCrypto.unwrap(kek, r, false));
+  await clsOpenRows(st.all);
+  clsRepaint();
+}
+
+// This device's passkey, one more wrap; `wait` is told when the OS dialog is up
+async function clsPasskeyAdd(pw, name, wait) {
+  if (!clsCrypto.pkOk()) throw new Error("this browser has no passkeys (WebAuthn)");
+  if (typeof PublicKeyCredential === "function" && typeof PublicKeyCredential.getClientCapabilities === "function") {
+    const c = await PublicKeyCredential.getClientCapabilities().catch(() => ({}));
+    if (c["extension:prf"] === false) throw new Error("this browser's passkeys have no PRF: they cannot hold the key");
+  }
+  await clsVaultRead(true);
+  const u = await clsUnwrapPw(pw, true);    // a wrong password fails before the OS dialog
+  const salt = clsCrypto.bytes(32);
+  if (wait) wait();
+  const have = clsWrapsOf(cls.vault, "passkey");
+  let c;
+  try { c = await clsCrypto.pkCreate(salt, name, have.map(w => w.cred)); }
+  catch (e) { throw clsPkErr(e, true); }
+  if (!c.enabled) throw new Error("this passkey has no PRF, so it cannot hold the key: not registered (the password still opens it)");
+  let prf = c.prf;
+  // some authenticators give the PRF only to a get(), not at registration
+  if (!prf) {
+    try { prf = (await clsCrypto.pkGet([{ cred: c.id, prf_salt: clsB64(salt) }])).prf; }
+    catch (e) { throw clsPkErr(e); }
+  }
+  if (!prf) throw new Error("this passkey gave no PRF secret, so it cannot hold the key: not registered");
+  const hs = clsCrypto.salt();
+  const kek = await clsCrypto.hkek(prf, clsUnb64(hs), CLS_PK_INFO);
+  const w = Object.assign({ type: "passkey", kdf: "HKDF-SHA256", info: CLS_PK_INFO, salt: hs, name: name || "a passkey",
+                            created: clsDay(), cred: c.id, prf_salt: clsB64(salt) }, await clsCrypto.wrap(kek, u.key));
+  await clsPut(Object.assign({}, cls.vault, { wraps: cls.vault.wraps.concat([w]) }), u.token);
+  return w;
+}
+function clsPkErr(e, making) {
+  const n = e && e.name;
+  if (n === "NotAllowedError") return new Error("the passkey was not given (cancelled, or timed out)");
+  if (n === "InvalidStateError" && making) return new Error("this device has a passkey for it already");
+  if (n === "SecurityError") return new Error("passkeys need this page on a domain name over https");
+  return new Error("passkey: " + ((e && e.message) || n || "failed"));
+}
+async function clsPasskeyUnlock(wait) {
+  if (clsPatched()) throw new Error("a deck patch ran in this page: open it again with ?nopatch to unlock");
+  if (!clsCrypto.pkOk()) throw new Error("this browser has no passkeys (WebAuthn)");
+  await clsVaultRead(true);
+  const list = clsWrapsOf(cls.vault, "passkey");
+  if (!list.length) throw new Error("no passkey is registered: unlock with the password");
+  if (wait) wait();
+  let g;
+  try { g = await clsCrypto.pkGet(list); } catch (e) { throw clsPkErr(e); }
+  const w = list.find(x => x.cred === g.id);
+  if (!w) throw new Error("that passkey is not one of this vault's");
+  if (!g.prf) throw new Error("the passkey gave no PRF secret");
+  const kek = await clsCrypto.hkek(g.prf, clsUnb64(w.salt), w.info || CLS_PK_INFO);
+  let u;
+  try { u = await clsCrypto.unwrap(kek, w, false); }
+  catch (e) { throw new Error("that passkey does not open this vault"); }
+  clsTake(u);
+  await clsOpenRows(st.all);
+  clsRepaint();
+}
+// Removing one needs no password, only the token an unlock gives
+async function clsPasskeyRemove(cred) {
+  if (!clsOn()) throw new Error("unlock first");
+  await clsVaultRead(true);
+  await clsPut(clsWithout(cls.vault, x => !(x.type === "passkey" && x.cred === cred)), cls.token);
+  clsCrypto.pkForget(cred);
+}
+
+// Every way of locking: the key and the plaintext dropped, the rows blank again
+function clsLock(said, why) {
+  if (!clsOn()) { if (said) toast("classified entries are locked"); return; }
+  const e = st.sel;
+  // the edit of a Secret entry goes first, sealed with the key it still has
+  const flush = e && clsSecret(e) && document.body.classList.contains("dirty") ? runSave(true) : Promise.resolve();
+  return flush.catch(() => {}).then(() => {
+    cls.key = null;
+    cls.token = "";
+    cls.plain.clear();
+    clearInterval(cls.timer);
+    // byId holds every row the page has (st.all, and any opened outside it)
+    for (const r of st.byId.values()) if (clsSecret(r)) clsApply(r);
+    if (st.sel && clsSecret(st.sel)) clsApply(st.sel);
+    clsRepaint();
+    if (said || why) toast(why ? "classified entries locked: " + why : "classified entries locked");
+  });
+}
+function clsTick() {
+  if (!clsOn()) { clearInterval(cls.timer); return; }
+  const now = Date.now();
+  if (now - cls.lastInput >= CLS_IDLE_MS) clsLock(false, "15 minutes idle");
+  else if (document.hidden && cls.hiddenAt && now - cls.hiddenAt >= CLS_HIDDEN_MS) clsLock(false, "away 5 minutes");
+}
+for (const t of ["keydown", "pointerdown", "wheel", "touchstart"])
+  document.addEventListener(t, () => { cls.lastInput = Date.now(); }, { capture: true, passive: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { cls.hiddenAt = Date.now(); return; }
+  // a hidden tab's timers are throttled: the time away is judged on return too
+  if (clsOn() && cls.hiddenAt && Date.now() - cls.hiddenAt >= CLS_HIDDEN_MS) clsLock(false, "away 5 minutes");
+  cls.hiddenAt = 0;
+});
+
+// A deck patch is code an agent wrote, with this page's reach: it must not
+// have run where the key is held (the deck holds the console in a frame)
+function clsPatched() {
+  try { return inDeck() && typeof parent.lcarsDeckPatched === "function" && parent.lcarsDeckPatched(); }
+  catch (e) { return false; }
+}
+window.lcarsClsUnlocked = () => clsOn();
+
+/* ---------- the rows ---------- */
+// The text a row shows: its plaintext while unlocked, else its placeholder
+function clsApply(e) {
+  if (!clsSecret(e)) return e;
+  const p = clsOn() && e.sealed ? cls.plain.get(e.sealed) : null;
+  e.title = p ? String(p.title || "") : "";
+  e.content = p ? String(p.content || "") : (e.sealed || e.content === undefined ? "" : e.content);
+  e.value_int = p ? Number(p.value_int) || 0 : 0;
+  e.value_float = p ? Number(p.value_float) || 0 : 0;
+  return e;
+}
+async function clsOpenRows(rows) {
+  if (clsOn()) {
+    for (const e of rows) {
+      if (!clsSecret(e) || !e.sealed || cls.plain.has(e.sealed)) continue;
+      try { cls.plain.set(e.sealed, await clsCrypto.open(cls.key, e.sealed)); }
+      catch (err) { cls.failed.set(e.id, "it would not open: " + err.message); }
+    }
+  }
+  for (const e of rows) clsApply(e);
+  return rows;
+}
+const clsSecretIn = d => Array.isArray(d) ? d.some(clsSecret) : clsSecret(d);
+async function clsOpenAnswer(d) {
+  if (cls.vault === undefined) clsVaultRead();
+  await clsOpenRows(Array.isArray(d) ? d : [d]);
+  return d;
+}
+// the mirror and the outbox's copies: a Secret row's columns empty
+function clsBare(o) {
+  if (clsSecret(o)) for (const k of CLS_TEXT) o[k] = k === "title" || k === "content" ? "" : 0;
+  return o;
+}
+// lsSet's guard: an editor draft of a Secret entry is never written down
+const clsDraftSecret = d => !!(d && d.v && Number(d.v.classification) === 2);
+
+const clsWrite = (path, opts) => !!opts && opts.body && typeof opts.body === "object" &&
+  /^(POST|PUT|PATCH)$/i.test(opts.method || "") && /^\/entries(\/\d+)?$/.test(path);
+
+/* A write of a Secret entry, sealed. The envelope holds all four columns, so
+   a PUT of one of them is sealed with the others as this page holds them;
+   done, the kind and the dates need no envelope and go as they are. A
+   lowering puts the text back in its columns (and needs it open). */
+async function clsSealOpts(path, opts) {
+  const b = opts.body;
+  const m = /^\/entries\/(\d+)$/.exec(path);
+  const row = m ? st.byId.get(Number(m[1])) : null;
+  const was = row ? Number(row.classification) || 0 : 0;
+  const level = b.classification !== undefined ? Number(b.classification) : was;
+  const text = CLS_TEXT.some(k => b[k] !== undefined);
+  const val = (k, src) => src && src[k] !== undefined ? src[k] : k === "title" || k === "content" ? "" : 0;
+  if (level !== CLS_SECRET) {
+    if (was !== CLS_SECRET || b.classification === undefined) return opts;
+    if (!row || clsLocked(row)) throw new Error("unlock classified entries to declassify #" + (row ? row.id : "?"));
+    const out = Object.assign({}, b, { sealed: "" });
+    for (const k of CLS_TEXT) if (out[k] === undefined) out[k] = val(k, row);
+    return Object.assign({}, opts, { body: out });
+  }
+  if (!text && b.classification === undefined) return opts;
+  if (!clsOn()) throw new Error("classified entries are locked: unlock to save this Secret entry");
+  if (row && was === CLS_SECRET && clsLocked(row)) throw new Error("#" + row.id + " has not been opened yet");
+  const plain = {};
+  for (const k of CLS_TEXT) plain[k] = b[k] !== undefined ? b[k] : val(k, row);
+  plain.title = String(plain.title || "");
+  plain.content = String(plain.content || "");
+  plain.value_int = Number(plain.value_int) || 0;
+  plain.value_float = Number(plain.value_float) || 0;
+  const env = await clsCrypto.seal(cls.key, plain);
+  cls.plain.set(env, plain);
+  return Object.assign({}, opts, { body: Object.assign({}, b, {
+    title: "", content: "", value_int: 0, value_float: 0, sealed: env, classification: CLS_SECRET }) });
+}
+// apiNet's: the proof a classifying write carries, while there is one
+const clsHeaders = (opts, h) => {
+  const b = opts && opts.body;
+  if (cls.token && b && typeof b === "object" && (b.sealed !== undefined || b.classification !== undefined))
+    h["X-LCARS-Vault"] = cls.token;
+};
+
+/* ---------- what is shown ---------- */
+const clsPlaceholder = "▮ Classified";
+function clsFlag(e) {
+  if (cls.failed.has(e.id)) return `<span class="clsf bad" title="${attr(cls.failed.get(e.id))}">&#10005; not sealed</span>`;
+  if (cls.busy.has(e.id)) return `<span class="clsf">sealing&hellip;</span>`;
+  return clsSecret(e) ? `<span class="clsf">SECRET</span>` : "";
+}
+function clsReadLock() {
+  return `<div class="clslock"><p><b>&#9646; Classified.</b> This entry is Secret: its title and text are ` +
+    `encrypted, and open only here, unlocked.</p>` +
+    `<button type="button" class="pill go" data-cls="unlock">Unlock</button></div>`;
+}
+// the editor: a locked Secret entry is read-only (its fields hold nothing to edit)
+function clsForm(e) {
+  const lock = !st.isNew && clsLocked(e);
+  for (const id of ["#e_head", "#content"]) {
+    const el = $(id);
+    if (!el) continue;
+    if (lock) { el.readOnly = true; el.classList.add("ro"); }
+    else if (id === "#e_head") { el.readOnly = false; el.classList.remove("ro"); }
+  }
+  clsChipPaint();
+}
+function clsChipPaint() {
+  const c = $("#edcls");
+  if (!c) return;
+  const id = st.sel && !st.isNew ? st.sel.id : 0;
+  const secret = clsHere();
+  const [k, label] = id && cls.failed.has(id) ? ["failed", "✕ Not sealed · Retry"]
+    : id && cls.busy.has(id) ? ["busy", secret ? "▮ Secret · opening…" : "▮ Secret · sealing…"]
+    : secret ? ["on", clsOn() || st.isNew ? "▮ Secret" : "▮ Secret · locked"]
+    : ["off", "Unclassified"];
+  c.dataset.s = k;
+  c.textContent = label;
+  c.setAttribute("aria-pressed", secret ? "true" : "false");
+  c.title = secret ? "Secret: encrypted on this device · tap to declassify" : "Unclassified · tap to mark it Secret";
+}
+function clsHeadPaint() {
+  const b = $("#bCls");
+  if (!b) return;
+  b.hidden = !cls.vault;
+  b.setAttribute("aria-pressed", clsOn() ? "true" : "false");
+  b.setAttribute("aria-label", clsOn() ? "Lock the classified entries" : "Unlock the classified entries");
+  b.querySelector(".lg").textContent = clsOn() ? "▮ Unlocked" : "▮ Locked";
+  b.classList.toggle("on", clsOn());
+}
+// the microphone in a Secret entry: its words go to a recogniser elsewhere
+function clsVoicePaint() {
+  let m = $("#clsvmark");
+  const on = typeof vx === "object" && vx.on && clsHere();
+  if (!m && !on) return;
+  if (!m) {
+    m = document.createElement("div");
+    m.id = "clsvmark";
+    m.className = "clsvmark";
+    m.setAttribute("role", "status");
+    m.textContent = "▮ Secret entry — the voice leaves the device";
+    document.body.appendChild(m);
+  }
+  m.hidden = !on;
+}
+function clsPaint() {
+  clsHeadPaint();
+  clsChipPaint();
+  clsVoicePaint();
+  const l = $("#c_clsl");
+  if (l) l.innerHTML = clsCfgHtml();
+}
+function clsRepaint() {
+  st.bodyGen++;
+  refresh();
+  const e = st.sel;
+  if (e && !st.isNew && !document.body.classList.contains("dirty")) {
+    setForm(e);
+    setEdTitle(e);
+    if (st.read) renderRead();
+  }
+  clsPaint();
+}
+
+/* ---------- the doors ---------- */
+function clsCfgHtml() {
+  if (!clsCrypto.ok()) return `<div class="hint">Needs a secure page (https) with WebCrypto: not here.</div>`;
+  if (cls.vault === undefined) {
+    if (!cls.err) setTimeout(() => clsVaultRead(), 0);
+    return `<div class="hint">${cls.err ? esc(cls.err) : "reading&hellip;"}</div>`;
+  }
+  if (!cls.vault) {
+    return `<div class="hint">No password set. A Secret entry is encrypted on this device before it is ` +
+      `sent, and no agent, script or copy of the journal can read it.</div>` +
+      `<button type="button" class="mini" data-cls="setup">Set a password&hellip;</button>`;
+  }
+  const pks = clsWrapsOf(cls.vault, "passkey"), rec = clsWrapsOf(cls.vault, "recovery")[0];
+  return `<div class="hint">${clsOn() ? "Unlocked on this device." : "Locked on this device."} ` +
+    `It locks after 15 minutes idle, 5 minutes away, or a reload.</div>` +
+    (clsOn() ? `<button type="button" class="mini" data-cls="lock">Lock</button> ` +
+               `<button type="button" class="mini" data-cls="token">Copy the vault token</button> `
+             : `<button type="button" class="mini" data-cls="unlock">Unlock&hellip;</button> `) +
+    `<button type="button" class="mini" data-cls="change">Change the password&hellip;</button>` +
+    `<div class="clsw"><b>Passkeys</b> &mdash; unlock with Face ID, a fingerprint or a security key; ` +
+      `the password stays the way in when there is none.` +
+      (pks.length ? `<ul class="clspk">${pks.map(w => `<li><span>${esc(w.name || "a passkey")}` +
+          `<small> &middot; ${esc(w.created || "")}</small></span>` +
+          (clsOn() ? `<button type="button" class="mini" data-cls="pkdel" data-cred="${attr(w.cred)}">Remove</button>` : "") +
+          `</li>`).join("")}</ul>` : `<div class="hint">None registered.</div>`) +
+      (clsOn() ? `<button type="button" class="mini" data-cls="pkadd">Register this device&hellip;</button>`
+               : `<div class="hint">Unlock to register or remove one.</div>`) + `</div>` +
+    `<div class="clsw"><b>Recovery code</b> &mdash; ` +
+      (rec ? `made ${esc(rec.created || "")}. It opens the vault if the password is lost.`
+           : `none. Without one, a lost password loses the Secret entries.`) +
+      (clsOn() ? ` <button type="button" class="mini" data-cls="recmake">${rec ? "Replace it" : "Make one"}&hellip;</button>` : "") +
+    `</div>` +
+    `<div class="hint clswarn">${CLS_LOST}</div>`;
+}
+const CLS_LOST = "If you lose the password (and the recovery code, and every passkey), your Secret entries are " +
+  "gone. Nobody can recover them: not the server, not its admin, not an engineer.";
+
+function clsDialog(title, body, go, run, busy) {
+  openDialog(`<h2 id="dlgh">${esc(title)}</h2>${body}` +
+    `<div class="hint" id="clsMsg" role="status"></div>` +
+    `<div class="row" style="justify-content:flex-end;flex-wrap:wrap">` +
+      `<button class="pill" id="clsNo">Cancel</button>` +
+      `<button class="pill go" id="clsGo">${esc(go)}</button></div>`,
+    { onkey: ev => { if (ev.key === "Enter" && ev.target.tagName === "INPUT" && ev.target.type !== "checkbox") {
+      ev.preventDefault(); $("#clsGo").click(); } } });
+  $("#clsNo").onclick = () => closeOv();
+  $("#clsGo").onclick = async () => {
+    const b = $("#clsGo"), msg = $("#clsMsg");
+    if (b.disabled) return;
+    // pressed at once: deriving the key takes a moment on a phone
+    b.disabled = true;
+    b.textContent = "Working…";
+    msg.classList.remove("bad");
+    msg.textContent = busy || "deriving the key…";
+    // the OS's passkey sheet can take a while: the button says what it waits on
+    const wait = (label, why) => { b.textContent = label; msg.textContent = why; };
+    try {
+      await run(wait);
+      for (const i of $("#dlg").querySelectorAll("input[type=password]")) i.value = "";
+      closeOv();
+    } catch (e) {
+      b.disabled = false;
+      b.textContent = go;
+      msg.textContent = e.message;
+      msg.classList.add("bad");
+      sfx("deny");
+      const p = $("#dlg").querySelector("input[type=password]");
+      if (p) p.select();
+    }
+  };
+  openOv();
+  const f = $("#dlg").querySelector("input[type=password]");
+  if (f) f.focus();
+}
+// the dialogs' fields, written out: test/check.py wants every id it is asked by
+const CLS_PW = `<div class="field"><label>password</label><input type="password" id="clsPw" autocomplete="current-password"></div>`;
+const CLS_PW_NEW = `<div class="field"><label>the new password</label><input type="password" id="clsPw" autocomplete="new-password"></div>` +
+  `<div class="field"><label>the same again</label><input type="password" id="clsPw2" autocomplete="new-password"></div>`;
+const CLS_PW_OLD = `<div class="field"><label>the password now</label><input type="password" id="clsOld" autocomplete="current-password"></div>`;
+
+function clsSetupAsk(then) {
+  if (!clsCrypto.ok()) { toast("classified entries need a secure page (https) with WebCrypto", true); return; }
+  clsDialog("Set the classified password",
+    `<div class="cfbody"><p>Secret entries are encrypted on this device with a key only this password ` +
+    `opens. The server keeps the encrypted text and never sees the password.</p>` +
+    `<p class="clswarn"><b>If you lose this password, your Secret entries are gone.</b> Nobody can ` +
+    `recover them: not the server, not its admin, not an engineer.</p></div>` +
+    CLS_PW_NEW +
+    `<label class="chk"><input type="checkbox" id="clsRec" checked> Make a recovery code too: shown once, ` +
+    `it opens the entries if the password is lost</label>` +
+    `<label class="chk"><input type="checkbox" id="clsOk"> I understand: a lost password means my Secret ` +
+    `entries are gone</label>`,
+    "Set the password", async () => {
+      const pw = $("#clsPw").value;
+      if (!$("#clsOk").checked) throw new Error("tick the box first: it is the one thing to know");
+      if (pw !== $("#clsPw2").value) throw new Error("the two passwords differ");
+      const code = await clsSetup(pw, $("#clsRec").checked);
+      clsRepaint();
+      toast("classified password set — unlocked on this device");
+      sfx("save");
+      // after this dialog closes: the code's own, shown once
+      setTimeout(() => code ? clsCodeShow(code, then) : then && then(), 0);
+    });
+}
+
+function clsUnlockAsk(then, passkey) {
+  if (!clsCrypto.ok()) { toast("classified entries need a secure page (https) with WebCrypto", true); return; }
+  if (clsOn()) { if (then) then(); else toast("classified entries are unlocked"); return; }
+  if (clsPatched()) {
+    toast("a deck patch ran in this page — open the deck with ?nopatch (or the console alone) to unlock", true);
+    return;
+  }
+  clsVaultRead().then(v => {
+    if (cls.err && v === undefined) { toast("classified: " + cls.err, true); return; }
+    if (!v) { clsSetupAsk(then); return; }
+    const pk = clsWrapsOf(v, "passkey").length && clsCrypto.pkOk(), rec = clsWrapsOf(v, "recovery").length;
+    clsDialog("Unlock classified entries",
+      (pk ? `<div class="row"><button type="button" class="pill go" id="clsPk">Use a passkey</button></div>` : "") +
+      CLS_PW +
+      (DEMO && window.LCARS_DEMO.password
+        ? `<div class="hint">This demo's password: <b>${esc(window.LCARS_DEMO.password)}</b></div>` : "") +
+      `<div class="hint">Unlocked on this device until you lock, 15 minutes idle, 5 minutes away, or a reload.</div>` +
+      (rec ? `<button type="button" class="mini" id="clsRecUse">Lost the password? Use the recovery code&hellip;</button>` : ""),
+      "Unlock", async () => {
+        await clsUnlock($("#clsPw").value);
+        toast("classified entries unlocked");
+        sfx("save");
+        if (then) then();
+      });
+    if (pk) $("#clsPk").onclick = () => clsPkTap(then);
+    if (rec) $("#clsRecUse").onclick = () => { sfx("tap"); closeOv(); clsRecoveryAsk(then); };
+    if (pk && passkey) clsPkTap(then);
+  });
+}
+// The passkey button: pressed at once, and saying so while the OS's sheet is up
+async function clsPkTap(then) {
+  const b = $("#clsPk"), msg = $("#clsMsg");
+  if (!b || b.disabled) return;
+  sfx("tap");
+  b.disabled = true;
+  b.textContent = "Waiting for the passkey…";
+  msg.classList.remove("bad");
+  msg.textContent = "your device asks for the passkey…";
+  try {
+    await clsPasskeyUnlock(() => { msg.textContent = "your device asks for the passkey…"; });
+    closeOv();
+    toast("classified entries unlocked, by passkey");
+    sfx("save");
+    if (then) then();
+  } catch (e) {
+    if (!b.isConnected) { toast(e.message, true); return; }
+    b.disabled = false;
+    b.textContent = "Use a passkey";
+    msg.textContent = e.message;
+    msg.classList.add("bad");
+    sfx("deny");
+  }
+}
+// voice's "unlock with a passkey": the unlock dialog, its passkey asked at once
+function clsPasskeyAsk() {
+  if (clsOn()) { toast("classified entries are unlocked"); return; }
+  clsVaultRead().then(v => {
+    if (!v) { toast("no classified password is set", true); return; }
+    if (!clsWrapsOf(v, "passkey").length) { toast("no passkey is registered: Config, Classified", true); return; }
+    clsUnlockAsk(null, true);
+  });
+}
+
+// The code, once: nothing keeps it after this dialog closes
+function clsCodeShow(code, then) {
+  openDialog(`<h2 id="dlgh">Your recovery code</h2>` +
+    `<p class="clscode" id="clsCode">${esc(code)}</p>` +
+    `<div class="cfbody"><p>It is shown this once. Keep it in a password manager or on paper, away from ` +
+    `this device: it opens your Secret entries if the password is lost, for anyone who holds it.</p></div>` +
+    `<div class="row" style="justify-content:flex-end;flex-wrap:wrap">` +
+      `<button class="pill" id="clsCopy">Copy</button><button class="pill go" id="clsKept">I have kept it</button></div>`);
+  $("#clsCopy").onclick = () => {
+    sfx("tap");
+    if (navigator.clipboard) navigator.clipboard.writeText(code).then(() => toast("recovery code copied"),
+      () => toast("could not copy it: write it down", true));
+  };
+  // the closed dialog's markup stays in #dlg until the next one: the code goes from it now
+  $("#clsKept").onclick = () => { sfx("tap"); $("#clsCode").textContent = ""; closeOv(); if (then) then(); };
+  openOv();
+}
+function clsRecoveryAsk(then) {
+  if (!clsCrypto.ok()) { toast("classified entries need a secure page (https) with WebCrypto", true); return; }
+  clsVaultRead().then(v => {
+    if (!v) { toast("no classified password is set", true); return; }
+    if (!clsWrapsOf(v, "recovery").length) { toast("this vault has no recovery code", true); return; }
+    clsDialog("Unlock with the recovery code",
+      `<div class="field"><label>the recovery code</label><input type="text" id="clsCodeIn" autocomplete="off" ` +
+      `autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX"></div>` +
+      CLS_PW_NEW +
+      `<div class="hint">The code opens the vault and a new password is set with it. The code stays valid: ` +
+      `make a new one in Config if this one has been seen.</div>`,
+      "Unlock and set it", async () => {
+        if ($("#clsPw").value !== $("#clsPw2").value) throw new Error("the two new passwords differ");
+        await clsRecoveryUse($("#clsCodeIn").value, $("#clsPw").value);
+        $("#clsCodeIn").value = "";
+        toast("unlocked by the recovery code — the new password is set");
+        sfx("save");
+        if (then) then();
+      });
+    $("#clsCodeIn").focus();
+  });
+}
+function clsRecoveryMakeAsk() {
+  if (!clsOn()) { clsUnlockAsk(() => clsRecoveryMakeAsk()); return; }
+  const had = clsWrapsOf(cls.vault, "recovery").length;
+  clsDialog(had ? "Replace the recovery code" : "Make a recovery code",
+    CLS_PW + `<div class="hint">The password once more: a new wrap of the key needs it. ` +
+    (had ? "The old code stops working." : "") + `</div>`,
+    had ? "Replace it" : "Make it", async () => {
+      const code = await clsRecoveryMake($("#clsPw").value);
+      setTimeout(() => clsCodeShow(code), 0);
+    });
+}
+function clsPasskeyAddAsk() {
+  if (!clsCrypto.ok()) { toast("classified entries need a secure page (https) with WebCrypto", true); return; }
+  if (!clsCrypto.pkOk()) { toast("this browser has no passkeys (WebAuthn)", true); return; }
+  if (!clsOn()) { clsUnlockAsk(() => clsPasskeyAddAsk()); return; }
+  const ua = navigator.userAgent || "";
+  const guess = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android phone"
+    : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows PC" : /Linux/.test(ua) ? "Linux" : "this device";
+  clsDialog("Register this device's passkey",
+    `<div class="field"><label>call it</label><input type="text" id="clsPkCall" value="${attr(guess)}" autocomplete="off"></div>` +
+    CLS_PW +
+    `<div class="hint">The password once more: a new wrap of the key needs it. The passkey must support PRF ` +
+    `(iCloud Keychain, Google Password Manager, Windows Hello, a FIDO2 key); one that does not is told so ` +
+    `and not registered.</div>`,
+    "Register", async wait => {
+      const w = await clsPasskeyAdd($("#clsPw").value, $("#clsPkCall").value.trim().slice(0, 60),
+                                    () => wait("Waiting for the passkey…", "your device asks to make the passkey…"));
+      toast("passkey registered: " + w.name);
+      sfx("save");
+    });
+}
+async function clsPasskeyDel(b) {
+  const cred = b.dataset.cred, w = clsWrapsOf(cls.vault, "passkey").find(x => x.cred === cred);
+  if (!w || b.disabled) return;
+  if (!await lcarsConfirm({ title: "Remove the passkey “" + (w.name || "a passkey") + "”?",
+    body: "<p>It will no longer unlock the Secret entries. The password, and any other passkey, still do.</p>",
+    ok: "Remove", danger: true })) return;
+  const live = document.querySelector(`#c_clsl [data-cls=pkdel][data-cred="${CSS.escape ? CSS.escape(cred) : cred}"]`) || b;
+  live.disabled = true;
+  live.textContent = "removing…";
+  try {
+    await clsPasskeyRemove(cred);
+    toast("passkey removed: " + (w.name || "a passkey"));
+    sfx("save");
+  } catch (e) {
+    live.disabled = false;
+    live.textContent = "✕ Retry";
+    toast("could not remove it: " + e.message, true);
+  }
+}
+
+function clsChangeAsk() {
+  clsVaultRead().then(v => {
+    if (!v) { clsSetupAsk(); return; }
+    clsDialog("Change the classified password",
+      CLS_PW_OLD + CLS_PW_NEW +
+      `<div class="hint">The key is rewrapped: no entry is touched, and every device's next unlock takes the new one.</div>`,
+      "Change it", async () => {
+        if ($("#clsPw").value !== $("#clsPw2").value) throw new Error("the two new passwords differ");
+        await clsChange($("#clsOld").value, $("#clsPw").value);
+        toast("classified password changed");
+        sfx("save");
+      });
+  });
+}
+
+function clsToggle() { return clsOn() ? clsLock(true) : clsUnlockAsk(); }
+
+// The chip's two ways, each showing its change before the network does
+async function clsMarkSecret() {
+  if (!clsCrypto.ok()) { toast("classified entries need a secure page (https) with WebCrypto", true); return; }
+  if (!st.sel && !st.isNew) { toast("open an entry first", true); return; }
+  if (clsHere()) { toast("this entry is Secret already"); return; }
+  if (!clsOn()) { clsUnlockAsk(() => clsMarkSecret()); return; }
+  if (st.isNew) {
+    st.newTok.level = CLS_SECRET;
+    clsPaint();
+    markDirty();
+    toast("this entry will be Secret: sealed before it is sent");
+    return;
+  }
+  const e = st.sel;
+  if (media.byEntry && (media.byEntry.get(e.id) || []).length) {
+    toast("#" + e.id + " has files, which are not encrypted: remove them before marking it Secret", true);
+    return;
+  }
+  cls.failed.delete(e.id);
+  cls.busy.add(e.id);
+  clsPaint();
+  clsRowPaint(e);
+  try {
+    // what the form holds now goes in the same write, sealed: it is never sent in the clear first
+    const v = formValues();
+    const body = Object.assign(needsBody(e) ? {} : updateBody(v, e), { classification: CLS_SECRET });
+    await api("/entries/" + e.id, { method: "PUT", body });
+    e.classification = CLS_SECRET;
+    await refetchInto(e);
+    cls.busy.delete(e.id);
+    setClean();
+    clsRepaint();
+    sfx("save");
+    toast("#" + e.id + " is Secret: encrypted, and only here to read");
+  } catch (err) { clsFail(e, err, clsMarkSecret); }
+}
+async function clsDeclassify() {
+  if (!st.sel && !st.isNew) { toast("open an entry first", true); return; }
+  if (!clsHere()) { toast("this entry is not Secret"); return; }
+  if (st.isNew) { st.newTok.level = 0; clsPaint(); toast("this entry will be Unclassified"); return; }
+  if (!clsOn()) { clsUnlockAsk(() => clsDeclassify()); return; }
+  const e = st.sel;
+  if (!await lcarsConfirm({ title: "Declassify #" + e.id + "?",
+    body: "<p>Its title and text go back to the journal in the clear, where the chat, the crew, Number One " +
+          "and every copy of the journal can read them.</p>", ok: "Declassify", danger: true })) return;
+  cls.failed.delete(e.id);
+  cls.busy.add(e.id);
+  clsPaint();
+  clsRowPaint(e);
+  try {
+    await api("/entries/" + e.id, { method: "PUT", body: { classification: 0 } });
+    e.classification = 0;
+    e.sealed = "";
+    await refetchInto(e);
+    cls.busy.delete(e.id);
+    clsRepaint();
+    sfx("save");
+    toast("#" + e.id + " is Unclassified");
+  } catch (err) { clsFail(e, err, clsDeclassify); }
+}
+function clsFail(e, err, retry) {
+  cls.busy.delete(e.id);
+  cls.failed.set(e.id, err.message);
+  clsPaint();
+  clsRowPaint(e);
+  toast("#" + e.id + ": " + err.message, true, { label: "Retry", fn: () => { if (st.sel === e) retry(); } });
+}
+function clsRowPaint(e) {
+  const m = document.querySelector(`.item[data-id="${e.id}"] .m`);
+  if (!m) return;
+  const old = m.querySelector(".clsf");
+  const t = document.createElement("template");
+  t.innerHTML = clsFlag(e);
+  if (old) old.replaceWith(...t.content.childNodes); else m.appendChild(t.content);
+}
+function clsChipTap() {
+  sfx("tap");
+  const id = st.sel && !st.isNew ? st.sel.id : 0;
+  if (id && cls.busy.has(id)) return;
+  if (id && cls.failed.has(id)) {
+    // Retry: whichever way it was going
+    return clsSecret(st.sel) ? clsDeclassify() : clsMarkSecret();
+  }
+  return clsHere() ? clsDeclassify() : clsMarkSecret();
+}
+
+document.addEventListener("click", ev => {
+  const b = ev.target.closest && ev.target.closest("[data-cls]");
+  if (!b) return;
+  const w = b.dataset.cls;
+  if (w === "setup") clsSetupAsk();
+  else if (w === "unlock") clsUnlockAsk();
+  else if (w === "lock") clsLock(true);
+  else if (w === "change") clsChangeAsk();
+  else if (w === "pkadd") clsPasskeyAddAsk();
+  else if (w === "pkdel") clsPasskeyDel(b);
+  else if (w === "recmake") clsRecoveryMakeAsk();
+  else if (w === "token") {
+    // for scripts/db-merge-window.py (LCARS_VAULT_TOKEN): it can rewrite an
+    // envelope, never read one
+    const t = cls.token;
+    if (t && navigator.clipboard) navigator.clipboard.writeText(t).then(() => toast("vault token copied"),
+      () => toast("could not copy it", true));
+  }
+});
+
 /* ===================== state ===================== */
 const FIELDS = ["kind","title","content","value_int","value_float","done_bool","deleted",
                 "created_at_utc","last_modified_at_utc","start_date","end_date"];
@@ -7180,11 +8274,15 @@ const MIRROR_BODY_FETCH = 60;   // missing bodies fetched one by one; past this,
 
 // The columns the server sends. Stored as plain objects of exactly these keys,
 // so a property the page ever hangs on a row cannot break the structured clone.
-const ROW_KEYS = ["id", "content_length"].concat(FIELDS);
+// the outbox's and the mirror's columns: the form's, and a Secret row's level
+// and envelope (the "classified" block), which no field of the form holds
+const OB_FIELDS = FIELDS.concat(["classification", "sealed"]);
+const ROW_KEYS = ["id", "content_length"].concat(OB_FIELDS);
+// a row as it is kept on this device: a Secret one's text never (clsBare)
 function plainRow(r) {
   const o = {};
   for (const k of ROW_KEYS) if (r[k] !== undefined) o[k] = r[k];
-  return o;
+  return clsBare(o);
 }
 
 // The newest last_modified_at_utc in a set of rows. Stamps are
@@ -7581,7 +8679,7 @@ function obServe(r, opts) {
 function obCreate(body, key) {
   const id = ob.next++;
   const row = Object.assign({ id }, OB_ROW);
-  for (const k of FIELDS) if (body[k] !== undefined) row[k] = body[k];
+  for (const k of OB_FIELDS) if (body[k] !== undefined) row[k] = body[k];
   if (!row.created_at_utc) row.created_at_utc = utcNow();
   row.last_modified_at_utc = utcNow();
   row.content_length = obLen(row.content);
@@ -7607,7 +8705,7 @@ function obEdit(id, body) {
     });
     ob.ops.set(id, op);
   }
-  for (const k of FIELDS) {
+  for (const k of OB_FIELDS) {
     if (body[k] === undefined || k === "last_modified_at_utc") continue;
     op.row[k] = body[k];
     if (!op.create && !op.fields.includes(k)) op.fields.push(k);
@@ -7756,7 +8854,7 @@ async function obFlush() {
 
 function obCreateBody(row) {
   const body = {};
-  for (const k of FIELDS) if (k !== "last_modified_at_utc") body[k] = row[k];
+  for (const k of OB_FIELDS) if (k !== "last_modified_at_utc" && row[k] !== undefined) body[k] = row[k];
   body.kind = String(body.kind || "").trim() || kindOf("log");
   // sent only when set, like saveCreate: the server's '' default is the same
   if (!body.start_date) delete body.start_date;
@@ -7778,7 +8876,7 @@ async function obSendCreate(op) {
   // Edited while it was on its way: what moved since is an edit of the new row.
   if (op.ver !== ver) {
     const row = Object.assign({}, op.row, { id: fresh.id });
-    const fields = FIELDS.filter(f => f !== "last_modified_at_utc" && !obSame(row[f], fresh[f]));
+    const fields = OB_FIELDS.filter(f => f !== "last_modified_at_utc" && !obSame(row[f], fresh[f]));
     if (fields.length) {
       ob.ops.set(fresh.id, { id: fresh.id, create: false, base: plainRow(fresh), row, fields,
                              ver: 1, at: op.at, held: false });
@@ -7873,7 +8971,7 @@ function obSettle(op, ver, fresh, sent) {
   // An open, unsaved editor is only brought up to date when the server's row
   // is exactly what this device sent, so its next save is not a conflict with
   // itself; anything the server merged in is for that save's own check.
-  const pure = FIELDS.every(f => f === "last_modified_at_utc" || obSame(fresh[f], op.row[f]));
+  const pure = OB_FIELDS.every(f => f === "last_modified_at_utc" || obSame(fresh[f], op.row[f]));
   if (editing && !pure) return;
   landBody(e, fresh);
   if (still) Object.assign(e, still.row);
@@ -8074,8 +9172,8 @@ function obOverlay() {
   let added = false;
   for (const op of ob.ops.values()) {
     const have = st.byId.get(op.id);
-    if (have) { Object.assign(have, op.row); continue; }
-    const e = st.sel && st.sel.id === op.id ? Object.assign(st.sel, op.row) : Object.assign({}, op.row);
+    if (have) { clsApply(Object.assign(have, op.row)); continue; }
+    const e = clsApply(st.sel && st.sel.id === op.id ? Object.assign(st.sel, op.row) : Object.assign({}, op.row));
     st.byId.set(op.id, e);
     st.all.push(e);
     added = true;
@@ -8178,7 +9276,7 @@ function saveCache() {
   for (const e of st.all) {                       // st.all is newest-first
     if (rows.length >= CACHE_ROWS || size > CACHE_BYTES) break;
     if (needsBody(e)) break;      // a bodiless row would warm-boot as a blank entry
-    rows.push(e);
+    rows.push(clsSecret(e) ? plainRow(e) : e);   // a Secret row's text is never kept
     size += (e.content_length || 0) + 200;
   }
   // Over quota, the half-written key is worse than none: drop it rather than
@@ -8785,7 +9883,8 @@ const sugTitleOpen = () => {
   const t = $("#e_head").value.trim();
   return !t || t === "HTTP Entry";
 };
-const sugEditing = () => !!(st.isNew || st.sel) && !st.read && !$("#content").readOnly;
+// not a Secret entry's: its text would go to the embedding service
+const sugEditing = () => !!(st.isNew || st.sel) && !st.read && !$("#content").readOnly && !clsHere();
 
 function sugSoon() {
   clearTimeout(sg.tmr);
@@ -9388,7 +10487,7 @@ const ROUTES = {
   crew:      { open: a => openCrew(a[0]) },
   queue:     { open: () => openQueue() },
   notes:     { open: () => openNotes() },
-  questions: { open: () => openQuestions() },
+  questions: { open: () => openQuestions(oqBackTop()) },
   thread:    { open: a => { const e = st.byId.get(Number(a[0])); if (e) openThread(e); } },
   trend:     { open: a => openTrend(a[0]) },
   help:      { open: () => openHelp() },
@@ -10598,16 +11697,21 @@ function openRow(id) {
    The url and the day's scroll are kept for the way back. */
 let edFrom = null;       // { kind, url, key, top }, or null: the list
 let dayLeft = null;      // the day last closed and its scroll (closeOv)
+let oqLeft = null;       // the open questions' scroll as they last closed (closeOv)
 // read as the panel goes (closeOv), before it does: hidden, it scrolls nowhere
 const dayKeep = () => { dayLeft = dayOpen && $("#dayout") ? { key: dayOpen, top: $("#dayout").scrollTop } : null; };
+const oqKeep = () => { oqLeft = $("#oqrows") ? $("#oqrows").scrollTop : null; };
 const ED_FROM = { list: ["‹ List", "Back to the list"], search: ["‹ Search", "Back to the search"],
-                  day: ["‹ Day", "Back to the day"], tasks: ["‹ Tasks", "Back to the tasks"] };
+                  day: ["‹ Day", "Back to the day"], tasks: ["‹ Tasks", "Back to the tasks"],
+                  questions: ["‹ Questions", "Back to the open questions"] };
 function edFromOf(u) {
   const r = parseRel(u || "");
   if (r.v === "day" && r.a[0]) {
     return { kind: "day", url: u, key: r.a[0], top: dayLeft && dayLeft.key === r.a[0] ? dayLeft.top : 0 };
   }
   if (r.v === "tasks") return { kind: "tasks", url: u };
+  // an entry linked from a question: Back is the questions, the card in view
+  if (r.v === "questions") return { kind: "questions", url: u, top: oqLeft || 0 };
   if (!r.v && new URLSearchParams(r.qs).get("q")) return { kind: "search", url: u };
   return null;
 }
@@ -10626,15 +11730,18 @@ function edFromOpen() {
 // the one its text was tapped for (applyPage opens the day before it
 // closes the editor)
 const dayBackTop = key => edFrom && edFrom.kind === "day" && edFrom.key === key && (st.sel || st.isNew) ? edFrom.top : 0;
+const oqBackTop = () => edFrom && edFrom.kind === "questions" && (st.sel || st.isNew) ? edFrom.top : 0;
 /* The phone's ‹ and the voice's "close": back where the entry came from, in
    the tap. The view is opened here and now; only the url's step is left to
    writeState, as a Back when the view is the step below. */
 function edBack() {
   const f = edFrom;
-  if (!f || (f.kind !== "day" && f.kind !== "tasks")) { closeRow(); return; }
+  if (!f || (f.kind !== "day" && f.kind !== "tasks" && f.kind !== "questions")) { closeRow(); return; }
   if (!closeEditor()) return;
   backNext = true;
-  if (f.kind === "day") openDay(f.key, f.top); else openTasks();
+  if (f.kind === "day") openDay(f.key, f.top);
+  else if (f.kind === "questions") openQuestions(f.top);
+  else openTasks();
 }
 
 /* ‹, ×, Escape. Not a morph: a door out of an edited entry leaves in the
@@ -10710,6 +11817,7 @@ function closeOv() {
   // up; only a panel that really was on screen gets a sound for leaving it
   if ($("#ov").classList.contains("on")) sfx("dismiss");
   dayKeep();
+  oqKeep();
   $("#ov").classList.remove("on");
   dayOpen = null;
   monthAt = null;       // the calendar's arrow keys go with its grid
@@ -10778,6 +11886,7 @@ const MORE_TILES = [
   ["#bSound", "&#9834;", () => snd.on ? "Sound on" : "Sound off"],
   ["#bReload", "&#8635;", "Reload"],
   ["#bCfg", "&#9881;", "Connection"],
+  ["#bCls", "&#9646;", () => clsOn() ? "Lock classified" : "Unlock classified"],
 ];
 const moreTile = ([sel, glyph, label], i, cls) =>
   `<button type="button" class="pill shtile${cls || ""}" data-i="${i}">` +
@@ -11442,6 +12551,7 @@ function dayMapSaid(which) {
 const PLACEHOLDER_TITLE = "HTTP Entry";
 const SHOWN_TITLE_MAX = 60;
 function shownTitle(e) {
+  if (clsLocked(e)) return { t: clsPlaceholder, derived: true };
   const t = ((e && e.title) || "").trim();
   if (t && t !== PLACEHOLDER_TITLE) return { t, derived: false };
   if (!e || needsBody(e)) return { t: "(untitled)", derived: true };
@@ -11585,7 +12695,7 @@ function rowNodes(lo, hi) {
       `<div class="m">` + (fresh ? `<span class="newtag">new</span>` : "") +
         `<span class="kchip">${esc(e.kind)}</span>` +
         `<span title="${attr(localOf(e.created_at_utc))} local">${esc(relStamp(e.created_at_utc))}</span>` +
-        `<span>${e.content_length}b</span>${flagSpans(e)}${awayMark(e)}</div>` +
+        `<span>${e.content_length}b</span>${flagSpans(e)}${clsFlag(e)}${awayMark(e)}</div>` +
       (needsBody(e)
         ? `<div class="sn pend">${e.content_length ? e.content_length + " bytes — loading…" : ""}</div>`
         : `<div class="sn">${mark(snippet(e))}</div>`) +
@@ -12556,6 +13666,9 @@ $("#pkjoin").onclick = mergePicked;
 function formValues() {
   const v = {};
   for (const f of FIELDS) v[f] = fieldEl(f).value;
+  // the level the entry is written at: a draft's is its token's, so a create
+  // that lands after they left it is still sealed (createRow)
+  v.classification = String(clsHere() ? CLS_SECRET : 0);
   return v;
 }
 function setForm(e) {
@@ -12587,6 +13700,8 @@ function setForm(e) {
   updateHints();
   sugReset();              // another entry: the last one's suggestions are not this one's
   afterTyping();           // the debounce must not leave a stale count on open
+  clsForm(e);              // a locked Secret entry: read-only, and its chip
+  clsVoicePaint();
 }
 
 /* The two boolean columns are edited as toggles but still stored in a hidden
@@ -13239,7 +14354,8 @@ function paintReadBody() {
   const e = st.sel;
   const el = $("#rd_content");
   if (!e || !el) return;
-  el.innerHTML = needsBody(e)
+  el.innerHTML = clsLocked(e) ? clsReadLock()
+    : needsBody(e)
     ? '<p class="hint">loading…</p>'
     : (e.content || "").trim()
       ? mdRender(yeoShown(e), { eid: e.id })
@@ -15241,6 +16357,7 @@ async function createRow(v) {
   // own default ('') rather than asserting an empty string over them.
   if (v.start_date.trim()) body.start_date = v.start_date.trim();
   if (v.end_date.trim()) body.end_date = v.end_date.trim();
+  if (Number(v.classification) === CLS_SECRET) body.classification = CLS_SECRET;   // api() seals it
   const r = await api("/entries", { method: "POST", body });
   return api("/entries/" + r.id);
 }
@@ -21752,6 +22869,8 @@ function openCfg() {
       <div id="c_srvl">${cfgServerHtml()}</div></div>
     <div class="hint">From the server's GET /features: a feature off names the settings it
       needs, set in lcars.env (then restart). <button type="button" class="mini" id="c_srvr">Read again</button></div>
+    <div class="field" id="c_cls"><label>Classified &mdash; Secret entries</label>
+      <div id="c_clsl">${clsCfgHtml()}</div></div>
     <div class="field" id="c_kinds"><label>Kinds &mdash; what each feature writes</label>
       <div id="c_kindl">${cfgKindsHtml()}</div></div>
     <div class="hint">The journal's mapping (its <code>settings</code> entry titled <code>kinds</code>):
@@ -22000,6 +23119,8 @@ window.addEventListener("keydown", ev => {
 $("#bDayPage").onclick = dayPage;
 $("#bReload").onclick = () => { if (confirmDiscard()) loadAll(); else sfx("deny"); };
 $("#bCfg").onclick = openCfg;
+$("#bCls").onclick = () => { sfx("tap"); clsToggle(); };
+$("#edcls").onclick = clsChipTap;
 $("#bSound").onclick = () => sndSet(!snd.on);
 $("#bMore").onclick = openMore;
 $("#bStats").onclick = openStats;
@@ -27436,6 +28557,7 @@ function paletteRows() {
   add("view · star chart, the journal by meaning", "S", () => openStars());
   add("view · chats, every conversation" + (chatUnreadTotal() ? ` (${chatUnreadTotal()} unread)` : ""), "A", () => chatsList());
   if (engKey()) add("view · the queue, and what shipped", "Q", () => openQueue());
+  if (engKey()) add("view · the jobs, the heavy runs on the cores", "", () => queueJobsShow());
   if (dockAllowed()) {
     add("chat · the dock, into its last window or its list", "B", () => dockKey());
     add(dock.hidden ? "chat · show the dock" : "chat · hide the dock", "", () => (dock.hidden ? dockShowSaid() : dockHideSaid()));
@@ -27497,6 +28619,15 @@ function paletteRows() {
   add("app · reload everything", "", () => { if (confirmDiscard()) loadAll(); });
   add("app · connection settings", "", openCfg);
   add("app · what is off on the server", "W", featWhatOff);
+  add(clsOn() ? "classified · lock the Secret entries" : "classified · unlock the Secret entries", "L", clsToggle);
+  if (st.sel || st.isNew)
+    add(clsHere() ? "entry · declassify (Unclassified again)" : "entry · mark it Secret (encrypted here)", "",
+        clsHere() ? clsDeclassify : clsMarkSecret);
+  add("classified · change the password", "", clsChangeAsk);
+  add("classified · unlock with a passkey", "", clsPasskeyAsk);
+  add("classified · register this device's passkey", "", clsPasskeyAddAsk);
+  add("classified · unlock with the recovery code", "", () => clsRecoveryAsk());
+  add("classified · make a new recovery code", "", clsRecoveryMakeAsk);
   add("app · kinds: which kind each feature writes", "", openKinds);
   add("app · check for updates", "", () => updCheck(true));
   add("app · update the app", "", updAsked);
@@ -28183,6 +29314,12 @@ const VCMDS = [
       "what is asked of me", "what's asked of me", "what am i asked", "answer the questions", "number one's questions"],
     help: "the open questions: what Number One and the crew ask of you, each with its context and a box to answer and close it",
     fn: () => openQuestions() },
+  { say: "answer question {n} {*}", alias: ["for question {n} {*}", "on question {n} {*}"],
+    help: "in the open questions: question n of the top ask answered &mdash; yes, no, a letter, skip or recommended, and the rest a note",
+    fn: a => oqSaid(+a.n, a.text) },
+  { say: "send the answers", alias: ["send my answers", "send answers", "send the questions", "send my questions"],
+    help: "in the open questions: the first ask with every question answered sent and closed, as its Send does",
+    fn: () => oqSendSaid() },
   { say: "crew notes", alias: ["show the crew notes", "the crew notes", "my notes to the crew", "open the crew notes", "notes to the crew"],
     help: "every crew note's thread, the open ones first", fn: () => openNotes() },
   { say: "show the queue", alias: ["the queue", "queue", "what is in the queue", "what's in the queue", "whats in the queue",
@@ -28194,6 +29331,14 @@ const VCMDS = [
       "where did the time go"],
     help: "the queue, with the newest shipped item's time opened: when it started and ended, and what the time went on",
     fn: () => queueHowLong() },
+  { say: "show the jobs", alias: ["the jobs", "show jobs", "jobs", "the job line", "show the job line", "the job queue",
+      "show the job queue", "what jobs are running", "which jobs are running", "what is running on the cores"],
+    help: "the queue at its Jobs block: the heavy run on the cores and how long it has run, the job line in order, each with Cancel",
+    fn: () => queueJobsShow() },
+  { say: "cancel {*} job", alias: ["cancel the job of {*}", "cancel the job for {*}", "stop {*} job", "stop the job of {*}"],
+    help: "the job line: asks whether to take that engineer's job back (Reyes's job) &mdash; out of the line, or stopped if it runs; " +
+      "the tap on Cancel the job is the confirmation (no spoken yes)",
+    fn: a => queueJobSaid(a.text) },
   { say: "move up {*}", alias: ["move up in the queue {*}", "bump up {*}", "queue up {*}"],
     help: "the queue: that one a place up the line (Reyes, the yeoman)", fn: a => queueSaid(a.text, "up") },
   { say: "move down {*}", alias: ["move down in the queue {*}", "bump down {*}", "queue down {*}"],
@@ -28227,6 +29372,16 @@ const VCMDS = [
     help: "an order for Number One, said into his conversation", fn: a => engNo1(a.text) },
   { say: "refresh number one", alias: ["refresh the first officer", "refresh number one's context", "number one handover"],
     help: "a fresh context for Number One: a handover note in the log, the conversation cleared, carried on from the note", fn: () => engNo1Refresh() },
+  { say: "number one threads", alias: ["number one's threads", "show the threads", "show number one's threads", "the threads sheet"],
+    help: "Number One's threads: the sheet &mdash; each one to show, a new one (a name, an opening message)", fn: () => engThreadsSheet() },
+  { say: "switch to {*} thread", alias: ["switch to the {*} thread", "switch thread to {*}", "switch to thread {*}", "show the {*} thread"],
+    help: "only that thread of Number One's conversation shown, and what you send goes to it", fn: a => engThreadVoice("pick", a.text) },
+  { say: "all threads", alias: ["show all threads", "every thread", "all of number one's threads"],
+    help: "Number One's whole conversation again, every thread (a send goes to main)", fn: () => engThreadVoice("all", "") },
+  { say: "new thread {*}", alias: ["open a new thread {*}", "a new thread called {*}", "new thread called {*}"],
+    help: "a new thread label for Number One's conversation, by that name, picked: what you send next goes to it", fn: a => engThreadVoice("new", a.text) },
+  { say: "close the {*} thread", alias: ["close thread {*}", "close the thread {*}"],
+    help: "one of Number One's threads off the chips, its messages kept (not main)", fn: a => engThreadVoice("close", a.text) },
   { say: "engineer {*}", alias: ["talk to engineer {*}", "open engineer {*}"],
     help: "that engineer's conversation, by name", fn: a => chatTalkTo(a.text) },
   { say: "earlier messages", alias: ["show earlier messages", "older messages", "earlier in the conversation"],
@@ -28357,6 +29512,28 @@ const VCMDS = [
   { say: "what is off", alias: ["whats off", "what is turned off", "what is off on the server", "what can the server do",
                                 "server features", "what features are off"],
     help: "what the server lacks: each feature off, with the settings it needs", fn: () => featWhatOff() },
+  { say: "unlock classified", alias: ["unlock the classified entries", "unlock secret entries", "unlock the secret entries",
+                                      "unlock classified entries", "open the classified entries"],
+    help: "the password prompt for the Secret entries &mdash; it is typed, never said", fn: () => clsUnlockAsk() },
+  { say: "unlock with a passkey", alias: ["unlock with the passkey", "use a passkey", "use the passkey",
+                                          "passkey unlock", "unlock with face id", "unlock with my fingerprint"],
+    help: "the Secret entries opened by this device&rsquo;s passkey (Face ID, a fingerprint, a key)", fn: () => clsPasskeyAsk() },
+  { say: "register a passkey", alias: ["add a passkey", "register this device", "register a passkey for classified",
+                                       "make a passkey"],
+    help: "this device&rsquo;s passkey, one more way to unlock (the password once more, typed)", fn: () => clsPasskeyAddAsk() },
+  { say: "use the recovery code", alias: ["unlock with the recovery code", "i lost the password", "recovery code"],
+    help: "the lost password&rsquo;s door: the code typed, and a new password set", fn: () => clsRecoveryAsk() },
+  { say: "make a recovery code", alias: ["new recovery code", "make a new recovery code", "replace the recovery code"],
+    help: "a recovery code for the Secret entries, shown once", fn: () => clsRecoveryMakeAsk() },
+  { say: "lock", alias: ["lock classified", "lock the classified entries", "lock secret entries",
+                         "lock the secret entries", "lock it all"],
+    help: "lock the Secret entries again: the key and their text dropped from this page", fn: () => clsLock(true) },
+  { say: "mark this secret", alias: ["mark it secret", "make this secret", "make it secret", "classify this",
+                                     "classify this entry", "mark this entry secret"],
+    help: "this entry becomes Secret: encrypted here before it is sent", fn: () => clsMarkSecret() },
+  { say: "declassify", alias: ["declassify this", "declassify this entry", "mark this unclassified",
+                               "make this unclassified"],
+    help: "this Secret entry back in the clear (it asks first)", fn: () => clsDeclassify() },
   { say: "the kinds by role", alias: ["kinds by role", "kind roles", "the kind roles", "the kind mapping",
                                       "map the kinds", "which kinds"],
     help: "Config&rsquo;s Kinds: which kind each feature writes, and a name for the child&rsquo;s", fn: () => openKinds() },
@@ -28418,7 +29595,8 @@ napVoice();
 function vTry(pat, words, i) {
   const arg = { n: null, text: "" };
   let j = i;
-  for (const tok of pat) {
+  for (let pi = 0; pi < pat.length; pi++) {
+    const tok = pat[pi];
     if (tok === "{n}") {
       let s = vNum(words[j]);
       if (s === null) return null;
@@ -28430,6 +29608,17 @@ function vTry(pat, words, i) {
         j++;
       }
       arg.n = s;
+      continue;
+    }
+    if (tok === "{*}" && pi + 1 < pat.length) {
+      // inside a phrase ("close the {*} thread"): the words up to the next
+      // word of the phrase, at least one
+      const nx = pat[pi + 1];
+      let k = j + 1;
+      while (k < words.length && vNorm(words[k]) !== nx && !VWAKE.has(vNorm(words[k]))) k++;
+      if (k >= words.length || vNorm(words[k]) !== nx) return null;
+      arg.text = words.slice(j, k).join(" ");
+      j = k;
       continue;
     }
     if (tok === "{*}") {
@@ -29311,6 +30500,7 @@ function vNote(msg, bad) {
 function vPaint() {
   document.body.dataset.voice = vx.on ? "on" : "off";
   edMicPaint();
+  clsVoicePaint();
   vCamPaint();
   const b = $("#bVoice");
   b.classList.toggle("on", vx.on);
@@ -30329,6 +31519,8 @@ function ttsAloud() {
   const e = st.sel;
   if (!e || st.isNew) { toast("open an entry first", true); return; }
   if (needsBody(e)) { toast("#" + e.id + " is still loading its content", true); return; }
+  // the voice may be a service's (some browsers' are): a Secret entry stays unspoken
+  if (clsSecret(e)) { toast("a Secret entry is not read aloud", true); return; }
   const body = ttsText(e.content || "");
   // the placeholder or none: the body's first words would be said twice
   const title = shownTitle(e).derived ? "" : (e.title || "").trim();
@@ -31429,6 +32621,7 @@ function chatChrome(m = chatFm()) {
   chatQuotesPaint(m);
   engCard(t, m);
   engInboxPaint(t, m);
+  engThreadsPaint(t, m);
   chatVoicePaint();
   // the course's Navigator tab says it is at work, with its panel folded away too
   if ($("#crsTabNav")) $("#crsTabNav").classList.toggle("busy", !!(chats.list.find(x => x.nav === crs.id) || {}).busy);
@@ -32068,6 +33261,8 @@ function chatSheet(which, o, m = chatFm()) {
         `<span class="chtick">${v === m ? "&#10003;" : ""}</span><b>${t}</b><span>${CHAT_MODEL_WHY[v] || ""}</span></button>`).join("") +
       `<p class="hint">${e ? "when their turn ends: their session restarts on it, resumed, the conversation kept"
                            : "from the next message on &mdash; the thread carries on"}</p>`)(e ? engModel(chat).model : chat.model)
+    : which === "threads" ? engThreadsSheetHtml(e)
+    : which === "thread" ? engThreadSheetHtml(e, o)
     : which === "past"
     ? `<h3>Earlier conversations</h3>` +
       `<button type="button" class="chopt" data-past="" aria-pressed="${!e.view}"><span class="chtick">${e.view ? "" : "&#10003;"}</span>` +
@@ -32111,7 +33306,9 @@ function chatSheetTap(ev) {
   if (!b || b.disabled) return;
   if (b.dataset.model) { chatModelSet(b.dataset.model); return; }
   if (b.dataset.past !== undefined) { chatSheet(""); engPast(b.dataset.past); return; }
+  if (b.dataset.thr !== undefined) { chatSheet(""); engThreadView(b.dataset.thr); return; }
   const act = b.dataset.act;
+  if (act && act.indexOf("thr-") === 0) { engThreadSheetAct(act, b); return; }
   // the two that ask first: the sheet becomes the question
   if (act === "deploy" && !b.classList.contains("pill")) { engDeploySheet("deploy"); return; }
   if (act === "clear" && !b.classList.contains("pill")) { engClearSheet(); return; }
@@ -32301,7 +33498,7 @@ function chatsUp() {
    and they are never up together (one dialog). */
 const chatMounts = [];
 let chatM = null;
-const CHAT_MOUNT_EL = { log: ".chlog", box: ".chbox", send: ".chsend", qcard: ".chqcard", inbox: ".chinbox", quotes: ".chquotes",
+const CHAT_MOUNT_EL = { log: ".chlog", box: ".chbox", send: ".chsend", qcard: ".chqcard", inbox: ".chinbox", thr: ".chthr", quotes: ".chquotes",
   qsel: ".chqsel", qblk: ".chqblk", ctx: ".chctx", eta: ".cheta", feat: ".chfeat", title: ".chtitle", stat: ".chhdr .chstat",
   av: ".chhdr .chav", voice: ".chvoice", gauge: ".chgauge", model: ".chmodel", more: ".chmore", back: ".chhdr .chback",
   scrim: ".chscrim", sheet: ".chsheet", files: ".chfiles", plus: ".chplus", pick: ".chpick" };
@@ -32324,6 +33521,7 @@ function chatPaneInner(mode) {
         <button type="button" class="dkb dkfull" aria-label="Full view" title="The full view (f)">&#10530;</button>
         <button type="button" class="dkb dkx" aria-label="Close" title="Close (x)">&times;</button>` : ""}
       </div>
+      <div class="chthr" hidden role="tablist" aria-label="Number One's threads"></div>
       <div class="cheta" hidden></div>
       <div class="chfeat" hidden></div>
       <button type="button" class="chctx" hidden aria-expanded="false"></button>
@@ -32501,6 +33699,7 @@ function chatPaneWire(m) {
   log.onscroll = () => { chatSelHide(); if (!log.classList.contains("qsw")) chatBlkHide(); const t = chatFind(m.id); if (t && t.eng && log.scrollTop < 40 && !(m.from > 0)) engEarlier(t); };
   m.qcard.onclick = ev => { const b = ev.target.closest && ev.target.closest("button[data-k]"); if (b) engAnswer(b.dataset.k); };
   m.inbox.onclick = ev => engInboxTap(ev, m);
+  engThreadsWire(m);
   box.oninput = () => { chatGrow(box); chatChrome(m); };
   // a touch screen's Enter is a new line (its keyboard has no Shift+Enter);
   // Send sends
@@ -32694,6 +33893,7 @@ function chatPaneShow(t, m = chatFm(), quiet = false) {
     m.from = null;
     m.qcard.dataset.screen = "";
     m.inbox.dataset.k = "";
+    m.thr.dataset.k = "";
     chatMountDraw(m);
     // back from an entry opened in it (chatLeaveAt): where it was read
     if (t.backTop != null) { m.log.scrollTop = t.backTop; t.backTop = null; }
@@ -40202,7 +41402,8 @@ function notesRowHtml() {
    (OQ_DRAFT_KEY), so a repaint, a reload or another view loses nothing. */
 const OQ_DRAFT_KEY = "lcars.oqDrafts";
 // busy: id -> "saving" or the failure's words; more: the cards unfolded
-const oq = { busy: new Map(), more: new Set(), sig: "" };
+// open: the answered questions unfolded again ("id:n"), to change their answer
+const oq = { busy: new Map(), more: new Set(), open: new Set(), sig: "" };
 const isAskKind = k => askOf(k, "no1") || askOf(k, "crew");
 const oqList = () => st.all.filter(e => isAskKind(e.kind) && !e.done_bool && !e.deleted)
   .sort((a, b) => String(b.created_at_utc || "").localeCompare(String(a.created_at_utc || "")) || b.id - a.id);
@@ -40218,14 +41419,149 @@ function oqDraftSet(id, text) {
 }
 // a long context is folded after a few lines, with a "more" to unfold it
 const oqLong = c => String(c || "").split("\n").length > 6 || String(c || "").length > 480;
+/* An ask's shape (docs/design/questions.md): the page splits one ask into
+   the questions in it, so each is answered on its own and one Send closes
+   it. The text before the first question is the shared context. A line
+   "Q1: …" (or "**Q1.** …") begins a question; failing those, "1. …", "2. …"
+   do, but only when they run 1, 2, 3… and every one asks (has a "?"), so a
+   numbered list in the context is not taken for questions. Inside one,
+   "Options: A) … B) …" (inline, or "Options:" then a line per "A) …") are
+   its choices and "Recommendation: B" marks the default (a letter, yes or
+   no; the line stays as context, it gives the reason); with no Options it
+   is Yes or No. An ask with no question lines but an Options line is one
+   question, the title its text. Anything else is null: the card of before,
+   a box and Answer and close. */
+const OQ_QLINE = /^\s*[*_]{0,2}Q(\d{1,2})\s*[:.)]\s*[*_]{0,2}\s*(.*)$/i;
+const OQ_NLINE = /^(\d{1,2})[.)]\s+(.*)$/;
+const OQ_OPTS = /^\s*(?:[-*]\s+)?[*_]{0,2}options?\s*:\s*[*_]{0,2}\s*(.*)$/i;
+const OQ_REC = /^\s*(?:[-*]\s+)?[*_]{0,2}(?:my\s+)?recommend(?:ation|ed)?\s*:\s*[*_]{0,2}\s*(.*)$/i;
+const OQ_OPT = /^\s*(?:[-*]\s+)?\(?([A-H])\)\s*(.*)$/;
+// "A) ship B) wait" into its choices: each letter followed by ")" starts one
+function oqOpts(text) {
+  const out = [], re = /(?:^|\s)\(?([A-H])\)\s*/g, at = [];
+  let m;
+  while ((m = re.exec(text))) at.push({ k: m[1], from: m.index, to: re.lastIndex });
+  at.forEach((x, i) => out.push({ k: x.k, l: text.slice(x.to, i + 1 < at.length ? at[i + 1].from : undefined).trim() }));
+  return out;
+}
+function oqParse(title, content) {
+  const lines = String(content || "").replace(/\r/g, "").split("\n");
+  let starts = [];
+  lines.forEach((ln, i) => { const m = OQ_QLINE.exec(ln); if (m) starts.push({ i, text: m[2] }); });
+  if (!starts.length) {
+    lines.forEach((ln, i) => { const m = OQ_NLINE.exec(ln); if (m && +m[1] === starts.length + 1) starts.push({ i, text: m[2] }); });
+    const asks = starts.length > 1 && starts.every((q, j) => /\?/.test(lines.slice(q.i, j + 1 < starts.length ? starts[j + 1].i : lines.length).join("\n")));
+    if (!asks) starts = [];
+  }
+  if (!starts.length) {
+    if (!lines.some(ln => OQ_OPTS.test(ln))) return null;
+    starts = [{ i: -1, text: String(title || "").trim() }];
+  }
+  const qs = starts.map((q, j) => {
+    const body = lines.slice(q.i + 1, j + 1 < starts.length ? starts[j + 1].i : lines.length);
+    const ctx = [], opts = [];
+    let inOpts = false, rec = "";
+    for (const ln of body) {
+      let m;
+      if ((m = OQ_OPTS.exec(ln))) { opts.push(...oqOpts(m[1])); inOpts = true; continue; }
+      if (inOpts && (m = OQ_OPT.exec(ln))) { opts.push({ k: m[1], l: m[2].trim() }); continue; }
+      if (ln.trim()) inOpts = false;
+      if ((m = OQ_REC.exec(ln))) rec = m[1];
+      ctx.push(ln);
+    }
+    const choices = opts.length ? opts : [{ k: "yes", l: "Yes" }, { k: "no", l: "No" }];
+    const r = /^\(?([A-H])\)?(?![\w'’])/.exec(rec.trim()) || /^(yes|no)\b/i.exec(rec.trim());
+    const want = r ? (opts.length ? r[1] : r[1].toLowerCase()) : "";
+    let text = q.text.trim();
+    if (!text) { const k = ctx.findIndex(x => x.trim()); if (k >= 0) text = ctx.splice(k, 1)[0].trim(); }
+    return { n: j + 1, text, ctx: ctx.join("\n").trim(), opts: choices, own: q.i < 0,
+             rec: choices.some(o => o.k === want) ? want : "" };
+  });
+  return { ctx: starts[0].i < 0 ? "" : lines.slice(0, starts[0].i).join("\n").trim(), qs };
+}
+// what is chosen and noted per question, kept on the device per entry
+// (OQ_ANS_KEY: id -> { n: { c: choice or "skip", note } }), as the drafts are
+const OQ_ANS_KEY = "lcars.oqAnswers";
+const oqAnsAll = () => { const m = lsGet(OQ_ANS_KEY, {}); return m && typeof m === "object" ? m : {}; };
+const oqAns = id => oqAnsAll()[id] || {};
+function oqAnsSet(id, a) {
+  const m = oqAnsAll();
+  if (a && Object.keys(a).some(n => a[n] && (a[n].c || a[n].note))) m[id] = a; else delete m[id];
+  lsSet(OQ_ANS_KEY, m);
+}
+function oqAnsPut(id, n, k, v) {
+  const a = oqAns(id), q = Object.assign({}, a[n]);
+  if (v) q[k] = v; else delete q[k];
+  a[n] = q;
+  oqAnsSet(id, a);
+}
+const oqShape = e => needsBody(e) ? null : oqParse(e.title, e.content);
+const oqReady = (p, a) => p.qs.filter(q => a[q.n] && a[q.n].c).length;
+// a question's answer as Number One reads it: "Q1: A (Ship it); note: after lunch"
+function oqAnsLine(q, x) {
+  const o = q.opts.find(y => y.k === x.c);
+  const what = x.c === "skip" ? "skipped" : /^[A-H]$/.test(x.c) ? x.c + (o && o.l ? " (" + o.l + ")" : "") : x.c;
+  const note = String(x.note || "").trim().replace(/\s*\n\s*/g, " ");
+  return "Q" + q.n + ": " + what + (note ? "; note: " + note : "");
+}
+function oqQHtml(e, q, a, saving) {
+  const x = a[q.n] || {}, key = e.id + ":" + q.n, folded = !!x.c && !oq.open.has(key);
+  const dis = saving ? " disabled" : "";
+  const choice = o => `<button type="button" class="oqc${x.c === o.k ? " on" : ""}${q.rec === o.k ? " rec" : ""}" ` +
+    `data-oqc="${key}:${o.k}" aria-pressed="${x.c === o.k}"${dis}>` +
+    `${/^[A-H]$/.test(o.k) ? `<b>${o.k}</b> ` : ""}${esc(o.l || o.k)}` +
+    `${q.rec === o.k ? `<span class="oqrec">recommended</span>` : ""}</button>`;
+  const picked = x.c === "skip" ? "skipped" : (q.opts.find(o => o.k === x.c) || {}).l || x.c;
+  return `<section class="oqb${folded ? " done" : ""}" data-oqb="${key}">` +
+    (folded
+      ? `<button type="button" class="oqsum" data-oqopen="${key}"${dis} aria-label="change the answer to question ${q.n}">` +
+        `<span class="oqn">Q${q.n}</span><span class="oqst1">${esc(q.text)}</span>` +
+        `<span class="oqpick${x.c === "skip" ? " skip" : ""}">${/^[A-H]$/.test(x.c) ? x.c + " &middot; " : ""}${esc(picked)}</span></button>`
+      // the title's own question is the heading already
+      : (q.own ? "" : `<div class="oqbh"><span class="oqn">Q${q.n}</span><span class="md">${oqLine(q.text)}</span></div>`) +
+        (q.ctx ? `<div class="oqbctx md">${oqMd(q.ctx)}</div>` : "") +
+        `<div class="oqchs">${q.opts.map(choice).join("")}` +
+        choice({ k: "skip", l: "Skip" }) + `</div>`) +
+    `<textarea class="oqnote" data-oqnote="${key}" rows="1" aria-label="a note on question ${q.n}" ` +
+    `placeholder="a note (optional)"${dis}></textarea></section>`;
+}
+/* A question's text, as the chats draw theirs: a bare #8924 is the entry it
+   names (chatRefs makes it ((8924)), erefLink's link), [[a title]] and
+   ((id)) as anywhere. Only here and in the chats: in an ordinary note a
+   "#12" is not an entry reference. The card's own "#id" in .oqmeta is the
+   question's, and stays plain. */
+const oqMd = s => mdRender(chatRefs(s));
+const oqLine = s => mdInline(chatRefs(s));
 function oqCardHtml(e) {
+  const p = oqShape(e);
+  return p ? oqMultiHtml(e, p) : oqOneHtml(e);
+}
+// an ask in the shape: the shared context folded, a block per question, one Send
+function oqMultiHtml(e, p) {
+  const busy = oq.busy.get(e.id), saving = busy === "saving", a = oqAns(e.id);
+  const n = oqReady(p, a), all = n === p.qs.length, c = p.ctx;
+  const fold = (c.split("\n").length > 2 || c.length > 160) && !oq.more.has(e.id);
+  return `<article class="oqcard oqmulti${saving ? " saving" : ""}" data-oqid="${e.id}">` +
+    `<h3 class="oqq md">${e.title ? oqLine(e.title) : "(no question written)"}</h3>` +
+    `<div class="oqmeta">${esc(oqWho(e))} &middot; ${esc(relStamp(e.created_at_utc))} &middot; #${e.id}` +
+    `${p.qs.length > 1 ? " &middot; " + p.qs.length + " questions" : ""}</div>` +
+    (c ? `<div class="oqctx md${fold ? " fold" : ""}">${oqMd(c)}</div>` +
+         (fold || oq.more.has(e.id) ? `<button type="button" class="mini oqmore" data-oqmore="${e.id}">${fold ? "context" : "less"}</button>` : "") : "") +
+    p.qs.map(q => oqQHtml(e, q, a, saving)).join("") +
+    `<div class="oqacts"><span class="oqst${busy && !saving ? " bad" : ""}">${saving ? "sending&hellip;" : busy ? esc(busy)
+      : all ? "" : n + " of " + p.qs.length + " answered"}</span>` +
+    `<button type="button" class="mini" data-oqlater="${e.id}"${saving ? " disabled" : ""}>Later</button>` +
+    `<button type="button" class="mini go oqsend" data-oqdone="${e.id}"${saving || !all ? " disabled" : ""}>${busy && !saving ? "Retry" : "Send"}</button></div>` +
+    `</article>`;
+}
+function oqOneHtml(e) {
   const busy = oq.busy.get(e.id), saving = busy === "saving", c = needsBody(e) ? null : e.content || "";
   const fold = c != null && oqLong(c) && !oq.more.has(e.id);
   return `<article class="oqcard${saving ? " saving" : ""}" data-oqid="${e.id}">` +
-    `<h3 class="oqq">${esc(e.title || "(no question written)")}</h3>` +
+    `<h3 class="oqq md">${e.title ? oqLine(e.title) : "(no question written)"}</h3>` +
     `<div class="oqmeta">${esc(oqWho(e))} &middot; ${esc(relStamp(e.created_at_utc))} &middot; #${e.id}</div>` +
     (c == null ? `<p class="hint">loading the context&hellip;</p>`
-      : c.trim() ? `<div class="oqctx md${fold ? " fold" : ""}">${mdRender(c)}</div>` +
+      : c.trim() ? `<div class="oqctx md${fold ? " fold" : ""}">${oqMd(c)}</div>` +
                    (oqLong(c) ? `<button type="button" class="mini oqmore" data-oqmore="${e.id}">${fold ? "more" : "less"}</button>` : "")
       : `<p class="hint">no context written</p>`) +
     `<textarea class="oqa" data-oqa="${e.id}" rows="2" aria-label="your answer to #${e.id}" ` +
@@ -40235,7 +41571,8 @@ function oqCardHtml(e) {
     `<button type="button" class="mini go" data-oqdone="${e.id}"${saving ? " disabled" : ""}>${busy && !saving ? "Retry" : "Answer and close"}</button></div>` +
     `</article>`;
 }
-function openQuestions() {
+// top: the cards' scroll to come back to (oqBackTop, edBack), else the top
+function openQuestions(top) {
   const up = $("#ov").classList.contains("on");
   const from = up && $("#dlg").classList.contains("chats");
   if (up) { engStopOff(); chatVoiceLeave(); }
@@ -40251,11 +41588,17 @@ function openQuestions() {
   const box = $("#oqrows");
   box.onclick = oqTap;
   // every keystroke kept, so a repaint (a sync landing) or a reload loses nothing
-  box.oninput = ev => { const t = ev.target; if (t.dataset && t.dataset.oqa) oqDraftSet(Number(t.dataset.oqa), t.value); };
+  box.oninput = ev => {
+    const t = ev.target;
+    if (!t.dataset) return;
+    if (t.dataset.oqa) oqDraftSet(Number(t.dataset.oqa), t.value);
+    if (t.dataset.oqnote) { const [id, n] = t.dataset.oqnote.split(":"); oqAnsPut(id, n, "note", t.value); oqGrow(t); }
+  };
   routeAs("questions");
   openOv();
   oq.sig = "";
   oqPaint();
+  if (typeof top === "number" && top > 0) box.scrollTop = top;
   const want = oqList().filter(needsBody);
   if (want.length) ensureBodies(want).then(() => { if ($("#oqrows")) oqPaint(); });
 }
@@ -40267,18 +41610,26 @@ function oqPaint() {
   const box = $("#oqrows");
   if (!box) return;
   const l = oqList();
-  const sig = JSON.stringify(l.map(e => [e.id, e.last_modified_at_utc, needsBody(e), oq.busy.get(e.id) || "", oq.more.has(e.id)]));
+  // the choices are in it (a tap repaints), the notes not: a note's box is its draft
+  const am = oqAnsAll(), chose = id => Object.entries(am[id] || {}).map(([n, x]) => n + (x.c || "")).join();
+  const sig = JSON.stringify([...oq.open].concat(l.map(e => [e.id, e.last_modified_at_utc, needsBody(e), oq.busy.get(e.id) || "",
+                                                             oq.more.has(e.id), chose(e.id)])));
   $("#oqstat").textContent = l.length ? l.length + " waiting on you" : "nothing asked of you";
   if (sig === oq.sig) return;
   oq.sig = sig;
-  const a = document.activeElement, fid = a && a.dataset && a.dataset.oqa;
-  const sel = fid ? [a.selectionStart, a.selectionEnd] : null;
+  const a = document.activeElement, fa = a && a.dataset && (a.dataset.oqa ? "oqa" : a.dataset.oqnote ? "oqnote" : "");
+  const fid = fa && a.dataset[fa], sel = fid ? [a.selectionStart, a.selectionEnd] : null;
   box.innerHTML = l.map(oqCardHtml).join("") ||
     `<div class="chempty">nothing open &mdash; Number One's questions and the crew's asks land here</div>`;
   // the value set, not only the markup's text: the box is the draft
   const d = oqDrafts();
   for (const t of box.querySelectorAll("[data-oqa]")) t.value = d[t.dataset.oqa] || "";
-  const na = fid && box.querySelector(`[data-oqa="${fid}"]`);
+  for (const t of box.querySelectorAll("[data-oqnote]")) {
+    const [id, n] = t.dataset.oqnote.split(":");
+    t.value = ((am[id] || {})[n] || {}).note || "";
+    if (t.value) oqGrow(t);
+  }
+  const na = fid && box.querySelector(`[data-${fa}="${fid}"]`);
   if (na && !na.disabled) { na.focus({ preventScroll: true }); if (sel) na.setSelectionRange(sel[0], sel[1]); }
 }
 function oqTap(ev) {
@@ -40288,15 +41639,38 @@ function oqTap(ev) {
     const id = Number(b.dataset.oqmore);
     if (oq.more.has(id)) oq.more.delete(id); else oq.more.add(id);
     oqPaint();
+  } else if (b.dataset.oqc) {
+    const [id, n, k] = b.dataset.oqc.split(":");
+    oqChoose(Number(id), n, k);
+  } else if (b.dataset.oqopen) {
+    oq.open.add(b.dataset.oqopen);
+    oqPaint();
   } else if (b.dataset.oqdone) oqAnswer(Number(b.dataset.oqdone));
   else if (b.dataset.oqlater) oqLater(Number(b.dataset.oqlater));
+}
+// the one-line note box grows with what is written in it, to a few lines
+function oqGrow(t) {
+  t.style.height = "auto";
+  t.style.height = Math.min(t.scrollHeight || 0, 160) + "px";
+}
+// A choice shows in the same frame: the repaint is synchronous, the button
+// pressed and the block folded to its answer (a second tap on the chosen
+// one takes it back). Nothing is written until Send.
+function oqChoose(id, n, k) {
+  if (oq.busy.get(id) === "saving") return;
+  const was = (oqAns(id)[n] || {}).c;
+  oqAnsPut(id, n, "c", was === k ? "" : k);
+  if (was === k) oq.open.add(id + ":" + n); else oq.open.delete(id + ":" + n);
+  sfx("tap");
+  oqPaint();
 }
 function oqLater(id) {
   const ta = $("#oqrows") && $("#oqrows").querySelector(`[data-oqa="${id}"]`);
   if (ta) { oqDraftSet(id, ta.value); ta.blur(); }
   toast("kept open" + (oqDraft(id) ? ", your draft kept on this device" : ""));
 }
-const oqBlock = text => `Answer (captain, ${noteStamp()}): ${text}\n\n`;
+// one answer on its line; a structured ask's, a line per question under it
+const oqBlock = (text, multi) => `Answer (captain, ${noteStamp()}):${multi ? "\n" : " "}${text}\n\n`;
 /* The write is the editor's: the row read again first, and then a PATCH
    whose if_modified is compared in the server's UPDATE itself, so a write
    landing in between (Reminders, Number One) is a 412 and the answer is put
@@ -40307,31 +41681,38 @@ async function oqPut(id, body, fresh) {
   if (r && obLocalFirst(r)) return api("/entries/" + id, { method: "PUT", body });
   return api("/entries/" + id, { method: "PATCH", body: Object.assign({ if_modified: fresh.last_modified_at_utc }, body) });
 }
-async function oqWrite(e, text, again) {
+async function oqWrite(e, block, again) {
   const fresh = await api("/entries/" + e.id);
   if (fresh.done_bool) throw new Error("already ticked off elsewhere");
-  const block = text ? oqBlock(text) : "";
   const body = block ? { content: block + (fresh.content || ""), done_bool: 1 } : { done_bool: 1 };
   try { await oqPut(e.id, body, fresh); }
-  catch (err) { if (err.http === 412 && !again) return oqWrite(e, text, true); throw err; }
+  catch (err) { if (err.http === 412 && !again) return oqWrite(e, block, true); throw err; }
   await refetchInto(e);
-  return { id: e.id, block, text, title: fresh.title || "#" + e.id };
+  return { id: e.id, block, title: fresh.title || "#" + e.id };
 }
 async function oqAnswer(id) {
   const e = st.byId.get(id);
   if (!e || oq.busy.get(id) === "saving") return;
-  const ta = $("#oqrows") && $("#oqrows").querySelector(`[data-oqa="${id}"]`);
-  const text = String(ta ? ta.value : oqDraft(id)).trim();
-  oqDraftSet(id, text);
+  // the shape is read from the row as the card showed it: Send writes the
+  // answers to the questions the captain saw
+  const p = oqShape(e), ans = oqAns(id);
+  if (p && oqReady(p, ans) < p.qs.length) {
+    toast("answer each question, or Skip it: " + oqReady(p, ans) + " of " + p.qs.length + " answered", true);
+    return;
+  }
+  const ta = !p && $("#oqrows") && $("#oqrows").querySelector(`[data-oqa="${id}"]`);
+  const text = p ? p.qs.map(q => oqAnsLine(q, ans[q.n])).join("\n") : String(ta ? ta.value : oqDraft(id)).trim();
+  if (!p) oqDraftSet(id, text);
   oq.busy.set(id, "saving");
   sfx("send");
   oqPaint();
   try {
-    const u = await oqWrite(e, text);
+    const u = Object.assign(await oqWrite(e, text ? oqBlock(text, !!p) : ""), p ? { ans } : { text });
     oq.busy.delete(id);
-    oqDraftSet(id, "");
+    if (p) { oqAnsSet(id, null); for (const q of p.qs) oq.open.delete(id + ":" + q.n); }
+    else oqDraftSet(id, "");
     refresh();
-    toast((text ? "answered: " : "ticked off: ") + u.title, false, { label: "Undo", fn: () => oqUndo(u) });
+    toast((p ? "sent: " : text ? "answered: " : "ticked off: ") + u.title, false, { label: "Undo", fn: () => oqUndo(u) });
   } catch (err) {
     oq.busy.set(id, "not saved: " + err.message);
     if (err.message === "already ticked off elsewhere") { oq.busy.delete(id); refetchInto(e).then(refresh, () => {}); }
@@ -40351,9 +41732,50 @@ async function oqUndo(u) {
     await oqPut(u.id, body, fresh);
     if (e) await refetchInto(e);
     if (u.text && !oqDraft(u.id)) oqDraftSet(u.id, u.text);
+    if (u.ans && !Object.keys(oqAns(u.id)).length) oqAnsSet(u.id, u.ans);
     refresh();
     toast("reopened: " + u.title + (u.block && body.content === undefined ? " (the answer left in its notes: they changed)" : ""));
   } catch (err) { toast("could not undo: " + err.message, true); }
+}
+/* Spoken: "answer question 2 yes", "answer question 1 b after lunch",
+   "answer question 3 skip", "... recommended" - on the first card in the
+   shape (the top one), the view opened if it is not; what follows the
+   choice is the note. "send the answers" sends the first card answered in
+   full. */
+function oqCardSaid() {
+  if (!$("#oqrows")) openQuestions();
+  return oqList().find(e => oqShape(e));
+}
+function oqSaid(n, text) {
+  const e = oqCardSaid();
+  if (!e) { vRefuse("no open question is split into questions · say \"open questions\""); return; }
+  const p = oqShape(e), q = p.qs.find(x => x.n === n);
+  if (!q) { vRefuse(`"${e.title}" has ${p.qs.length} question${p.qs.length > 1 ? "s" : ""} · say "answer question 1 yes"`); return; }
+  // the words normalised to match, the note kept as said
+  const said = vWords(text || ""), w = said.map(vNorm);
+  let k = "", at = w[0] === "option" || w[0] === "the" ? 1 : 0, used = at + 1;
+  const h = w[at] || "";
+  if (/^(yes|yeah|yep|no|nope)$/.test(h)) k = /^n/.test(h) ? "no" : "yes";
+  else if (/^(skip|skipped|pass)$/.test(h)) k = "skip";
+  else if (/^recommend/.test(h)) k = q.rec;
+  else if (/^[a-h]$/.test(h)) k = h.toUpperCase();
+  else if (h === "bee" || h === "see" || h === "sea" || h === "dee") k = { bee: "B", see: "C", sea: "C", dee: "D" }[h];
+  if (h === "recommended" && w[at + 1] === "one") used++;
+  if (!k || (k !== "skip" && !q.opts.some(o => o.k === k))) {
+    vRefuse(`Q${n} takes ${q.opts.map(o => o.k).join(", ")} or skip · heard "${text}"`);
+    return;
+  }
+  // said again, it stays chosen (a tap on the chosen one takes it back)
+  if ((oqAns(e.id)[n] || {}).c !== k) oqChoose(e.id, String(n), k);
+  const note = said.slice(used).join(" ").replace(/^(and|but|note)\s+/i, "");
+  if (note) { oqAnsPut(e.id, String(n), "note", note); oq.sig = ""; oqPaint(); }
+  toast("Q" + n + ": " + (k === "skip" ? "skipped" : k) + (note ? "; " + note : ""));
+}
+function oqSendSaid() {
+  if (!$("#oqrows")) openQuestions();
+  const e = oqList().find(x => { const p = oqShape(x); return p && oqReady(p, oqAns(x.id)) === p.qs.length; });
+  if (!e) { vRefuse("no ask has every question answered · say \"answer question 1 yes\""); return; }
+  oqAnswer(e.id);
 }
 // the Chats list's row for them, at its top while any is open
 function oqRowHtml() {
@@ -40514,12 +41936,20 @@ function engRowHtml(x) {
     (t && t.eng.done.length && chatPreview({ msgs: t.eng.done })) || x.task || engRole(x) || ENG_STATUS[x.status] || "",
     ask ? `<span class="chbadge ans">ANSWER</span>` : x.status === "working" ? CHAT_DOTS
       : unread ? CHAT_DOT
+      : x.job ? engJobBadge(x.job)
       : x.status === "queued" ? `<span class="chbadge seat">${seatAt >= 0 ? "#" + (seatAt + 1) + " " : ""}SEAT</span>`
       : x.status === "off" ? `<span class="chbadge off">off</span>` : "",
     x.dismissed ? chatMini("recall", x.name, "Bring back") : no1 ? "" : chatMini("dismiss", x.name, "Dismiss"),
     false, unread ? "read" : "unread",
     (engInboxCount(x.name) ? `<i class="chrc chinq" title="orders in their inbox, waiting for the seat">${engInboxCount(x.name)} waiting</i>` : "") +
     (x.ctx ? `<i class="chrc${x.ctx > ENG_CTX_HANDOVER ? " over" : ""}" title="context, of the handover mark">${engCtxPct(x.ctx)}</i>` : ""));
+}
+// waiting on a job (engineer.py's job_of): its place in the job line, or
+// how long it has run, from `since` so a list read a while ago still counts
+function engJobBadge(j) {
+  const run = j.state === "running";
+  return `<span class="chbadge seat qjb" title="${qq(esc((run ? "their job is running: " : "their job waits in the job line: ") + (j.label || "")))}">` +
+    `job ${run ? esc(queueDur(Date.now() / 1000 - (+j.since || 0))) : "#" + (+j.place || 1)}</span>`;
 }
 // The Crew section: Number One first, then newest activity; the dismissed
 // folded under their own heading. Without the key, one row that asks for it.
@@ -40557,16 +41987,20 @@ const QUEUE_POLL_MS = 6000;
 // pend: name -> what a press is doing to them ("moving"), until it lands;
 // errs: name -> a press that failed, said on their row; confirm: the name
 // whose Remove is asking "are you sure?" in its row
+// jpend, jerrs, jconfirm: the same for a job's Cancel, by the job's id;
+// wantJobs: "show the jobs" asked, the Jobs block scrolled to on the paint
 const qv = { data: null, err: "", busy: false, press: false, gen: 0, timer: 0, at: 0, from: false, open: new Set(), wantLast: false,
-             pend: new Map(), errs: new Map(), confirm: null };
+             pend: new Map(), errs: new Map(), confirm: null, jpend: new Map(), jerrs: new Map(), jconfirm: null, wantJobs: false };
 function queueStop() { clearTimeout(qv.timer); qv.timer = 0; qv.gen++; qv.busy = qv.press = false; }
 // the row at the top of the Crew section: who has the seat, how many wait
 function queueRowHtml() {
   const s = eng.seat, d = eng.deploy || {}, q = (s && s.queue) || [];
   const run = d.state === "running" || d.state === "queued";
   // the seat unread (engineer.py's {error}) says so, not "the seat is free"
+  const jr = s && s.jobs && s.jobs.running, jq = (s && s.jobs && s.jobs.queue) || [];
   const prev = (s ? (s.error ? "seat unknown: " + s.error : s.holder ? "working: " + engSeatName(s.holder) : "the seat is free") +
-                    (q.length ? ` · ${q.length} queued` : "") : "") +
+                    (q.length ? ` · ${q.length} queued` : "") +
+                    (jr ? " · job: " + engSeatName(jr.name) : jq.length ? " · job: " + engSeatName(jq[0].name) + " next" : "") : "") +
     (run ? (s ? " · " : "") + "deploying " + (d.name || "") : "");
   return chatRowBtn(`data-queue="1"`, "k-queue", "&#8801;", "Queue & shipped", "",
     prev || "who works, who waits, and every deploy", run ? CHAT_DOTS : q.length ? `<span class="chbadge seat">${q.length}</span>` : "");
@@ -40807,6 +42241,93 @@ function queueConfirmSaid() {
   if (qv.confirm && $("#qtl")) queueRemove(qv.confirm);
   else toast("no removal to confirm: say remove from the queue and a name", true);
 }
+/* The job line (docs/design/job-queue.md): a heavy run (a full suite, a
+   build) one at a time on the cores while its engineer is stopped and the
+   seat passes on; its result brings them back. From queue_seat's `jobs`:
+   the running one with how long it has run, then the line in order, each
+   with a Cancel for the captain (POST /engineer/<name>/job-cancel). Cancel
+   asks first in the row, as Remove does - a running suite stopped is
+   minutes lost - then the row is marked "cancelling…" until the server
+   answers; a failure is said on the row, and a read follows either way. */
+function queueJobs(s) {
+  const j = (s && s.jobs) || {}, run = j.running, q = j.queue || [];
+  const item = (x, badge, meta) => queueWho(x, "qjob" + (qv.jpend.has(x.id) ? " qpend" : ""), x.label || "", meta, badge) + queueJobCtl(x);
+  let html = run ? item(run, CHAT_DOTS, "running " + esc(queueDur(Date.now() / 1000 - (+run.since || 0))) + " &middot; since " +
+                     esc(queueClock(+run.since || 0)) + (run.inline ? " &middot; inline" : "")) : "";
+  html += q.map(x => item(x, `<span class="chbadge seat">#${+x.place || 1}</span>`,
+                          "submitted " + esc(queueSince(x.t)) + (x.hold ? " &middot; starts when their turn ends" : ""))).join("");
+  if (!html) html = `<div class="qitem qnone"><span class="qdot"></span><span class="qbody"><span class="qtask">no job running or waiting</span></span></div>`;
+  if (j.note && q.length) html += `<div class="qitem qnone"><span class="qdot"></span><span class="qbody"><span class="qmeta">${esc(j.note)}</span></span></div>`;
+  return html;
+}
+function queueJobCtl(x) {
+  const nm = esc(queueName(x)), pend = qv.jpend.get(x.id), err = qv.jerrs.get(x.id);
+  if (qv.jconfirm === x.id) {
+    return `<div class="qctl qcf" data-qj="${qq(esc(x.id))}" role="group" aria-label="${qq("cancel " + nm + "'s job?")}">` +
+      `<span class="qcfq">Cancel <b>${nm}</b>'s job? ${x.place ? "It leaves the job line" : "It is stopped where it is"}; nobody is brought back for it.</span>` +
+      `<button type="button" class="qcb" data-qjno="1">Keep</button><button type="button" class="qcb danger" data-qjyes="1">Cancel the job</button></div>`;
+  }
+  return `<div class="qctl" data-qj="${qq(esc(x.id))}"><button type="button" class="qcb" data-qjc="1" aria-label="${qq("Cancel " + nm + "'s job")}"` +
+    (pend ? " disabled" : "") + `>&#10005; cancel</button>` +
+    (pend ? `<span class="qcst">${esc(pend)}&hellip;</span>` : err ? `<span class="qcst bad">${esc(err)}</span>` : "") + `</div>`;
+}
+const queueJobList = () => { const j = (qv.data && qv.data.seat && qv.data.seat.jobs) || {}; return (j.running ? [j.running] : []).concat(j.queue || []); };
+async function queueJobCancel(id) {
+  const x = queueJobList().find(e => e.id === id);
+  qv.jconfirm = null;
+  if (!x) { toast("that job is no longer in the line", true); return; }
+  qv.jpend.set(id, "cancelling"); qv.jerrs.delete(id);
+  queueStop();
+  queuePaint();
+  try {
+    await engApi("/" + x.name + "/job-cancel", { method: "POST", body: { id }, timeout: 60000 });
+    toast(queueName(x) + "'s job cancelled");
+  } catch (e) {
+    qv.jerrs.set(id, "not cancelled: " + e.message);
+    toast("cancel failed: " + e.message, true);
+  }
+  qv.jpend.delete(id);
+  await queueFetch();
+}
+function queueJobTap(ev) {
+  const row = ev.target.closest && ev.target.closest("[data-qj]");
+  const b = row && ev.target.closest("button");
+  if (!b || b.disabled) return false;
+  const id = row.dataset.qj;
+  b.classList.add("pressing");
+  if (b.dataset.qjc) {
+    qv.jconfirm = id; queuePaint();
+    const k = $("#qtl").querySelector(".qcf [data-qjno]");
+    if (k && k.focus) k.focus({ preventScroll: true });
+  } else if (b.dataset.qjno) { qv.jconfirm = null; queuePaint(); }
+  else if (b.dataset.qjyes) queueJobCancel(id);
+  return true;
+}
+// "show the jobs": the queue, scrolled to its Jobs block
+async function queueJobsShow() {
+  qv.wantJobs = true;
+  if ($("#qtl") && qv.data) { queuePaint(); return; }
+  await openQueue();
+}
+// "cancel Reyes's job": asked, as the tap asks - the queue at its Jobs
+// block, that job's row asking Keep / Cancel the job, the focus on Keep.
+// Only the tap on Cancel the job acts: there is no spoken yes for it (a
+// misheard name would stop minutes of a suite). "Reyes's" is heard as one
+// word: the 's is not part of the name
+async function queueJobSaid(what) {
+  if (!$("#qtl") || !qv.data) {
+    await openQueue();
+    for (let i = 0; i < 100 && qv.busy && $("#qtl"); i++) await new Promise(r => setTimeout(r, 100));
+  }
+  const w = String(what || "").trim().replace(/[’']s?$/i, "");
+  const x = w && engFind(queueJobList(), w);
+  if (!x) { toast(w ? "no job of " + w + "'s in the line" : "say whose job", true); return; }
+  qv.jconfirm = x.id; qv.wantJobs = true;
+  queuePaint();
+  const k = $("#qtl").querySelector(".qcf [data-qjno]");
+  if (k && k.focus) k.focus({ preventScroll: true });
+  toast("cancel " + queueName(x) + "'s job? Tap Cancel the job to stop it, or Keep");
+}
 function queueShipped(list, dep) {
   let html = "", day = "";
   if (dep && (dep.state === "running" || dep.state === "queued")) {
@@ -40857,8 +42378,14 @@ function queuePaint() {
   // what waits on the captain himself, above who waits for the seat
   box.innerHTML = oqRowHtml() + queueLegend(d) + sec("qb-work", "Working", queueWorking(d.seat)) +
     (d.seat ? sec("qb-wait", "Queued", queueQueued(d.seat)) : "") +
+    (d.seat ? `<section class="qband qb-jobs" id="qjobs"><div class="chsec">Jobs</div>${queueJobs(d.seat)}</section>` : "") +
     sec("qb-ship", "Shipped", queueShipped(d.deploys, d.deploy)) +
     (d.seat && d.seat.note ? `<div class="chempty">${esc(d.seat.note)}</div>` : "");
+  if (qv.wantJobs && d.seat) {
+    qv.wantJobs = false;
+    const jb = $("#qjobs");
+    if (jb && jb.scrollIntoView) jb.scrollIntoView({ block: "start" });
+  }
 }
 async function queueFetch(press) {
   const g = qv.gen;
@@ -40879,7 +42406,7 @@ async function queueFetch(press) {
 function queueTap(ev) {
   const oqb = ev.target.closest && ev.target.closest("[data-oqv]");
   if (oqb) { oqb.classList.add("pressing"); openQuestions(); return; }
-  if (queueCtlTap(ev)) return;
+  if (queueJobTap(ev) || queueCtlTap(ev)) return;
   const tb = ev.target.closest && ev.target.closest("[data-qtime]");
   if (tb) {
     const k = tb.dataset.qtime;
@@ -40965,12 +42492,14 @@ function engFold(e, evs) {
       // the files sent from here keep what this page knows of them (a picture's size)
       const mine = i >= 0 && e.pending[i].files;
       if (i >= 0) e.pending.splice(i, 1);
-      e.done.push(fx.files.length ? { role: "user", text: said, files: mine && mine.length === fx.files.length ? mine : fx.files }
-                                  : { role: "user", text: said });
+      e.done.push(Object.assign(fx.files.length ? { role: "user", text: said, files: mine && mine.length === fx.files.length ? mine : fx.files }
+                                                : { role: "user", text: said }, ev.th ? { th: ev.th } : {}));
       continue;
     }
+    // Number One's answer turning to another thread (a "[thread x]" line of
+    // his: the poll cut it there) is a message of its own
     let a = e.done[e.done.length - 1];
-    if (!a || a.role !== "asst") e.done.push(a = { role: "asst", parts: [] });
+    if (!a || a.role !== "asst" || (ev.th && a.th !== ev.th)) e.done.push(a = Object.assign({ role: "asst", parts: [] }, ev.th ? { th: ev.th } : {}));
     a.parts.push(ev.r === "tool" ? { t: "tool", label: ev.t, state: "ok" } : { t: "text", s: ev.t });
   }
 }
@@ -40987,7 +42516,10 @@ function engMsgs(t) {
   e.more.text = e.older ? (up && up.p ? "loading “" + (up.p.name || "untitled") + "”…" : "fetching…")
     : up && up.p && !up.old ? "earlier conversation: “" + (up.p.name || "untitled") + "”" : "earlier messages";
   const olds = e.olds.slice().reverse().flatMap(o => o.done.concat([o.div]));
-  return (up ? [e.more] : []).concat(olds, e.done, e.pending, working ? [e.live] : []);
+  // a thread of Number One's picked: only its messages (the dividers stay)
+  const shows = e.thread ? m => !m.role || m.role === "sys" || engThreadShows(e, m.th) : null;
+  return (up ? [e.more] : []).concat(shows ? olds.filter(shows) : olds, shows ? e.done.filter(shows) : e.done,
+                                    shows ? e.pending.filter(shows) : e.pending, working ? [e.live] : []);
 }
 /* The context gauge: an engineer's context size (engineer.py's
    context_tokens, `ctx` in their poll and in GET /engineer's rows) as a
@@ -41030,6 +42562,8 @@ function engStatusLine(t) {
   if (e.starting) return "reporting for duty… (up to a minute)";
   if (e.view) return "an earlier conversation · " + (e.view.name || "untitled") + " · " + engPastWhen(e.view);
   const line = [(ENG_STATUS[r.status] || r.status || "reporting…")];
+  // one of Number One's threads picked: what is shown, and where a send goes
+  if (e.thread) line.unshift("thread " + engThreadName(e, e.thread));
   if (seat.position) line.push(seat.position === 1 ? "next for the seat" : "#" + seat.position + " in line for the seat");
   if (d.state === "queued" || d.state === "running") line.push((d.verb || "deploy") + " " + d.state);
   if (r.task) line.push(r.task);
@@ -41256,11 +42790,12 @@ async function engPoll(t = chat) {
     if (first) { e.first = r.first || 0; e.events = evs; e.done = []; if (!view) e.olds = []; }
     else e.events = e.events.concat(evs);
     engFold(e, evs);
-    // what they say while the thread is open is spoken; the page it opens on is not
-    if (!first && !view) chatEngSpeak(t, evs);
+    // what they say while the thread is open is spoken (of Number One's, the
+    // thread shown's); the page it opens on is not
     e.off = r.next || 0;
     if ((e.st || {}).screen !== r.screen || r.status !== "blocked") e.answered = false;
     e.st = r;
+    if (!first && !view) chatEngSpeak(t, evs.filter(ev => engThreadShows(e, ev.th)));
     if (!view && chatSees(t)) engSeen(e.name);
     engDeployFollow(t, r.deploy || {});
   } catch (err) {
@@ -41380,6 +42915,214 @@ function engPast(sid, t = chat) {
   chatDraw();
   engPoll(t);
 }
+/* ---------- Number One's threads (docs/design/no1-threads.md, section 13) ----------
+   Labels on Number One's one conversation (engineer.py's `thread`): the
+   poll lists the open ones (`threads`: id, name) and gives every event its
+   thread (`th`: the tag line of the message that started the turn, or a
+   "[thread x]" paragraph of his). A row of chips under the header, sideways
+   on a phone: All, then each thread. A tap shows only that thread's
+   messages, at once and with no fetch (engMsgs filters what is loaded), and
+   what is sent then goes to it (the say's `thread`); All shows everything
+   and sends to main. + is the sheet: each thread, and New (a name and an
+   opening message, sent into it as any message); a long press on a chip is
+   Rename and Close. */
+const engThreads = e => (e && e.name === NO1 && (e.st || {}).threads) || [];
+const engThreadName = (e, id) => (engThreads(e).find(x => x.id === id) || {}).name || id;
+// whether a message of thread `th` is shown: All shows every one; one
+// without a thread (an engineer's, or from before the poll gave them) is main's
+const engThreadShows = (e, th) => !(e && e.thread) || (th || "main") === e.thread;
+// a name to the thread's id, NAME_RE's shape: "Deck redesign" is deck-redesign
+function engThreadSlug(name, e) {
+  let id = String(name || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^[^a-z]+|-+$/g, "").slice(0, 20).replace(/-+$/, "");
+  if (!id) id = "thread";
+  const taken = new Set(engThreads(e).map(x => x.id));
+  let out = id;
+  for (let n = 2; taken.has(out); n++) out = id + "-" + n;
+  return out;
+}
+function engThreadsPaint(t, m = chatMountFor(t)) {
+  const box = m && m.thr, e = t && t.eng;
+  if (!box) return;
+  const ts = e && !e.view ? engThreads(e) : [];
+  box.hidden = !ts.length;
+  if (!ts.length) { if (box.dataset.k) { box.dataset.k = ""; box.innerHTML = ""; } return; }
+  const shown = e.thread || "";
+  // the box: "to <name>" while a thread other than main is picked
+  const b = m.box, to = shown && shown !== "main";
+  if (to && !b.disabled) {
+    if (b.dataset.thph == null) b.dataset.thph = b.placeholder;
+    b.placeholder = "to " + engThreadName(e, shown);
+  } else if (b.dataset.thph != null) { b.placeholder = b.dataset.thph; delete b.dataset.thph; }
+  // drawn again only when what it shows changes: chatChrome runs per keystroke
+  const key = shown + "|" + ts.map(x => [x.id, x.name, x.pending].join("\u0001")).join("\u0002");
+  if (box.dataset.k === key) return;
+  box.dataset.k = key;
+  box.innerHTML = `<button type="button" role="tab" class="chthc" data-thr="" aria-selected="${!shown}" ` +
+      `title="Every thread · a message sent goes to main"><span>All</span></button>` +
+    ts.map(x => `<button type="button" role="tab" class="chthc${x.pending ? " pend" : ""}" ` +
+      `data-thr="${qq(esc(x.id))}" aria-selected="${x.id === shown}" title="${qq(esc(x.name || x.id))}` +
+      ` · a tap shows only it, and a message sent goes to it · hold: rename, close">` +
+      `<span>${esc(x.name || x.id)}</span></button>`).join("") +
+    `<button type="button" class="chthc chthplus" data-thrplus aria-label="Threads: new" title="Threads, a new one (U)">+</button>`;
+  const on = box.querySelector('[aria-selected="true"]');
+  if (on && on.scrollIntoView && box.scrollWidth > box.clientWidth) on.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+// a tap shows a chip's thread, a long press (or a right click) its sheet
+function engThreadsWire(m) {
+  const box = m.thr;
+  let hold = 0, held = false;
+  box.onpointerdown = ev => {
+    const c = ev.target.closest && ev.target.closest("[data-thr]");
+    held = false;
+    if (!c || !c.dataset.thr) return;
+    c.classList.add("press");
+    hold = setTimeout(() => { held = true; c.classList.remove("press"); engThreadSheet(c.dataset.thr); }, 550);
+  };
+  const off = () => { clearTimeout(hold); for (const c of box.querySelectorAll(".press")) c.classList.remove("press"); };
+  box.onpointerup = box.onpointercancel = box.onpointerleave = off;
+  box.oncontextmenu = ev => {
+    const c = ev.target.closest && ev.target.closest("[data-thr]");
+    if (!c || !c.dataset.thr) return;
+    ev.preventDefault(); off();
+    if (!held) engThreadSheet(c.dataset.thr);
+    held = true;
+  };
+  box.onclick = ev => {
+    off();
+    if (held) { held = false; return; }
+    const c = ev.target.closest && ev.target.closest("button");
+    if (!c) return;
+    if (c.dataset.thrplus !== undefined) { engThreadsSheet(); return; }
+    if (c.dataset.thr !== undefined) engThreadView(c.dataset.thr, chatFind(m.id));
+  };
+}
+// Show one thread ("" all of them): a filter of what is loaded, drawn at once
+function engThreadView(id, t = chat) {
+  const e = t && t.eng;
+  if (!e || e.name !== NO1) { toast("threads are Number One's: open his conversation first", true); return; }
+  if (id && !engThreads(e).some(x => x.id === id)) { toast("no thread " + id, true); return; }
+  if (e.view) engPast("", t);
+  if ((e.thread || "") === id) return;
+  e.thread = id;
+  // the log's keys are by position: what it shows changed, so it is redrawn whole
+  const mt = chatMountFor(t), log = mt && mt.log;
+  if (log) { log.innerHTML = ""; log.dataset.drawn = ""; }
+  chatDraw(t);
+  if (mt && mt.log) mt.log.scrollTop = mt.log.scrollHeight;
+}
+// the sheet's ways in: "+", U and the voice order open his conversation first
+async function engThreadsSheet() {
+  if (!chat || !chat.eng || chat.eng.name !== NO1) await engNo1();
+  if (!chat || !chat.eng || chat.eng.name !== NO1) return;
+  chatSheet("threads");
+}
+function engThreadSheet(id) {
+  const e = chat && chat.eng;
+  if (!e || e.name !== NO1 || !engThreads(e).some(x => x.id === id)) return;
+  chatSheet("thread", { id });
+}
+function engThreadsSheetHtml(e) {
+  const ts = engThreads(e), shown = (e && e.thread) || "";
+  const row = (id, name, why) => `<button type="button" class="chopt" data-thr="${qq(esc(id))}" aria-pressed="${id === shown}">` +
+    `<span class="chtick">${id === shown ? "&#10003;" : ""}</span><b>${esc(name)}</b><span>${why}</span></button>`;
+  return `<h3>Number One's threads</h3>` + row("", "All", "every thread; a message goes to main") +
+    ts.map(x => row(x.id, x.name || x.id, "only it; a message goes to it")).join("") +
+    `<h4>New thread</h4>` +
+    `<input type="text" class="chthf" id="chthcall" maxlength="60" autocomplete="off" aria-label="what to call the new thread" placeholder="call it: Deck redesign">` +
+    `<textarea class="chthf" id="chthseed" rows="3" aria-label="the opening message" placeholder="the opening message (Number One sees every thread)"></textarea>` +
+    `<div class="row" style="justify-content:flex-end"><button type="button" class="pill go" data-act="thr-new">Open it</button></div>`;
+}
+function engThreadSheetHtml(e, o) {
+  const x = engThreads(e).find(y => y.id === o.id) || { id: o.id, name: o.id };
+  const main = x.id === "main";
+  return `<h3>${esc(x.name || x.id)}</h3>` +
+    `<input type="text" class="chthf" id="chthren" maxlength="60" autocomplete="off" aria-label="what to call it now" value="${qq(esc(x.name || x.id))}" data-id="${qq(esc(x.id))}">` +
+    `<div class="row" style="justify-content:flex-end"><button type="button" class="pill" data-act="thr-ren" data-id="${qq(esc(x.id))}">Rename</button></div>` +
+    `<button type="button" class="chopt" data-act="thr-view" data-id="${qq(esc(x.id))}"><b>Show</b><span>only its messages, here</span></button>` +
+    `<button type="button" class="chopt" data-act="thr-close" data-id="${qq(esc(x.id))}"${main ? " disabled" : ""}><b>Close</b>` +
+    `<span>${main ? "main is never closed" : "off the chips; its messages stay in the conversation"}</span></button>`;
+}
+// the sheet's buttons: the fields read before it closes
+function engThreadSheetAct(act, b) {
+  const name = $("#chthcall") ? $("#chthcall").value : "", seed = $("#chthseed") ? $("#chthseed").value : "";
+  const ren = $("#chthren") ? $("#chthren").value : "", id = b.dataset.id || "";
+  if (act === "thr-new" && !name.trim()) { toast("give the thread a name", true); if ($("#chthcall")) $("#chthcall").focus(); return; }
+  chatSheet("");
+  if (act === "thr-new") engThreadNew(name, seed);
+  else if (act === "thr-ren") engThreadRename(id, ren);
+  else if (act === "thr-view") engThreadView(id);
+  else if (act === "thr-close") engThreadClose(id);
+}
+// POST /engineer/number-one/thread, its line in the log at once: live until
+// the answer, which a failure turns into the reason, where the line was
+async function engThreadOp(body, text, undo, t = chat) {
+  const e = t && t.eng;
+  if (!e || e.name !== NO1) { toast("threads are Number One's: open his conversation first", true); return null; }
+  const line = { role: "sys", text, live: true };
+  e.done.push(line);
+  chatDraw(t);
+  try {
+    const r = await engApi("/" + NO1 + "/thread", { method: "POST", body, timeout: 30000 });
+    line.live = false;
+    line.text = text.replace(/…$/, "");
+    if (r && r.threads && e.st) e.st.threads = r.threads.map(x => ({ id: x.id, name: x.name }));
+    return r || {};
+  } catch (err) {
+    line.live = false; line.cls = "bad"; line.text = text.replace(/…$/, "") + ": not done, " + err.message;
+    if (undo) undo();
+    return null;
+  } finally { chatDraw(t); }
+}
+// a new thread: its chip at once (pending until the answer) and picked; the
+// opening message, if any, sent into it as any message is once it exists
+async function engThreadNew(name, seed, t = chat) {
+  const e = t && t.eng, label = String(name || "").replace(/\s+/g, " ").trim().slice(0, 60);
+  if (!e || e.name !== NO1) { toast("threads are Number One's: open his conversation first", true); return; }
+  if (!label) { toast("a new thread needs a name", true); return; }
+  const id = engThreadSlug(label, e), ts = engThreads(e), was = e.thread || "";
+  const row = { id, name: label, pending: true };
+  ts.push(row);
+  engThreadView(id, t);
+  const r = await engThreadOp({ op: "new", id, name: label }, "Opening thread " + label + "…",
+                              () => { const i = ts.indexOf(row); if (i >= 0) ts.splice(i, 1); engThreadView(was, t); }, t);
+  const msg = String(seed || "").trim();
+  if (r && msg) engSend(t, msg);
+  return r;
+}
+function engThreadRename(id, name, t = chat) {
+  const e = t && t.eng, x = engThreads(e).find(y => y.id === id), label = String(name || "").replace(/\s+/g, " ").trim().slice(0, 60);
+  if (!x || !label || label === x.name) return;
+  const was = x.name;
+  x.name = label;
+  engThreadsPaint(t);
+  return engThreadOp({ op: "rename", id, name: label }, "Renaming " + was + " to " + label + "…", () => { x.name = was; }, t);
+}
+function engThreadClose(id, t = chat) {
+  const e = t && t.eng, ts = engThreads(e), i = ts.findIndex(y => y.id === id);
+  if (i < 0) { toast("no open thread " + id, true); return; }
+  if (id === "main") { toast("main is never closed", true); return; }
+  const [x] = ts.splice(i, 1);
+  if (e.thread === id) engThreadView("", t);
+  engThreadsPaint(t);
+  return engThreadOp({ op: "close", id }, "Closing " + x.name + "…", () => ts.splice(i, 0, x), t);
+}
+// a name said: the thread whose name or id has the words
+function engThreadSaid(name, t = chat) {
+  const e = t && t.eng, w = String(name || "").toLowerCase().replace(/\bthe\b|\bthread\b/g, " ").replace(/\s+/g, " ").trim();
+  const ts = engThreads(e);
+  return ts.find(x => x.id === w || String(x.name).toLowerCase() === w) ||
+         ts.find(x => String(x.name).toLowerCase().includes(w) || x.id.includes(w.replace(/ /g, "-"))) || null;
+}
+async function engThreadVoice(verb, name) {
+  if (!chat || !chat.eng || chat.eng.name !== NO1) await engNo1();
+  const e = chat && chat.eng;
+  if (!e || e.name !== NO1) return;
+  if (verb === "new") return engThreadNew(name, "");
+  if (verb === "all") return engThreadView("");
+  const x = engThreadSaid(name);
+  if (!x) { toast("no thread called " + name, true); return; }
+  return verb === "close" ? engThreadClose(x.id) : engThreadView(x.id);
+}
 // Send, to an engineer: the bubble at once, marked sending; delivered, or
 // queued for the seat (#2 in line, after whom), or not sent with Retry and
 // the words given back. One off duty is started first (up to a minute).
@@ -41387,7 +43130,10 @@ function engPast(sid, t = chat) {
 // CONV_NOTE), not shown in the bubble; the transcript's copy is stripped
 async function engSend(t, q, note, files) {
   if (t.eng.view) engPast("", t);
-  const e = t.eng, u = { role: "user", text: q, state: "sending" };
+  // a thread of Number One's picked: the say carries it, typed under its tag
+  // line (docs/design/no1-threads.md, section 13); All is main
+  const to = t.eng.name === NO1 && t.eng.thread && t.eng.thread !== "main" ? t.eng.thread : "";
+  const e = t.eng, u = { role: "user", text: q, state: "sending", th: to || "main" };
   if (files) u.files = files;
   e.pending.push(u);
   t.at = Date.now();
@@ -41405,7 +43151,8 @@ async function engSend(t, q, note, files) {
       await engApi("/" + e.name + "/start", { method: "POST", body: { title: e.title }, timeout: 120000 });
     }
     const said = await engApi("/" + e.name + "/say", { method: "POST", timeout: 60000,
-      body: Object.assign({ message: note ? note + "\n" + q : q }, files ? { attachments: chatAttachments(files) } : {}) });
+      body: Object.assign({ message: note ? note + "\n" + q : q }, files ? { attachments: chatAttachments(files) } : {},
+                          to ? { thread: to } : {}) });
     // Not in the seat: the message waits in their inbox (a crew_inbox entry)
     // and, being the captain's, puts them first in line; the one seated
     // finishes the turn they are on first (seat.py)
@@ -41798,6 +43545,9 @@ const KEYS = [
   { key: "B", help: "the chat dock (a desk): into its last window, or its list with the search; B again, back to the page. " +
       "On a window: Esc minimises, Enter types, &larr; &rarr; the next, x closes, f the full view",
     fn: () => dockKey() },
+  { key: "U", help: "Number One's threads: the sheet &mdash; each one to show (and send to), a new one. " +
+      "On a chip: a tap shows that thread only, All everything; a long press renames or closes it",
+    fn: () => engThreadsSheet() },
   { key: "!", help: "open questions &mdash; what Number One and the crew ask of you, the context of each, answered and closed here",
     fn: () => openQuestions() },
   { key: "Q", help: "the queue &mdash; who has the crew's seat and on what, who waits for it, and everything shipped, newest first",
@@ -41879,6 +43629,8 @@ const KEYS = [
   { key: "?", help: "this list", fn: () => openHelp() },
   { key: "W", help: "what is off on the server &mdash; each feature it lacks, and the settings it needs (Config's Server)",
     fn: () => featWhatOff() },
+  { key: "L", help: "classified entries: unlock them (the password), or lock them again",
+    fn: () => clsOn() ? clsLock(true) : clsUnlockAsk() },
 
   { head: "Voice" },
   { key: "m", help: "the microphone &mdash; orders first; &ldquo;start dictation&rdquo; types into the focused field",
@@ -41969,6 +43721,8 @@ document.addEventListener("keydown", ev => {
     // does: first the open panel closes to its bar, then the shelf itself
     if (stack.on != null) { stackFocus(stack.on); return; }
     if (stack.ids.length) { stackClear(); return; }
+    // opened from a question's link: Escape is its way back, as ‹ is
+    if (edFrom && edFrom.kind === "questions") { edBack(); return; }
     closeRow();
     return;
   }

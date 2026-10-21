@@ -218,6 +218,19 @@ def run(s):
     got = s.json("GET", f"/entries/{eid}")[1]
     check(got.get("created_at_utc") == "2026-10-15 04:02:33", "a refused PUT left the row alone")
 
+    print("classification (lcars_vault.h): every row Unclassified, the envelope refused without a vault")
+    check(got.get("classification") == 0 and "sealed" not in got,
+          f"a row reads classification 0 and no sealed ({got.get('classification')})")
+    st, rows = s.json("GET", "/entries?limit=1000")
+    check(all(r.get("classification") == 0 for r in rows), "every listed row too")
+    st, err = s.json("POST", "/entries", {"kind": "note", "classification": 2, "sealed": "lcs1.aGk.aGk"})
+    check(st == 409 and "vault" in str(err), f"a Secret create with no vault -> 409 ({st})")
+    st, err = s.json("PATCH", f"/entries/{eid}", {"classification": 2, "sealed": "lcs1.aGk.aGk"})
+    check(st == 409, f"a raise with no vault -> 409 ({st})")
+    st, err = s.json("PATCH", f"/entries/{eid}", {"classification": 7})
+    check(st == 400, f"an unknown level -> 400 ({st})")
+    check(s.json("GET", f"/entries/{eid}")[1].get("classification") == 0, "and the row is as it was")
+
 
 def unseeded(binary, tmp):
     """A journal emptied by hand is not seeded on its next start either.

@@ -330,8 +330,10 @@ static bool LimitedAllowed(int client_fd, const LimitedLogin *l,
   if (!read) {
     LimitedLoadRoles();
   }
+  // /vault: the wrapped key is an offline guessing target, and writing it
+  // is the owner's alone (lcars_vault.h)
   if (IsEngineerPath(path) || IsCalDAVRequest(method, path) ||
-      PathIs(path, "/say/token")) {
+      PathIs(path, "/say/token") || PathIs(path, "/vault")) {
     *status = LimitedRefuse(client_fd, l);
     return false;
   }

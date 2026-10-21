@@ -26,6 +26,7 @@ from unittest import mock
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import testguard  # noqa: E402,F401 - no test reaches the live journal
 import engineer as E  # noqa: E402
 import seat as S  # noqa: E402
 
@@ -188,7 +189,11 @@ class Queue(Fixture, unittest.TestCase):
         rec = E.history()[-1]
         self.assertEqual((rec["name"], rec["outcome"], rec["log"]), ("yar-c36", "failed", "deploy-1.log"))
         buf = io.StringIO()
-        with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as e:
+        # the check is the caller's side's; a job's runner sets
+        # LCARS_ENG_DETACHED for its command (the export's test run is one),
+        # which would make this the detached rollback itself
+        with mock.patch.dict(os.environ), contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as e:
+            os.environ.pop("LCARS_ENG_DETACHED", None)
             E.main(["rollback"])
         self.assertEqual(e.exception.code, 3)
         self.assertIn("no deploy to roll back", buf.getvalue())
@@ -228,6 +233,43 @@ class Queue(Fixture, unittest.TestCase):
             r = E.queue_seat(s, {})
         self.assertIsNone(r["holder"])
         self.assertEqual(r["queue"][0]["task"], "task of obrien-c33")
+
+    def test_the_job_lines(self):
+        """slice 2's views: queue_seat's and seat_brief's `jobs`, a crew
+        list row's and a poll's `job` (docs/design/job-queue.md)."""
+        run = {"id": "kim-c32-20261021-140200", "name": "kim-c32", "label": "run.sh", "t": 900, "started": 1000,
+               "unit": "lcars-job-x", "head": "abc", "cmd": "run.sh"}
+        held = {"id": "yar-c36-20261021-140500", "name": "yar-c36", "label": "buttons.py", "t": 1100, "hold": True}
+        s = {"holder": {"name": "obrien-c33", "since": 100}, "queue": [], "waiting": {},
+             "jobs": {"running": run, "queue": [held], "recent": [{"id": "x", "name": "kim-c32", "label": "perf",
+                                                                    "t": 1, "started": 2, "ended": 3, "outcome": "passed"}],
+                      "note": "short of memory"}}
+        with mock.patch.object(E.time, "time", return_value=1180):
+            jb = E.jobs_brief(s)
+        self.assertEqual(jb["running"], {"id": run["id"], "name": "kim-c32", "label": "run.sh", "t": 900, "since": 1000, "elapsed": 180})
+        self.assertEqual(jb["queue"], [{"id": held["id"], "name": "yar-c36", "label": "buttons.py", "t": 1100, "place": 1, "hold": True}])
+        self.assertEqual((jb["recent"][0]["outcome"], jb["note"]), ("passed", "short of memory"))
+        self.assertNotIn("unit", jb["running"])  # the view's, not the runner's
+        with mock.patch.object(S, "inbox_all", return_value=[]):
+            q = E.queue_seat(s, {})
+        self.assertEqual((q["jobs"]["running"]["title"], q["jobs"]["queue"][0]["title"]), ("Lieutenant Harry Kim", "Lieutenant Tasha Yar"))
+        b = E.seat_brief(s, "yar-c36")
+        self.assertEqual(b["jobs"]["running"]["name"], "kim-c32")
+        self.assertEqual({k: b["job"][k] for k in ("id", "state", "place")}, {"id": held["id"], "state": "queued", "place": 1})
+        self.assertEqual(E.seat_brief(s, "kim-c32")["job"]["state"], "running")
+        self.assertNotIn("job", E.seat_brief(s, "obrien-c33"))
+        # an old block without the key is read as empty lines
+        self.assertEqual(E.seat_brief({"holder": None, "queue": [], "waiting": {}})["jobs"]["running"], None)
+        # crew list: a row's job, its status left alone (a message still starts an "off" one)
+        buf = io.StringIO()
+        with mock.patch.object(E, "agent_info", return_value=None), mock.patch.object(E, "git_info", return_value={}), \
+                mock.patch.object(E, "seat_on", return_value=True), mock.patch.object(E, "seat_read_quiet", return_value=s), \
+                contextlib.redirect_stdout(buf), self.assertRaises(SystemExit):
+            E.cmd_list()
+        rows = {r["name"]: r for r in json.loads(buf.getvalue().strip().splitlines()[-1])["engineers"]}
+        self.assertEqual((rows["yar-c36"]["job"]["place"], rows["yar-c36"]["status"]), (1, "off"))
+        self.assertEqual(rows["kim-c32"]["job"]["state"], "running")
+        self.assertNotIn("job", rows.get("obrien-c33", {}))
 
 
 class Eta(Fixture, unittest.TestCase):

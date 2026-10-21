@@ -10944,6 +10944,16 @@ async function answerPrompt(text) {
                   { name: "kim-c32", title: "Lieutenant Harry Kim", status: "blocked", active: nowS - 60, ctx: 250000 },
                   { name: "number-one", title: "Number One", status: "idle", active: nowS - 9000 },
                   { name: "gone-e3f", title: "Gone Fishing", status: "off", active: nowS - 30, dismissed: nowS - 20 }];
+  // The live journal's own orders waiting for these names (a real
+  // crew_inbox row "obrien-c33 ← No.1 …" while the suite runs) would count
+  // in their rows, and the checks below would hang on what the journal
+  // holds that day: the in-memory copy of them dropped, the fixtures' own
+  // (ibMk) the only ones
+  st.all.filter(function (r) {
+    return engInboxRow(r) && crewEngs.some(function (x) { return (r.title || "").indexOf(x.name + " ← ") === 0; });
+  }).forEach(unplant);
+  engInboxN = null;
+  ok(crewEngs.every(function (x) { return !engInboxCount(x.name); }), "no live order waits for a fixture's name");
   eq(engFind(crewEngs, "Reyes").name, "reyes-c20", "a crew member by a word of their name");
   eq(engFind(crewEngs, "chief reyes").name, "reyes-c20", "by rank and name");
   eq(engFind(crewEngs, "obrien").name, "obrien-c33", "O'Brien said without the apostrophe");
@@ -11297,6 +11307,95 @@ async function answerPrompt(text) {
   fetch = qFetch2;
   engQueue1.seat.queue = qLine0;
   await queueFetch();
+
+  // the job line (docs/design/job-queue.md): a Jobs block under the seat
+  ok(/no job running or waiting/.test($("#qtl").querySelector(".qb-jobs").textContent), "with no jobs, the Jobs block says so");
+  var qjGone = [];
+  engQueue1.seat.jobs = {
+    running: { id: "reyes-c20-20261021-140200", name: "reyes-c20", title: "Chief Ana Reyes", label: "lcars-ui/test/run.sh", t: nowS - 400, since: nowS - 180, elapsed: 180 },
+    queue: [{ id: "okafor-c30-20261021-140500", name: "okafor-c30", title: "Lieutenant Daniel Okafor", label: "test/buttons.py", t: nowS - 60, place: 1, hold: true }],
+    recent: [], note: "" };
+  var qjFetch = fetch, qjHold = null, qjFail = false;
+  fetch = function (url, o) {
+    var m = /\/engineer\/([a-z0-9-]+)\/job-cancel$/.exec(String(url));
+    if (!m) return qjFetch.apply(this, arguments);
+    var b = JSON.parse(o.body);
+    qjGone.push(m[1] + " " + b.id);
+    var answer = function () {
+      if (qjFail) { qjFail = false; var tx = JSON.stringify({ error: "okafor-c30 has no job in the line" });
+        return { ok: false, status: 409, statusText: "", text: function () { return Promise.resolve(tx); },
+                 json: function () { return Promise.resolve(JSON.parse(tx)); }, headers: { get: function () { return "application/json"; } } }; }
+      var j = engQueue1.seat.jobs;
+      if (j.running && j.running.id === b.id) j.running = null;
+      j.queue = j.queue.filter(function (x) { return x.id !== b.id; });
+      return engJson({ ok: true, cancelled: b.id });
+    };
+    if (qjHold) return new Promise(function (res) { qjHold = function () { res(answer()); }; });
+    return Promise.resolve(answer());
+  };
+  await queueFetch();
+  qHtml = $("#qtl").innerHTML;
+  ok(qHtml.indexOf(">Queued<") < qHtml.indexOf(">Jobs<") && qHtml.indexOf(">Jobs<") < qHtml.indexOf(">Shipped<"), "the Jobs block sits under the seat, above Shipped");
+  var qJobs = $("#qtl").querySelectorAll(".qb-jobs .qitem");
+  eq(qJobs.length, 2, "the running job, then the job line");
+  has(qJobs[0].innerHTML, "Chief Ana Reyes", "whose job runs");
+  has(qJobs[0].innerHTML, "lcars-ui/test/run.sh", "with its label");
+  has(qJobs[0].innerHTML, "running 3m", "and how long it has run");
+  has(qJobs[1].innerHTML, "#1", "the line in order");
+  has(qJobs[1].innerHTML, "test/buttons.py", "each with its label");
+  has(qJobs[1].innerHTML, "starts when their turn ends", "a held one says why it waits");
+  var qjCtl = function (id) { return $("#qtl").querySelector('.qctl[data-qj="' + id + '"]'); };
+  ok(qjCtl("reyes-c20-20261021-140200") && qjCtl("okafor-c30-20261021-140500"), "each job has a Cancel");
+  click(qjCtl("reyes-c20-20261021-140200").querySelector("[data-qjc]"));
+  ok(/Cancel Chief Ana Reyes's job\?/.test($("#qtl").querySelector(".qcf").textContent), "Cancel asks first, in the row");
+  eq(qjGone.length, 0, "and posts nothing yet");
+  click($("#qtl").querySelector(".qcf [data-qjno]"));
+  ok(!$("#qtl").querySelector(".qcf"), "Keep leaves it running");
+  click(qjCtl("reyes-c20-20261021-140200").querySelector("[data-qjc]"));
+  qjHold = true;
+  click($("#qtl").querySelector(".qcf [data-qjyes]"));
+  ok(/cancelling/.test(qjCtl("reyes-c20-20261021-140200").textContent) && $("#qtl").querySelector(".qb-jobs .qitem.qpend"),
+     "Cancel the job shows cancelling… at once, before the server answers");
+  qjHold(); qjHold = null;
+  await settle(3);
+  eq(qjGone[0], "reyes-c20 reyes-c20-20261021-140200", "posted to /engineer/<name>/job-cancel with the job's id");
+  has($("#toast").textContent, "job cancelled", "the toast says so");
+  eq($("#qtl").querySelectorAll(".qb-jobs .qitem").length, 1, "and the read after it has the job gone");
+  // a failure said on the row
+  qjFail = true;
+  click(qjCtl("okafor-c30-20261021-140500").querySelector("[data-qjc]"));
+  click($("#qtl").querySelector(".qcf [data-qjyes]"));
+  await settle(3);
+  has(qjCtl("okafor-c30-20261021-140500").textContent, "not cancelled", "a failed cancel says so on its row");
+  // by voice
+  var qj1 = vMatch(vWords("cancel okafor's job"), 0);
+  ok(qj1 && qj1.cmd.say === "cancel {*} job", "\"cancel Okafor's job\" is an order");
+  var qjN = qjGone.length;
+  await qj1.cmd.fn(qj1.arg);
+  ok(document.activeElement === $("#qtl").querySelector(".qcf [data-qjno]"), "the focus on Keep, as the tap leaves it");
+  await settle(3);
+  ok($("#qtl").querySelector('.qcf[data-qj="okafor-c30-20261021-140500"]'), "which asks in their job's row, the 's no part of the name");
+  eq(qjGone.length, qjN, "and cancels nothing by voice alone");
+  click($("#qtl").querySelector(".qcf [data-qjyes]"));
+  await settle(3);
+  eq(qjGone[qjGone.length - 1], "okafor-c30 okafor-c30-20261021-140500", "the tap on Cancel the job cancels it");
+  ok(!$("#qtl").querySelector(".qb-jobs .qctl"), "the line empty after it");
+  var qj2 = vMatch(vWords("show the jobs"), 0);
+  ok(qj2 && qj2.cmd.say === "show the jobs" && vMatch(vWords("what jobs are running"), 0).cmd.say === "show the jobs", "\"show the jobs\" is an order");
+  await qj2.cmd.fn(qj2.arg);
+  ok(!qv.wantJobs && $("#qjobs"), "it paints the queue at its Jobs block");
+  // the Crew list: a row's badge and the queue row's preview
+  has(engRowHtml({ name: "okafor-c30", title: "Lieutenant Daniel Okafor", status: "off", job: { id: "j", label: "x", state: "queued", place: 2, since: nowS } }),
+      "job #2", "a crew row waiting on a queued job wears its place");
+  has(engRowHtml({ name: "okafor-c30", title: "Lieutenant Daniel Okafor", status: "off", job: { id: "j", label: "x", state: "running", place: 0, since: nowS - 180 } }),
+      "job 3m", "a running one, how long it has run");
+  var qjSeat = eng.seat;
+  eng.seat = Object.assign({}, qjSeat, { jobs: { running: { id: "j", name: "reyes-c20", label: "x", since: nowS }, queue: [], recent: [] } });
+  has(queueRowHtml(), "· job: ", "the Queue row's preview names whose job runs");
+  eng.seat = qjSeat;
+  fetch = qjFetch;
+  delete engQueue1.seat.jobs;
+  await queueFetch();
   ok(vMatch(vWords("what is in the queue"), 0).cmd.say === "show the queue", "\"what is in the queue\" is the queue");
   ok(vMatch(vWords("deploy history"), 0).cmd.say === "show the queue", "\"deploy history\" too, not a deploy of someone called history");
   ok(vMatch(vWords("what shipped"), 0).cmd.say === "show the queue", "and \"what shipped\"");
@@ -11320,7 +11419,9 @@ async function answerPrompt(text) {
   eq(rcR && rcR.textContent, "84%", "a crew row gives their context as a percentage of the handover mark");
   ok(rcR && !rcR.classList.contains("over") && rcK && rcK.textContent === "125%" && rcK.classList.contains("over"),
      "amber past the mark");
-  ok(!$("#chrows").querySelector('.chrow[data-eng="obrien-c33"] .chrc'), "and none for one with no reading");
+  // the reading's chip only: the inbox's "n waiting" is a .chrc too (.chinq)
+  ok(!Array.prototype.some.call($("#chrows").querySelectorAll('.chrow[data-eng="obrien-c33"] .chrc'),
+                                function (c) { return !c.classList.contains("chinq"); }), "and none for one with no reading");
   click($("#chrows").querySelector('.chrow[data-eng="reyes-c20"]'));
   ok(!$(".chth .chgauge").hidden && $(".chth .chgauge").textContent.indexOf("…") >= 0, "the thread's context gauge is there at once, pending");
   await settle(3);
@@ -11636,6 +11737,111 @@ async function answerPrompt(text) {
   eq(chat.id, "eng-number-one", "Number One's thread");
   ok(!engPosts.some(function (u) { return /number-one\/start/.test(u); }), "not started again when on duty");
   ok(engPosts.some(function (u) { return /number-one\/say .*status report/.test(u); }), "with the words said to him");
+
+  // his threads (no1-threads.md, section 13): labels on one conversation;
+  // the chips filter it, and the one picked tags what is sent
+  var thrFetch = fetch, thrOps = [], thrSays = [], thrSayEnd = null, thrSayAns = { ok: true };
+  var thrList = [{ id: "main", name: "Main" }, { id: "deck", name: "Deck redesign" }];
+  fetch = function (url, o) {
+    var u = String(url);
+    if (u.indexOf("/engineer/number-one") < 0) return thrFetch.apply(this, arguments);
+    engPosts.push(((o && o.method) || "GET") + " " + u.replace(/^.*\/engineer/, "/engineer"));
+    if (/\/thread$/.test(u)) {
+      var b = JSON.parse(o.body);
+      thrOps.push(b);
+      if (b.op === "new") thrList = thrList.concat([{ id: b.id, name: b.name }]);
+      if (b.op === "close") thrList = thrList.filter(function (x) { return x.id !== b.id; });
+      return engJson({ ok: true, threads: thrList, closed: [] });
+    }
+    if (/\/say$/.test(u)) {
+      thrSays.push(JSON.parse(o.body));
+      return new Promise(function (res) { thrSayEnd = function () { res(engJson(thrSayAns)); }; }).then(function (x) { return x; });
+    }
+    if (/\?off=/.test(u)) {
+      return engJson({ session: "s-main", next: 10, first: 0, status: "idle", threads: thrList,
+                       events: /off=-1/.test(u) ? [{ r: "me", t: "status report", th: "main" }, { r: "them", t: "All quiet.", th: "main" },
+                                                   { r: "me", t: "about the chairs", th: "deck" }, { r: "them", t: "Chairs done.", th: "deck" },
+                                                   { r: "them", t: "And main is fine.", th: "main" }] : [] });
+    }
+    return engJson({ ok: true });
+  };
+  var n1 = chat;
+  n1.eng.off = -1;
+  await engPoll(n1); await settle(2);
+  var thr = $(".chth .chthr"), chips = thr.querySelectorAll("[data-thr]");
+  ok(!thr.hidden && chips.length === 3 && thr.querySelector("[data-thrplus]"), "All, each thread, and +: chips under the header");
+  ok(chips[0].dataset.thr === "" && chips[0].getAttribute("aria-selected") === "true", "All first, and shown");
+  ok(thr.innerHTML.indexOf("chbadge") < 0, "no unread counts");
+  has($(".chth .chlog").innerHTML, "about the chairs", "All: every thread's messages");
+  has($(".chth .chlog").innerHTML, "All quiet.", "main's too");
+  eq(n1.eng.done.filter(function (m) { return m.role === "asst"; }).length, 3, "an answer turning to another thread is a message of its own");
+  engPosts = [];
+  click(chips[2]);
+  eq(thr.querySelector('[aria-selected="true"]').dataset.thr, "deck", "a tap lights its chip at once");
+  ok($(".chth .chlog").innerHTML.indexOf("All quiet.") < 0 && $(".chth .chlog").innerHTML.indexOf("And main is fine.") < 0, "only deck's shown");
+  has($(".chth .chlog").innerHTML, "Chairs done.", "deck's answer shown");
+  ok(!engPosts.some(function (u) { return /^POST |thread=/.test(u); }), "a filter: nothing posted, nothing fetched by thread");
+  has($(".chth .chbox").placeholder, "to Deck redesign", "the box says whom it goes to");
+  has($(".chth .chhdr .chstat").textContent, "thread Deck redesign", "the header says which thread");
+  $(".chth .chbox").value = "how are the chairs"; $(".chth .chbox").oninput();
+  var thrSend = chatSend();
+  await settle(1);
+  has($(".chth .chlog").innerHTML, "sending", "the bubble at once, sending");
+  eq(thrSays[0] && thrSays[0].thread, "deck", "the say carries the thread");
+  thrSayEnd(); await thrSend; await settle(2);
+  eq(n1.eng.pending[n1.eng.pending.length - 1].state, "delivered", "delivered");
+  click(thr.querySelector("[data-thr=main]")); await settle(1);
+  ok($(".chth .chlog").innerHTML.indexOf("how are the chairs") < 0, "deck's bubble is not main's");
+  $(".chth .chbox").value = "and main"; $(".chth .chbox").oninput();
+  thrSend = chatSend(); await settle(1);
+  ok(!("thread" in thrSays[1]), "to main: no thread on the say");
+  thrSayEnd(); await thrSend; await settle(2);
+  click(thr.querySelector("[data-thr='']")); await settle(1);
+  has($(".chth .chlog").innerHTML, "how are the chairs", "All again: everything");
+  // a long press: rename and close
+  engThreadSheet("main");
+  ok($("#chthren") && $(".chth .chsheet [data-act=thr-close]").disabled, "main's sheet: Close is off");
+  chatSheet("");
+  engThreadSheet("deck");
+  ok(!$(".chth .chsheet [data-act=thr-close]").disabled, "another's: Close is on");
+  $("#chthren").value = "The bridge";
+  click($(".chth .chsheet [data-act=thr-ren]")); await settle(2);
+  eq(JSON.stringify(thrOps[thrOps.length - 1]), '{"op":"rename","id":"deck","name":"The bridge"}', "Rename posts op rename");
+  // +: the sheet, a new thread with its opening message, sent as any message
+  click($(".chth .chthr [data-thrplus]"));
+  ok($("#chthcall") && $("#chthseed"), "+ opens the sheet: a name and the opening message");
+  ok(!$(".chth .chsheet [data-act=thr-fork]"), "no Branch");
+  $("#chthcall").value = "Web app"; $("#chthseed").value = "Look at the console's header.";
+  click($(".chth .chsheet [data-act=thr-new]"));
+  ok($(".chth .chthr [data-thr=web-app]") && $(".chth .chthr [data-thr=web-app]").classList.contains("pend"), "its chip at once, pending");
+  eq(n1.eng.thread, "web-app", "and picked");
+  await settle(3);
+  eq(JSON.stringify(thrOps[thrOps.length - 1]), '{"op":"new","id":"web-app","name":"Web app"}', "New posts op new, the id from the name");
+  eq(thrSays[2] && thrSays[2].thread, "web-app", "the opening message: a say into it");
+  has(thrSays[2] && thrSays[2].message, "Look at the console's header.", "with its words");
+  thrSayEnd(); await settle(2);
+  // the voice orders and the key
+  [["number one threads", "number one threads"], ["switch to deck thread", "switch to {*} thread"], ["all threads", "all threads"],
+   ["new thread web", "new thread {*}"], ["close the deck thread", "close the {*} thread"]].forEach(function (c) {
+    var h = vMatch(vWords(c[0]), 0);
+    eq(h && h.cmd.say, c[1], "\"" + c[0] + "\" is an order");
+  });
+  var sw = vMatch(vWords("switch to main thread"), 0);
+  engPosts = [];
+  await sw.cmd.fn(sw.arg); await settle(1);
+  eq(n1.eng.thread, "main", "said: main picked, by the name said");
+  ok(!engPosts.some(function (u) { return /^POST /.test(u); }), "nothing posted: a filter");
+  sw = vMatch(vWords("all threads"), 0);
+  await sw.cmd.fn(sw.arg); await settle(1);
+  eq(n1.eng.thread, "", "all threads: the filter off");
+  ok(KEYS.some(function (k) { return k.key === "U"; }), "U opens the threads sheet");
+  // earlier conversations: one list
+  n1.eng.st.past = [{ name: "old main", session: "p1", at: 1 }, { name: "old deck", session: "p2", at: 2, thread: "deck" }];
+  chatSheet("past");
+  ok($(".chth .chsheet").innerHTML.indexOf("<h4>") < 0, "Earlier conversations: one list, no groups");
+  has($(".chth .chsheet").innerHTML, "old deck", "every one in it");
+  chatSheet("");
+  fetch = thrFetch;
   closeOv();
   fetch = engFetch;
   lsSet("lcars.deck.engkey", "");
@@ -13227,6 +13433,92 @@ async function answerPrompt(text) {
     eq(oqCount(), n0, "and gone with the rows");
   })();
 
+  console.log("\n-- open questions: an ask split into its questions, each answered, one Send --");
+  await (async function () {
+    closeOv(); hideToast();
+    // the parser
+    eq(oqParse("Ship it?", "Sato built them.\nMy recommendation: ship."), null, "the old shape: no question lines, no Options: one question as before");
+    eq(oqParse("t", "Steps:\n1. build\n2. test\n3. ship"), null, "a numbered list that asks nothing is context");
+    var p = oqParse("Two things", "The deck is green.\nShared line.\n\nQ1: Ship the pins today?\nThe phone check passed.\nOptions: A) ship now B) wait for the iPad C) drop them\nRecommendation: A, it is tested.\n" +
+      "**Q2.** Keep the old view?\nOnly the menu used it.\n\nQ3: Rename it?\nOptions:\nA) Questions\nB) Asks\n");
+    eq(p.qs.length, 3, "Q lines: three questions");
+    eq(p.ctx, "The deck is green.\nShared line.", "the text before the first is the shared context");
+    eq(p.qs[0].opts.map(function (o) { return o.k + "=" + o.l; }).join("|"), "A=ship now|B=wait for the iPad|C=drop them", "inline Options");
+    eq(p.qs[0].rec, "A", "Recommendation marks the default");
+    has(p.qs[0].ctx, "phone check passed", "a question's own context");
+    has(p.qs[0].ctx, "Recommendation: A, it is tested.", "the recommendation's reason stays as context");
+    eq(p.qs[1].text, "Keep the old view?", "a bold Q2. line");
+    eq(p.qs[1].opts.map(function (o) { return o.k; }).join(), "yes,no", "no Options: Yes and No");
+    eq(p.qs[1].rec, "", "no Recommendation, none marked");
+    eq(p.qs[2].opts.map(function (o) { return o.k + "=" + o.l; }).join("|"), "A=Questions|B=Asks", "Options: then a line each");
+    var pn = oqParse("t", "Context.\n1. Ship it?\nRecommendation: yes\n2. And the deck too?");
+    eq(pn && pn.qs.length, 2, "1. and 2. lines that ask are questions");
+    eq(pn.qs[0].rec, "yes", "a yes/no Recommendation");
+    var p1 = oqParse("Which name?", "Options: A) Asks B) Questions\nRecommendation: Z");
+    ok(p1 && p1.qs.length === 1 && p1.qs[0].text === "Which name?" && p1.qs[0].own, "Options alone: one question, the title's");
+    eq(p1.qs[0].rec, "", "a Recommendation naming no choice marks none");
+    eq(oqAnsLine(p.qs[0], { c: "A", note: "after lunch" }), "Q1: A (ship now); note: after lunch", "an answer's line");
+    eq(oqAnsLine(p.qs[1], { c: "yes" }), "Q2: yes", "a yes");
+    eq(oqAnsLine(p.qs[2], { c: "skip" }), "Q3: skipped", "a Skip");
+
+    // the card
+    var content = "The deck is green.\nShared line.\nThird line.\n\nQ1: Ship the pins today?\nOptions: A) ship now B) wait\nRecommendation: A\nQ2: Keep the old view?\nQ3: Rename it?";
+    var qM = await plant({ kind: "task_no1", title: "Pins and the old view", done_bool: 0, content: content });
+    // the top card, which the spoken answers go to
+    qM.created_at_utc = fmtUtc(new Date(Date.now() + 120000));
+    refresh();
+    oq.more.delete(qM.id);  // an id an earlier check's row had, unfolded there
+    openQuestions(); await settle(2);
+    var card = function () { return $("#oqrows").querySelector('[data-oqid="' + qM.id + '"]'); };
+    ok(card() && card().classList.contains("oqmulti"), "an ask in the shape gets the split card");
+    eq(card().querySelectorAll(".oqb").length, 3, "a block per question");
+    ok(card().querySelector(".oqctx.fold"), "the shared context folded");
+    ok(card().querySelector('[data-oqc="' + qM.id + ':1:A"].rec'), "the recommended choice marked");
+    ok(card().querySelector('[data-oqc="' + qM.id + ':2:yes"]') && card().querySelector('[data-oqc="' + qM.id + ':2:no"]'), "Yes and No where no Options");
+    ok(card().querySelector('[data-oqc="' + qM.id + ':3:skip"]'), "and Skip");
+    ok(card().querySelector("[data-oqdone]").disabled, "Send waits for every answer");
+    has(card().querySelector(".oqst").textContent, "0 of 3", "and says how many are in");
+    click(card().querySelector('[data-oqc="' + qM.id + ':1:B"]'));
+    ok(card().querySelector('[data-oqb="' + qM.id + ':1"].done') && /wait/.test(card().querySelector('[data-oqb="' + qM.id + ':1"] .oqpick').textContent),
+       "a choice shows at once, the block folded to its answer");
+    click(card().querySelector('[data-oqopen="' + qM.id + ':1"]'));
+    ok(card().querySelector('[data-oqc="' + qM.id + ':1:B"].on'), "the folded answer unfolds to change it");
+    click(card().querySelector('[data-oqc="' + qM.id + ':1:A"]'));
+    var note = card().querySelector('[data-oqnote="' + qM.id + ':1"]');
+    note.value = "after lunch"; note.dispatchEvent(new Event("input", { bubbles: true }));
+    click(card().querySelector('[data-oqc="' + qM.id + ':3:skip"]'));
+    oq.sig = ""; oqPaint();
+    eq(card().querySelector('[data-oqnote="' + qM.id + ':1"]').value, "after lunch", "a note survives a repaint");
+    eq(oqAns(qM.id)[1].c, "A", "the choices kept per question on the device");
+    ok(card().querySelector("[data-oqdone]").disabled, "Send still waits for Q2");
+    // by voice
+    eq(vMatch(vWords("answer question 2 yes but only on the phone"), 0).cmd.say, "answer question {n} {*}", "“answer question 2 yes …” is an order");
+    eq(vMatch(vWords("send the answers"), 0).cmd.say, "send the answers", "and “send the answers”");
+    oqSendSaid(); await settle(1);
+    eq(dbFind(qM.id).done_bool, 0, "a send said before every answer is in refuses");
+    oqSaid(2, "yes but only on the phone");
+    eq(oqAns(qM.id)[2].c, "yes", "said: the choice");
+    eq(oqAns(qM.id)[2].note, "only on the phone", "and the rest its note");
+    ok(!card().querySelector("[data-oqdone]").disabled, "every question answered: Send is on");
+    // Send
+    var pS = oqAnswer(qM.id);
+    ok(card().classList.contains("saving") && /sending/.test(card().textContent), "Send shows at once");
+    await pS; await settle(3);
+    var dM = dbFind(qM.id);
+    eq(dM.content.slice(0, dM.content.indexOf("\n\n") + 2).replace(/\d{4}-\d\d-\d\d \d\d:\d\d/, "T"),
+       "Answer (captain, T):\nQ1: A (ship now); note: after lunch\nQ2: yes; note: only on the phone\nQ3: skipped\n\n", "Send writes every answer in one block");
+    ok(dM.content.endsWith(content), "the ask kept under it");
+    eq(dM.done_bool, 1, "and ticks it off");
+    eq(JSON.stringify(oqAns(qM.id)), "{}", "the answers' draft goes");
+    click($("#toast").querySelector(".tact")); await settle(4);
+    dM = dbFind(qM.id);
+    ok(dM.content === content && dM.done_bool === 0, "Undo: the block off, open again");
+    eq(oqAns(qM.id)[1].note, "after lunch", "the answers back on the card");
+    closeOv();
+    oqAnsSet(qM.id, null);
+    unplant(qM);
+  })();
+
   console.log("\n-- the architect: its thread, the fence, the entry, the error turn (docs/design/architect.md) --");
   await (async function () {
     closeOv(); runTimers(); await settle(1);
@@ -13494,6 +13786,199 @@ async function answerPrompt(text) {
     await loadAll();
     await settle(20);
     eq(st.all.length, DB.length, "the journal back for what follows");
+  })();
+
+  // ---------- classified entries (index.html's "classified" block) ----------
+  // The rules the page keeps, with a stand-in for the cipher (this engine has
+  // no WebCrypto); test/classified.py runs the real one in Chromium.
+  await (async function () {
+    console.log("-- classified: what is kept, sealed and shown --");
+    var realCrypto = Object.assign({}, clsCrypto), box = new Map(), n = 0;
+    clsCrypto.seal = async function (k, p) { var e = "lcs1.dA." + (++n); box.set(e, JSON.parse(JSON.stringify(p))); return e; };
+    clsCrypto.open = async function (k, e) { if (!box.has(e)) throw new Error("tag"); return box.get(e); };
+
+    var kept = plainRow({ id: 9, kind: "note", classification: 2, sealed: "lcs1.a.b", title: "t", content: "c",
+                          value_int: 3, value_float: 1.5, done_bool: 1 });
+    ok(kept.title === "" && kept.content === "" && kept.value_int === 0 && kept.value_float === 0,
+       "plainRow (the mirror, the outbox) keeps no Secret text");
+    ok(kept.sealed === "lcs1.a.b" && kept.classification === 2 && kept.done_bool === 1, "but its envelope, level and done");
+    eq(plainRow({ id: 8, kind: "note", title: "plain", content: "words" }).content, "words", "a plain row as it was");
+    lsDel("lcars.draft");
+    lsSet("lcars.draft", { id: 9, v: { classification: "2", content: "the plan" }, at: 1 });
+    eq(lsGet("lcars.draft", null), null, "a Secret entry's draft is never written down");
+    lsSet("lcars.draft", { id: 8, v: { classification: "0", content: "fine" }, at: 1 });
+    eq((lsGet("lcars.draft", {}).v || {}).content, "fine", "a plain one is");
+    lsDel("lcars.draft");
+
+    ok(clsWrite("/entries", { method: "POST", body: {} }) && clsWrite("/entries/4", { method: "PATCH", body: {} }),
+       "the writes api() seals: POST /entries, PUT/PATCH /entries/<id>");
+    ok(!clsWrite("/entries/4", { method: "GET" }) && !clsWrite("/vault", { method: "PUT", body: {} }) &&
+       !clsWrite("/entries/4/append", { method: "POST", body: {} }), "and nothing else");
+
+    var threw = "";
+    try { await clsSealOpts("/entries", { method: "POST", body: { kind: "note", title: "x", classification: 2 } }); }
+    catch (e) { threw = e.message; }
+    ok(/locked/.test(threw), "locked, a Secret write is refused before it is sent (" + threw + ")");
+
+    cls.key = {}; cls.token = "ab".repeat(32);
+    var o = await clsSealOpts("/entries", { method: "POST", body: { kind: "note", title: "Plan", content: "the words",
+                                                                     classification: 2 } });
+    ok(o.body.title === "" && o.body.content === "" && /^lcs1\./.test(o.body.sealed) && o.body.classification === 2,
+       "a Secret create goes out as an envelope and empty columns");
+    eq(box.get(o.body.sealed).content, "the words", "the envelope holds the text");
+    var h = {};
+    clsHeaders(o, h);
+    eq(h["X-LCARS-Vault"], cls.token, "and carries the vault token");
+    h = {};
+    clsHeaders({ body: { done_bool: 1 } }, h);
+    ok(!h["X-LCARS-Vault"], "a plain write does not");
+
+    var row = { id: 77001, kind: "note", classification: 2, sealed: o.body.sealed, title: "", content: "",
+                value_int: 0, value_float: 0, done_bool: 0, deleted: 0, created_at_utc: "2026-10-20 10:00:00",
+                last_modified_at_utc: "2026-10-20 10:00:00", content_length: 9 };
+    cls.plain.delete(row.sealed);        // as a row read from the server is, before it is opened
+    eq(shownTitle(row).t, clsPlaceholder, "unopened, its row shows the placeholder");
+    st.byId.set(row.id, row);
+    await clsOpenRows([row]);
+    eq(row.title, "Plan", "opened, its title is back in memory");
+    eq(shownTitle(row).t, "Plan", "and shown");
+    var same = { method: "PUT", body: { done_bool: 1 } };
+    ok(await clsSealOpts("/entries/77001", same) === same, "done, the kind, the dates: sent as they are");
+    var t = await clsSealOpts("/entries/77001", { method: "PUT", body: { title: "Plan B" } });
+    ok(t.body.title === "" && box.get(t.body.sealed).title === "Plan B" && box.get(t.body.sealed).content === "the words",
+       "a new title is sealed with the text the page holds");
+    var low = await clsSealOpts("/entries/77001", { method: "PUT", body: { classification: 0 } });
+    ok(low.body.title === "Plan" && low.body.content === "the words" && low.body.sealed === "",
+       "declassifying puts the text back in its columns");
+
+    await clsLock();
+    ok(!clsOn() && row.title === "" && row.content === "" && cls.plain.size === 0, "a lock drops the key and the text");
+    threw = "";
+    try { await clsSealOpts("/entries/77001", { method: "PUT", body: { classification: 0 } }); } catch (e) { threw = e.message; }
+    ok(/unlock/.test(threw), "and declassifying then asks for the unlock");
+    st.byId.delete(row.id);
+
+    eq(vMatch(vWords("unlock classified"), 0).cmd.say, "unlock classified", "voice: unlock classified");
+    eq(vMatch(vWords("lock"), 0).cmd.say, "lock", "voice: lock");
+    eq(vMatch(vWords("mark this secret"), 0).cmd.say, "mark this secret", "voice: mark this secret");
+    eq(vMatch(vWords("declassify"), 0).cmd.say, "declassify", "voice: declassify");
+    ok(KEYS.some(function (k) { return k.key === "L" && /clsUnlockAsk/.test(String(k.fn)); }), "L is its key");
+
+    console.log("-- classified: the recovery code and the passkeys (phase 5) --");
+    var b16 = new Uint8Array(16);
+    for (var i = 0; i < 16; i++) b16[i] = (i * 37 + 11) & 255;
+    var code = clsCodeOf(b16);
+    ok(/^[0-9A-HJKMNP-TV-Z]{5}(-[0-9A-HJKMNP-TV-Z]{5}){3}-[0-9A-HJKMNP-TV-Z]{6}$/.test(code),
+       "a recovery code: 26 characters of Crockford's base32, in groups (" + code + ")");
+    eq(Array.from(clsCodeBytes(code)).join(","), Array.from(b16).join(","), "it reads back to its 16 bytes");
+    eq(Array.from(clsCodeBytes(code.toLowerCase().replace(/-/g, " ").replace(/0/g, "o").replace(/1/g, "l"))).join(","),
+       Array.from(b16).join(","), "typed in any case, spaced, with O for 0 and L for 1");
+    threw = "";
+    try { clsCodeBytes(code.slice(0, -1)); } catch (e) { threw = e.message; }
+    ok(/26/.test(threw), "a short one is refused (" + threw + ")");
+    threw = "";
+    try { clsCodeBytes(code.slice(0, -1) + "Z"); } catch (e) { threw = e.message; }
+    ok(/wrong/.test(threw), "a last character with its spare bits set is a typo (" + threw + ")");
+
+    // a stand-in vault on a stand-in server: each kek is what made it, each wrap names its kek
+    var srv = { vault: null, version: 0, puts: [] }, realApiNet = apiNet, prfOn = true, made = 0;
+    apiNet = async function (path, opts) {
+      if (path !== "/vault") return realApiNet(path, opts);
+      if (!opts || opts.method !== "PUT") return { vault: srv.vault && JSON.parse(JSON.stringify(srv.vault)), version: srv.version };
+      if (opts.body.version !== srv.version) { var e = new Error("stale"); e.http = 409; throw e; }
+      if (opts.body.vault.wraps.filter(function (w) { return w.type === "password"; }).length !== 1)
+        { var e2 = new Error("a vault keeps exactly one password wrap"); e2.http = 400; throw e2; }
+      srv.puts.push(JSON.parse(JSON.stringify(opts.body)));
+      srv.vault = JSON.parse(JSON.stringify(opts.body.vault));
+      srv.version++;
+      return { version: srv.version };
+    };
+    clsCrypto.kek = async function (pw) { return { k: "pw:" + pw }; };
+    clsCrypto.hkek = async function (secret, salt, info) { return { k: info + ":" + clsHex(secret) }; };
+    clsCrypto.fresh = async function () { return { mk: "MK" }; };
+    clsCrypto.wrap = async function (kek, mk) { return { iv: "aXY", wrapped: kek.k + "|" + mk.mk }; };
+    clsCrypto.unwrap = async function (kek, w) {
+      if (w.wrapped.split("|")[0] !== kek.k) throw new Error("tag");
+      return { key: { mk: w.wrapped.split("|")[1] }, token: "cd".repeat(32) };
+    };
+    clsCrypto.bytes = function (n) { var u = new Uint8Array(n); for (var j = 0; j < n; j++) u[j] = (j * 7 + made) & 255; return u; };
+    clsCrypto.pkOk = function () { return true; };
+    clsCrypto.salt = function () { return "c2FsdA"; };
+    clsCrypto.ok = function () { return true; };
+    var prfs = {};
+    clsCrypto.pkCreate = async function () {
+      made++;
+      var id = "Y3JlZA" + made;
+      prfs[id] = clsCrypto.bytes(32);
+      return { id: id, enabled: prfOn, prf: prfOn ? prfs[id] : null };
+    };
+    clsCrypto.pkGet = async function (list) { var id = list[list.length - 1].cred; return { id: id, prf: prfs[id] }; };
+    clsCrypto.pkForget = function () {};
+    cls.vault = undefined; cls.key = null; cls.token = "";
+
+    var rc = await clsSetup("correct horse 1", true);
+    ok(/^[0-9A-Z]{5}-/.test(rc) && rc.replace(/-/g, "").length === 26, "setup with the recovery code returns it, once");
+    eq(srv.vault.wraps.map(function (w) { return w.type; }).join(","), "password,recovery", "the vault: password and recovery wraps");
+    ok(JSON.stringify(srv.puts).indexOf(rc.replace(/-/g, "")) < 0, "and no PUT carries the code");
+    eq(srv.vault.wraps[1].kdf + " " + srv.vault.wraps[1].info, "HKDF-SHA256 lcars vault recovery v1", "the recovery wrap names its KDF");
+    var w1 = await clsPasskeyAdd("correct horse 1", "Phone");
+    eq(srv.vault.wraps.map(function (w) { return w.type; }).join(","), "password,recovery,passkey", "a passkey: one more wrap");
+    ok(w1.cred && w1.prf_salt && w1.salt && w1.name === "Phone" && /^\d{4}-\d\d-\d\d$/.test(w1.created),
+       "with its credential, its PRF salt, its HKDF salt, a name and a date");
+    var pkThrew = "";
+    try { await clsPasskeyAdd("not it at all", "Other"); } catch (e) { pkThrew = e.message; }
+    ok(/wrong password/.test(pkThrew) && srv.vault.wraps.length === 3, "a wrong password: refused, before any passkey is made");
+    prfOn = false;
+    pkThrew = "";
+    try { await clsPasskeyAdd("correct horse 1", "Old key"); } catch (e) { pkThrew = e.message; }
+    ok(/no PRF/.test(pkThrew) && srv.vault.wraps.length === 3, "an authenticator without PRF: told so, not registered (" + pkThrew + ")");
+    prfOn = true;
+    await clsLock();
+    await clsPasskeyUnlock();
+    ok(clsOn() && cls.key.mk === "MK", "the passkey unlocks: the same master key");
+    await clsLock();
+    await clsRecoveryUse(rc.toLowerCase(), "a new password 2");
+    ok(clsOn() && cls.key.mk === "MK", "the recovery code unlocks");
+    var pw2 = srv.vault.wraps.filter(function (w) { return w.type === "password"; });
+    ok(pw2.length === 1 && pw2[0].wrapped.indexOf("pw:a new password 2") === 0 && srv.vault.wraps.length === 3,
+       "and sets the new password, every other wrap kept");
+    threw = "";
+    try { await clsUnwrapPw("correct horse 1"); } catch (e) { threw = e.message; }
+    ok(/wrong/.test(threw), "the old password no longer opens it");
+    var rc2 = await clsRecoveryMake("a new password 2");
+    ok(rc2 !== rc && srv.vault.wraps.filter(function (w) { return w.type === "recovery"; }).length === 1,
+       "a new recovery code replaces the old one");
+    await clsChange("a new password 2", "a third password");
+    eq(srv.vault.wraps.map(function (w) { return w.type; }).sort().join(","), "passkey,password,recovery",
+       "changing the password keeps the passkey and the recovery wraps");
+    await clsPasskeyRemove(w1.cred);
+    eq(srv.vault.wraps.map(function (w) { return w.type; }).sort().join(","), "password,recovery", "a passkey removed: only it");
+    // the old one-wrap vault: unlocks as before
+    srv.vault = { v: 1, kid: "k1", wraps: [{ type: "password", kdf: "PBKDF2-SHA256", iter: 600000, salt: "c2FsdA",
+                                             iv: "aXY", wrapped: "pw:old faithful 9|MK" }] };
+    await clsLock();
+    await clsUnlock("old faithful 9");
+    ok(clsOn() && cls.key.mk === "MK", "a phase-1 vault (one password wrap) unlocks exactly as before");
+    threw = "";
+    try { await clsPasskeyUnlock(); } catch (e) { threw = e.message; }
+    ok(/no passkey/.test(threw), "and says it has no passkey when asked for one");
+    ok(/Recovery code/.test(clsCfgHtml()) && /none/.test(clsCfgHtml()) && /data-cls="recmake"/.test(clsCfgHtml()),
+       "Config offers a recovery code to a vault that has none");
+    ok(/gone/.test(clsCfgHtml()), "and says what a lost password means");
+    ok(/data-cls="pkadd"/.test(clsCfgHtml()), "and a passkey for this device");
+    await clsLock();
+
+    eq(vMatch(vWords("unlock with a passkey"), 0).cmd.say, "unlock with a passkey", "voice: unlock with a passkey");
+    eq(vMatch(vWords("register a passkey"), 0).cmd.say, "register a passkey", "voice: register a passkey");
+    eq(vMatch(vWords("use the recovery code"), 0).cmd.say, "use the recovery code", "voice: use the recovery code");
+    eq(vMatch(vWords("make a recovery code"), 0).cmd.say, "make a recovery code", "voice: make a recovery code");
+    eq(vMatch(vWords("recovery code"), 0).cmd.say, "use the recovery code", "voice: recovery code alone is the door");
+    var csp = window.LCARS_CSP;
+    ok(typeof csp === "string" && /^connect-src 'self' /.test(csp) && /wss:\/\/api\.deepgram\.com/.test(csp),
+       "the page's CSP: connect-src 'self' and the services it names");
+    apiNet = realApiNet;
+    cls.vault = undefined;
+    Object.assign(clsCrypto, realCrypto);
   })();
 
   console.log("\n-- the real database was never touched --");

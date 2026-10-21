@@ -117,6 +117,29 @@ class Inbox(unittest.TestCase):
         self.assertEqual(self.prompts(), ["one", "two"])
         self.assertEqual(self.inbox(), [])
 
+    def test_every_thread_s_notes_go_at_once_tagged(self):
+        # threads are tags (no1-threads.md section 13): nothing is held, a
+        # note for a thread other than main is typed under its tag line
+        with open(os.path.join(self.state, "number-one.json"), "w") as f:
+            json.dump({"name": "number-one", "session": "s2", "threads": [
+                {"id": "main", "name": "Main"}, {"id": "deck", "name": "Deck"}]}, f)
+        for title, text in (("crew#main", "for main"), ("ship", "anyone's"), ("crew#deck", "for deck"),
+                            ("crew#gone", "a closed one's")):
+            self.j.rows.append({"id": len(self.j.rows) + 1, "kind": "crew_inbox", "content": text,
+                                "title": f"number-one ← {title}: {text}", "done_bool": 0, "deleted": 0})
+        p = self.flush()
+        o, e = p.communicate(timeout=30)
+        self.assertEqual(p.returncode, 0, e)
+        self.assertEqual(json.loads(o), {"ok": True, "sent": 4, "left": 0})
+        self.assertEqual(self.prompts(), ["for main", "anyone's", "[thread deck]\nfor deck", "[thread gone]\na closed one's"])
+        self.assertEqual(self.inbox(), [])
+
+    def test_a_note_s_thread_is_on_its_title(self):
+        p = subprocess.run([sys.executable, ENG, "no1-send", "--thread", "deck", "[crew] x"], env=self.env,
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual([r["title"] for r in self.j.kind("crew_inbox")], ["number-one ← crew#deck: [crew] x"])
+
     def test_twins_both_delivered(self):
         # the same text queued twice in one second is two notes, not one
         self.queue("same", "same")

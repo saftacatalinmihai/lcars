@@ -21,6 +21,7 @@ from unittest import mock
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import testguard  # noqa: E402,F401 - no test reaches the live journal
 import engineer as E  # noqa: E402
 
 
@@ -79,7 +80,7 @@ class Ctx(unittest.TestCase):
         send Number One (None: nothing sent)."""
         sent = []
         stdin = io.StringIO(json.dumps({"transcript_path": self.path, "last_assistant_message": "Report: done."}))
-        with mock.patch.object(E, "notify_no1", lambda about, text: sent.append(text)), \
+        with mock.patch.object(E, "notify_no1", lambda about, text, **kw: sent.append(text)), \
                 mock.patch.object(E, "spawn"), mock.patch.object(E, "seated", lambda n: False), \
                 mock.patch.object(sys, "stdin", stdin), contextlib.redirect_stdout(io.StringIO()):
             with contextlib.suppress(SystemExit):

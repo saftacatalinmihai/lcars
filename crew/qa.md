@@ -5,6 +5,7 @@ kind: script
 script: qa
 min_free_mb: 1000
 timeout: 1200
+heavy: true
 ---
 No model. scripts/crew.py run_qa: the web suite (`PERF=0 KB=0 lcars-ui/test/run.sh`) on the committed tree of
 the live checkout, unpacked into a scratch directory, against a copy of the newest hourly backup. The keyboard

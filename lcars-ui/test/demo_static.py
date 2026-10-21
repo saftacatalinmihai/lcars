@@ -183,6 +183,23 @@ with sync_playwright() as p:
     q = page.evaluate("api('/embed', {method: 'POST', body: {text: 'x'}}).then(() => 'answered', e => e.http + ' ' + e.message)")
     check(q.startswith("503 Search by meaning needs"), f"search by meaning says it needs the server ({q[:60]!r})")
 
+    # ---- the Secret entry: sealed in the browser, opened by the printed password ----
+    sec = page.evaluate("(st.all.find(e => clsSecret(e)) || {}).id")
+    check(bool(sec), f"the fixture's Secret entry is in, as Secret ({sec})")
+    if sec:
+        check(page.evaluate(f"st.byId.get({sec}).title === '' && String(st.byId.get({sec}).sealed).startsWith('lcs1.')"),
+              "sealed by demo.js: its columns empty, an envelope instead")
+        check(page.evaluate("[...sv.vec.keys()].indexOf(%d) < 0" % sec), "and it has no vector")
+        page.evaluate("clsUnlockAsk()")
+        page.wait_for_selector("#clsPw", timeout=5000)
+        check("make it so" in page.text_content("#dlg"), "the unlock dialog prints the demo's password")
+        page.fill("#clsPw", page.evaluate("LCARS_DEMO.password"))
+        page.click("#clsGo")
+        page.wait_for_function(f"clsOn() && st.byId.get({sec}).title.length > 0", timeout=20000)
+        check("birthday" in page.evaluate(f"st.byId.get({sec}).title"), "and it opens the Secret entry")
+        page.evaluate("clsLock()")
+        page.wait_for_function("!clsOn()", timeout=5000)
+
     # ---- a reload keeps the edit, and the route ----
     page.reload()
     page.wait_for_function(ROWS, timeout=60000)

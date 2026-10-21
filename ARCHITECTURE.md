@@ -11,14 +11,14 @@ are in AGENTS.md, agent workflow in CLAUDE.md.
 | Program | Make target | What it is |
 |---|---|---|
 | Server | `lcars` (debug + ASan) / `lcars-release` (-O3) | `lcars.c`, one translation unit: `InitDB()` (schema and migration) then `RunHTTPServer()`, forever |
-| CLI client | `lcars-cli` | `lcars_cli.c`, a separate program: libcurl only, a client of the HTTP API. The example deployment ran a copied build of it (`~/lcars/lcars-cli/`) until 0.276.2; now the one binary's link |
+| CLI client | `lcars-cli` | `lcars_cli.c`, a separate program: libcurl only, a client of the HTTP API. The example deployment ran a copied build of it (`~/lcars/lcars-cli/`) until 0.276.2 (retired, and its fallback dropped, in 0.279.2); now the one binary's link |
 | One binary | `lcars-one` | The server with the CLI linked in (step 3 of docs/design/open-source-build.md): `lcars.c` with `-DLCARS_ONE_BINARY` and `lcars_cli.c` with `-Dmain=LcarsCliMain`, two objects (`build/one/`) and one link, the host's libraries, the UI from disk. `lcars-one cli ARGS` is `lcars-cli ARGS`, and so is the binary run by the name `lcars-cli` (argv[0], busybox-style). Serving, it makes `<data dir>/bin/lcars-cli`, a symlink to itself, and sets `LCARS_CLI_DIR` to that directory for the chat (unless it is set already; a real file there is left alone). Written to `./lcars-one`, never `./lcars` |
 | UI pack | `ui-pack` | `scripts/ui-pack.py` → `build/ui.pack` (step 4): the shipped UI (`git ls-files lcars-ui` minus `test/` and `report/`, from the working tree) in one blob, a text index (path, offset, size, a content hash) then the raw files, 64-byte aligned |
 | Embedded UI | `lcars-embed` | `lcars-one` with `-DLCARS_EMBED_UI` (objects in `build/embed/`): the assembler's `.incbin` puts `build/ui.pack` in `.rodata` (`LCARS_UI_PACK` names another), and `/ui/` is served from it when `LCARS_UI_DIR` is not set - the same gzip cache, Range, HEAD and 304 as from disk, Last-Modified the pack's time, an ETag of the content hash. The start log's `UI:` line says which source (every build has it). Written to `./lcars-embed`; the VPS's builds do not embed |
 | Release binary | `lcars-static` | `lcars-embed` linked `-static` with `-DLCARS_STATIC` (step 5), in Alpine against musl (CI: `.github/workflows/static.yml`; the VPS has neither docker nor musl), the libraries pkg-config's `--static` list; the packages are in the Makefile's comment. `LCARS_STATIC` adds the CA bundle probe (`lcars_curl_ca.h`: `SSL_CERT_FILE`, else the first of the Debian, Fedora/RHEL, SUSE and Alpine paths, as `CURLOPT_CAINFO` on every curl handle); every other build keeps its libcurl's own default. On musl `pipe2` and `addchdir_np` are used and `addclosefrom_np` is not (it has none): the server's sockets are close-on-exec instead (`SOCK_CLOEXEC`, `accept4`), in every build |
 
 CI: `c-cpp.yml` (on `main`) builds `lcars-release` and `lcars-cli` and asks
-a started server `/health`. `static.yml` (on pushes to deb, so after every
+a started server `/health`. `static.yml` (on pushes to main, so after every
 deploy, and on pull requests) is the only place `lcars-static` is built and
 proven: `scripts/release/build.sh` runs `make lcars-static` in
 `alpine:3.20` by `docker run` (GitHub's JavaScript actions do not run in an
@@ -378,10 +378,14 @@ reading it, and those undrained bytes would otherwise be parsed as the next
 request. It cannot be a flag each early exit sets for itself, because
 `CheckHTTPAuth` sends its own 401 before returning.
 
-Concurrency is capped at `HTTP_MAX_CONCURRENT_CONNECTIONS` (32); over that a
-connection is answered 503 and closed rather than queued, which is what makes
-the memory ceiling real — each thread costs `HTTP_THREAD_STACK_BYTES` of
-address space and up to 1.5MB of touched stack. `pthread_create` failing falls
+Concurrency is capped at `HTTP_MAX_CONCURRENT_CONNECTIONS` (64). With every
+slot taken, the longest-idle connection (a keep-alive between requests, a
+preconnect yet to speak) is shut down and its slot handed to the new one once
+its thread has let go (`HTTPSlotAcquire`); only when every slot is
+mid-request is a connection answered 503 (logged, rate limited) and closed
+rather than queued, which is what makes the memory ceiling real — each thread
+costs `HTTP_THREAD_STACK_BYTES` of address space and up to 1.5MB of touched
+stack. `pthread_create` failing falls
 back to serving that one connection inline.
 
 Shared state must be ready before the first `accept()` or live per thread:
@@ -909,7 +913,9 @@ which does everything; its comments hold the detail.
     the captain ticks off, perhaps with notes. `reap` also runs
     `no1_answers`, a read-only look at `lcars.db` for `task_no1`/
     `task_no1_*` rows done and not yet told, each typed to him as
-    `[captain] ticked off your question #<id>: …`, through his inbox. What
+    `[captain] ticked off your question #<id>: …`, through his inbox, the
+    console's `Answer (captain, …)` block whole (a line per question of an
+    ask in docs/design/questions.md's shape) and the rest clipped. What
     was told is `no1-answers.json` in the state directory; one reopened and
     ticked again is told again, and the first run counts everything done
     more than a day before as told.
@@ -1026,7 +1032,11 @@ which does everything; its comments hold the detail.
   `eta_continues`, and if at the turn's end their task label is still the
   record's, the turn's minutes and estimates go into it (`ends` lists the
   turns' ends, which the queue's deploys match). `engineer.py etas`
-  (`no1.py crew etas`) prints them all with the medians, for the next look.
+  (`no1.py crew etas`) prints them all with the medians, for the next look;
+  `scripts/eta-report.py -o F.html` draws them (0.284.5): one
+  self-contained page, each record's took-over-said by the day it ended
+  on a log scale, the crew's rolling median of 15, the medians' table -
+  for `report.py publish`.
 
 ### Embeddings (`lcars_embed.h`) and the star chart
 
@@ -2254,9 +2264,9 @@ this is `lcars-cli` work and not a server module.
    `LCARS_STRAVA_CLIENT_ID=…` and `LCARS_STRAVA_CLIENT_SECRET=…`.
 3. Rebuild the CLI the timer (and the linker) runs. Since 0.276.2 that is
    `~/lcars/bin/lcars-cli`, the one binary's link, which every deploy that
-   rebuilds C rebuilds: nothing to do. Before it (and while the copy is
-   kept as the fallback),
-   `~/lcars/lcars-cli/` is a gitignored directory of *copied* sources with
+   rebuilds C rebuilds: nothing to do. Before it (the copy retired in
+   0.279.2; this is history),
+   `~/lcars/lcars-cli/` was a gitignored directory of *copied* sources with
    vendored curl headers and its own `build.sh` (Debian there has no
    libcurl dev package; its README.md says why). So, on the VPS:
    ```sh
@@ -2800,8 +2810,9 @@ or none (a journal it did not mean to open: a new one is empty), or the
 new server will not say. Healthy is not enough: a
 binary that resolved the path otherwise would answer `/health` on an empty
 journal. Putting back a binary without the CLI in it (a rollback to one from
-before 0.276.2) also removes `bin/lcars-cli`, so the scripts fall back to the
-copied build rather than run a server that answers "no CLI in this build".
+before 0.276.2) also removes `bin/lcars-cli`, rather than leave a link that
+answers "no CLI in this build"; the scripts' fallback to the copied build
+went with the copy in 0.279.2, so they then find no CLI and say so.
 `scripts/test_vps_rebuild.py` covers it, with stand-ins for make, systemctl
 and curl.
 
@@ -2845,7 +2856,7 @@ two trees from drifting:
   audit of nothing passes anything. demo/static.py's audit takes its
   private rules (hosts, the VPS, the name) from the same file.
 - **Then in DEST:** `make check`, `lcars-ui/test/run.sh` (no `lcars.db`
-  there, so a synthetic journal; `PERF=0`, since perf compares with deb),
+  there, so a synthetic journal; `PERF=0`, since perf compares with main),
   every `scripts/test_*.py`; a failure commits nothing (`--no-tests` skips
   them). The suite's `test/esbuild` and `test/qjs` are ignored binaries no
   clone has, so the run borrows this checkout's by symlink and removes

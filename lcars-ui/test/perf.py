@@ -32,7 +32,7 @@ one-core box the same frames cost 20-30% more, docs/ops/engineer-time.md).
 Pass: in every scenario, the 99th-percentile frame's main-thread time is at
 most FRAME_BUDGET_MS. A frame over it is a frame a phone drops. A scenario
 over it is run three more times and judged by their median, and if that is
-over too, against the same scenario on the baseline page (deb's, by
+over too, against the same scenario on the baseline page (main's, by
 default), run in turn with it: over budget but no slower than the baseline passes,
 named as such, since the change under test did not do it (see "judging"
 below). A scenario over budget that the change cannot reach (test/changed.py)
@@ -759,7 +759,7 @@ def one(job):
 #   of their p99s: one unlucky run does not fail it (and the run that was
 #   over is not counted, being picked for coming out high);
 # - between those runs the same scenario runs REPEAT times on the baseline
-#   page (lcars-ui/ as committed at the merge-base with deb, where an
+#   page (lcars-ui/ as committed at the merge-base with main, where an
 #   engineer's work lands; --base or PERF_BASE to choose), so both see the
 #   same box. Over budget, and no slower than the baseline by more than
 #   SLOWER and SLOWER_MS, passes and is named as over on the baseline too:
@@ -793,12 +793,12 @@ def base_ref(ref):
     import subprocess
     root = HERE.parent.parent
     git = lambda *a: subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True)
-    for want in ([ref] if ref else ["deb", "origin/deb", "HEAD"]):
+    for want in ([ref] if ref else ["main", "origin/main", "HEAD"]):
         mb = git("merge-base", "HEAD", want)
         if mb.returncode == 0:
             break
     else:
-        return f"no baseline: {ref or 'deb'} is not a commit here", None
+        return f"no baseline: {ref or 'main'} is not a commit here", None
     sha = mb.stdout.strip()
     return (want if git("rev-parse", want).stdout.strip() == sha else f"{want} ({sha[:8]})"), sha
 
@@ -848,9 +848,9 @@ def reachable(ref):
     try:
         sys.path.insert(0, str(HERE))
         import changed
-        _, ch = changed.worktree_changes(ref or "deb")
+        _, ch = changed.worktree_changes(ref or "main")
         st, only, _, _ = changed.select(ch, (HERE.parent / "index.html").read_text(encoding="utf-8").split("\n"))
-    except Exception:  # noqa: BLE001 - no git, no deb: every scenario is reachable
+    except Exception:  # noqa: BLE001 - no git, no main: every scenario is reachable
         return None
     if not st["perf"]:
         return set()
@@ -918,7 +918,7 @@ def main():
                     help="print each scenario's heaviest functions (line = index.html's script)")
     ap.add_argument("--base", default=os.environ.get("PERF_BASE", ""),
                     help="the commit a scenario over budget is compared with (default: the merge-base "
-                         "with deb); 'none' judges by the budget alone")
+                         "with main); 'none' judges by the budget alone")
     ap.add_argument("--compare", action="store_true",
                     help="judge every scenario as if it were over budget: repeats and the baseline "
                          "(to see the comparison itself, or the noise of a page against itself)")

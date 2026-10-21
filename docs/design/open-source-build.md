@@ -18,7 +18,7 @@ Surveyed on 0.259.0, on the VPS.
 |---|---|---|---|
 | `lcars` (server) | `make lcars` (debug, ASan), `make lcars-release` (-O3), `make lcars-portable` (lcars-release inside `debian:12-slim`, for an older glibc) | `-lcurl -lsqlite3 -lz -lm -lpthread`, all dynamic. On the VPS sqlite is `/usr/local/lib/libsqlite3.so` 3.46.1, built from source on the box; libcurl pulls in ~35 more shared libs (OpenSSL *and* GnuTLS, nghttp2/3, krb5, ldap, ssh2, rtmp, idn2, psl, brotli, zstd) | `lcars-ui/` from disk per request; `/usr/share/zoneinfo/<TZID>` (CalDAV); `claude`, `ffmpeg`, `/usr/bin/python3 scripts/engineer.py` spawned (§1c) |
 | `lcars-cli` | `make lcars-cli` | `-lcurl -lm` (no sqlite: it is an HTTP client) | nothing; `$EDITOR`, `LCARS_URL` |
-| `lcars-cli` **on the VPS** | `~/lcars/lcars-cli/build.sh` — a gitignored directory of *copied* sources with vendored curl headers (ARCHITECTURE.md ~2065), linking `libcurl.so.4` by path; not touched by deploys | same | the hourly linker, Strava timer and the chat's skill run *this* one |
+| `lcars-cli` **on the VPS** | until 0.276.2 `~/lcars/lcars-cli/build.sh` — a gitignored directory of *copied* sources with vendored curl headers, linking `libcurl.so.4` by path; since then `~/lcars/bin/lcars-cli`, the one binary's link (the copy retired in 0.279.2, §5c step 4) | same | the hourly linker, Strava timer and the chat's skill run *this* one |
 
 Two things the order expected that are not there:
 
@@ -240,7 +240,7 @@ itself**: `vps-rebuild.sh` builds `make lcars-one` (the UI still from
 and sets `LCARS_CLI_DIR` to `~/lcars/bin` for the chat. No PATH entry, no
 `~/.local/bin` link, no unit `Environment=` line and no `LCARS_CLI_DIR` in
 `~/.env` (which would stop the link being made). Every script looks for
-`~/lcars/bin/lcars-cli` first and the copied build second, so the order is:
+`~/lcars/bin/lcars-cli` first and the copied build second (until step 4), so the order is:
 
 1. The deploy of 0.276.2 (it touches C, so it runs the new
    `vps-rebuild.sh`): the one binary is `./lcars`, the old `lcars-release`
@@ -260,11 +260,16 @@ and sets `LCARS_CLI_DIR` to `~/lcars/bin` for the chat. No PATH entry, no
    too, and a rollback cannot need the copy): `rm -r ~/lcars/lcars-cli`
    (`build.sh`, the copied sources, the vendored curl headers, `lcars-cli`,
    `lcars-cli.prev`), and a patch drops the scripts' fallback to it.
+   Done in 0.279.2: `lcars_linker.py`, `lcars-link.sh`,
+   `lcars-strava.service`, `db-slots.sh`, `crew_tool.py` and `no1.py` look
+   only at `~/lcars/bin/lcars-cli` (and `$LCARS_CLI`; `crew_tool.py` and
+   `no1.py` also a checkout's own `make lcars-cli`, then PATH).
 
 A rollback to a binary without the CLI (`vps-rebuild.sh --rollback`, or
 its own rollback after a failed restart) removes `bin/lcars-cli`, which
-would otherwise answer every timer "no CLI in this build", and the scripts
-fall back to the copy while it exists.
+would otherwise answer every timer "no CLI in this build". With the copy
+retired, the scripts then have no CLI until a one binary is back; since
+`lcars.prev` became a one binary, no rollback leads there.
 O'Brien's `/features` (his §2a) is a separate order and fits after 2.
 
 ## 6. What the captain decides
@@ -274,5 +279,5 @@ O'Brien's `/features` (his §2a) is a separate order and fits after 2.
 | musl static (one file, ~15 MB) or a glibc build with a dependency list | musl static |
 | arm64 in the first release | yes; it costs a matrix line |
 | Step 1 and step 7 deploys | his word, each; the captain adds `LCARS_MEDIA_ROOT=<the mount>` to `~/.env` before 7 |
-| The VPS running the one binary (retiring `~/lcars/lcars-cli/build.sh`) | after 3, when convenient; not needed for the release |
+| The VPS running the one binary (retiring `~/lcars/lcars-cli/build.sh`) | done: switched in 0.276.2, the copy retired in 0.279.2 |
 | A tag on this repo as the release dry run | yes, before the public repo exists |

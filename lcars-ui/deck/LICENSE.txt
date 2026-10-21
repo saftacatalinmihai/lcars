@@ -5,7 +5,15 @@ scripts/deck-models/build.sh rebuilds them (docs/design/deck-pipeline.md).
 Built in Blender by scripts/deck-models/arboretum.py, part of this repository.
 
 == bridge.glb, bridge_{base,norm,orm}.webp
+Generated with Higgsfield (Tripo H3.1 multiview) on the captain's plan, 2026-10-20, the output the captain's under Higgsfield's terms.
+These converted by common.import_pack; the rest:
 Built in Blender by scripts/deck-models/bridge.py, part of this repository.
+
+== bridge_skylight.webp
+The bridge's skylight, seen from below. Generated with Higgsfield (Seedream 5.0 Flash) on the captain's plan, 2026-10-20, the output the captain's under Higgsfield's terms; scaled to 1024² (docs/design/bridge-redesign.md, slice 6).
+
+== bridge_{carpet,wall}_{base,norm,rough}.webp
+The bridge's carpet and wall tiles. Generated with Higgsfield (Seedream 5.0 Flash) on the captain's plan, 2026-10-21, the output the captain's under Higgsfield's terms; made seamless, matched to the palette and their normal and roughness maps derived by scripts/deck-models/tiles.py (docs/design/bridge-redesign.md, 8h).
 
 == concourse.glb, concourse_{base,norm,orm}.webp
 Built in Blender by scripts/deck-models/concourse.py, part of this repository.

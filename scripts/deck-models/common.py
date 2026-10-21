@@ -533,7 +533,7 @@ def import_pack(src, room, each=1500, budgets=None):
     decimated props and {low: original}, `finish_room`'s `sources`: the bake
     is from the original onto the low copy, so the detail the decimation
     took is carried in the normal map, and the pack's own textures end in
-    the room's one atlas."""
+    the room's one atlas. The joined mesh is welded first (below)."""
     import glob
     files = sorted(f for f in glob.glob(os.path.join(src, "**", "*"), recursive=True)
                    if f.lower().endswith((".glb", ".gltf", ".obj")))
@@ -561,6 +561,24 @@ def import_pack(src, room, each=1500, budgets=None):
             if o.type != "MESH":
                 bpy.data.objects.remove(o)
         hi = join(prop + "__src", meshes)
+        # Welded before anything else: a glTF importer splits every vertex
+        # on a UV seam into one per side, so an image-to-3D mesh that is
+        # closed (Tripo's captain's chair, watertight to trimesh) comes in
+        # as islands, thousands of seam edges with one face each. Decimated
+        # so, each side of a seam collapsed on its own and the chair opened
+        # black cracks and crossing slivers along its seams; and
+        # normals_make_consistent, which needs one closed surface to know
+        # which side is out, turned a fifth of its faces inside out
+        # (bridge-redesign.md 8c, 8e, 8f). Merging coincident vertices
+        # (1e-5 m: only the seam's twins, never two real vertices) keeps the
+        # UVs - they are per corner - and gives both steps one surface. The
+        # source is welded too: the bake's rays then leave a surface with
+        # no cracks for them to escape through.
+        bm = bmesh.new()
+        bm.from_mesh(hi.data)
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+        bm.to_mesh(hi.data)
+        bm.free()
         floor_origin(hi)
         lo = hi.copy()
         lo.data = hi.data.copy()
@@ -576,7 +594,8 @@ def import_pack(src, room, each=1500, budgets=None):
             modifier(lo, "DECIMATE", ratio=want / tris(lo), use_collapse_triangulate=True)
             apply_all(lo)
         # a collapse leaves faces turned inside out, and a flipped face bakes
-        # its AO and normal from inside the prop (dark streaks on the vase)
+        # its AO and normal from inside the prop (dark streaks on the vase):
+        # made consistent, now the weld above has made it one surface
         activate(lo)
         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.mesh.select_all(action="SELECT")

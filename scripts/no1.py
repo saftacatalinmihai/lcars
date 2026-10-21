@@ -27,6 +27,9 @@
                                                 report.py list gives it): the same link, and one
                                                 no1_log line "Report updated: <title>"
     no1.py escalate "<question>" ["<context>"]  a reminder in the captain's No1 list (kind task_no1)
+                                                several in one: context, then "Q1: …" lines, each with
+                                                "Options: A) … B) …" and "Recommendation: A" (none: yes/no);
+                                                the console answers each (docs/design/questions.md)
     no1.py asks                                 the open ones
     no1.py answered <id>                        close one (the captain ticking one off is
                                                 typed to you as "[captain] ...", by reap)
@@ -34,6 +37,10 @@
     no1.py ask "<question>" [--session <id>] [--model <m>]
                                                 the ship's computer (POST /chat); prints its answer
                                                 and the session id to continue it with
+    no1.py thread list                          your threads' labels (docs/design/no1-threads.md, 13)
+    no1.py thread new <id> "<name>"             a new label (a closed one of that id is reopened)
+    no1.py thread rename <id> "<name>"
+    no1.py thread close <id>                    not main
     no1.py sync                                 your worktree (eng/number-one) fast-forwarded to the
                                                 live branch, so the files you read are what is live;
                                                 refused if it has changes or commits of its own.
@@ -75,6 +82,7 @@ ASK_KIND = "task_no1"
 CREW_VERBS = {"list", "poll", "say", "key", "clear", "start", "diff", "deploy", "deploy-status", "rollback",
               "stop", "dismiss", "recall", "queue", "etas"}
 QUEUE_OPS = {"move", "remove", "restore"}
+THREAD_OPS = {"list", "new", "rename", "close"}
 
 
 def die(msg, code=2):
@@ -95,6 +103,9 @@ def crew(a):
     if not a or a[0] not in CREW_VERBS:
         die("crew " + "|".join(sorted(CREW_VERBS)))
     verb, rest = a[0], a[1:]
+    if verb in ("deploy", "rollback"):
+        # its outcome reports to the turn's thread (by_thread)
+        os.environ["LCARS_THREAD_BY"] = "no1"
     if verb in ("list", "deploy-status", "rollback", "etas"):
         return engineer(verb)
     if verb == "queue":
@@ -148,6 +159,21 @@ def crew(a):
     return engineer(verb, name)
 
 
+def thread(a):
+    """engineer.py thread number-one <op> ...: the rules are held there.
+    Labels only: nothing is typed, nothing switched."""
+    if not a or a[0] not in THREAD_OPS:
+        die('thread list | new <id> ["<name>"] | rename <id> "<name>" | close <id>')
+    op, rest = a[0], a[1:]
+    if op == "new" and not 1 <= len(rest) <= 2:
+        die('thread new <id> ["<name>"] (a label: to speak in it, a "[thread <id>]" line in your reply)')
+    elif op == "close" and len(rest) != 1:
+        die("thread close <id>")
+    elif op == "rename" and len(rest) < 2:
+        die('thread rename <id> "<name>"')
+    return engineer("thread", E.NO1, op, *rest)
+
+
 # ---- the journal, as Number One ---------------------------------------------
 
 def http(method, path, body=None, timeout=60):
@@ -164,12 +190,12 @@ def answer(status, text):
 
 def cli_path():
     """The lcars-cli binary: <live>/bin/lcars-cli, the one binary's link the
-    server makes at start, first. Before it, <live>/lcars-cli is a directory with
-    the binary inside it (lcars_chat.h's LCARS_CLI_DIR, crew_tool.py), and
-    os.access(dir, X_OK) is true of a directory, so the old lookup handed
-    exec a directory: PermissionError. Only a regular executable file counts."""
+    server makes at start, first; then a checkout's own `make lcars-cli`.
+    <live>/lcars-cli was once a directory with a copied build inside it
+    (retired in 0.279.2, never looked in now), and os.access(dir, X_OK) is
+    true of a directory, so the old lookup handed exec a directory:
+    PermissionError. Only a regular executable file counts."""
     for p in (os.environ.get("LCARS_CLI") or "", os.path.join(E.LIVE, "bin", "lcars-cli"),
-              os.path.join(E.LIVE, "lcars-cli", "lcars-cli"),
               os.path.join(E.LIVE, "lcars-cli"), shutil.which("lcars-cli") or ""):
         if p and os.path.isfile(p) and os.access(p, os.X_OK):
             return p
@@ -282,6 +308,8 @@ def main(a):
             die('escalate "<question>" ["<context>"]')
         code, j = answer(*http("POST", "/entries", {"kind": ASK_KIND, "title": rest[0][:200],
                                                      "content": " ".join(rest[1:]).strip()}))
+        if code == 0 and isinstance(j, dict) and j.get("id"):
+            E.thread_ask(j["id"])  # its answer goes to the thread asking
     elif cmd == "asks":
         code, j = answer(*http("GET", f"/entries?kind={ASK_KIND}&done=0&limit=50"))
     elif cmd == "answered":
@@ -294,6 +322,8 @@ def main(a):
         code, j = journal(rest)
     elif cmd == "ask":
         code, j = chat(rest)
+    elif cmd == "thread":
+        code, j = thread(rest)
     elif cmd == "sync":
         try:
             code, j = 0, E.sync_no1()

@@ -280,7 +280,8 @@ def build(out):
         at = next(r for r in rows if r["id"] == eid)["created_at_utc"]
         media.append({"id": mid, "entry_id": eid, "path": rel, "mime": "image/png", "bytes": len(data),
                       "name": fname, "created_at_utc": at})
-    live = [r for r in rows if not r["deleted"]]
+    # a Secret row has no vector: the demo's sealed one (fixture.py) neither
+    live = [r for r in rows if not r["deleted"] and not r.get("seal")]
     mark = max(r["last_modified_at_utc"] for r in rows)
     journal = {"built": built, "rows": rows, "media": media,
                "embeddings": {"model": "demo-bag-of-words", "dim": DIM, "mark": mark,

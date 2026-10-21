@@ -32,6 +32,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+import testguard  # noqa: E402,F401 - no test reaches the live journal
 import engineer as E  # noqa: E402
 import no1  # noqa: E402
 
@@ -82,11 +83,20 @@ class Journal(unittest.TestCase):
         with open(self.out) as f:
             return f.read().splitlines()
 
-    def test_binary_inside_the_directory(self):
-        cli = self.stub(os.path.join(self.live, "lcars-cli", "lcars-cli"))
+    def test_bin_link(self):
+        os.makedirs(os.path.join(self.live, "bin"))
+        cli = self.stub(os.path.join(self.live, "bin", "lcars-cli"))
         code, err = self.run_journal("kinds")
         self.assertEqual((code, err), (0, None))
         self.assertEqual(self.ran(), [cli, "http://127.0.0.1:9", "no1", "pw", "kinds"])
+
+    def test_retired_copy_not_used(self):
+        # The copied build inside <live>/lcars-cli/ retired in 0.279.2: one
+        # left behind is not run.
+        self.stub(os.path.join(self.live, "lcars-cli", "lcars-cli"))
+        code, err = self.run_journal("kinds")
+        self.assertEqual(code, 1)
+        self.assertIn("not built", err["error"])
 
     def test_directory_alone_is_not_built(self):
         code, err = self.run_journal("kinds")
@@ -130,7 +140,7 @@ class Refresh(unittest.TestCase):
                    mock.patch.object(E, "agent_info", return_value={"agent_status": "idle"}),
                    mock.patch.object(E, "herdr", return_value=({}, "")),
                    mock.patch.object(E, "submit_if_left"),
-                   mock.patch.object(E, "no1_send", side_effect=self.sent.append),
+                   mock.patch.object(E, "no1_send", side_effect=lambda text, **kw: self.sent.append(text)),
                    mock.patch.object(E, "clear_session",
                                      side_effect=lambda n, label: (self.cleared.append(label) or
                                                                    (0, {"ok": True, "cleared": True}))),
@@ -217,8 +227,9 @@ class Refresh(unittest.TestCase):
                 mock.patch.object(E, "reap_test_tmp", return_value=([], 0)), \
                 mock.patch.object(E, "reap_test_servers", return_value=[]), \
                 mock.patch.object(E, "no1_answers", return_value=[]), \
+                mock.patch.object(testguard.seat, "_http", return_value=[]), \
                 mock.patch.object(E, "seat_on", return_value=False):
-            got = self.call(E.cmd_reap)
+            got = self.call(E.cmd_reap)  # an empty inbox stood in (testguard)
         self.assertEqual(got["relaunched"], [E.NO1])  # ada is mid-turn: left alone
         self.assertEqual(got["kept"], ["ada"])
         E.herdr.assert_called_once_with("tab", "close", "tab-" + E.NO1, timeout=15)
@@ -231,6 +242,40 @@ class Refresh(unittest.TestCase):
         self.log("Handover")
         self.assertNotIn("noted", E.load(E.NO1)["refresh"])
         self.assertTrue(self.call(E.cmd_refresh, E.NO1)["pending"])  # a new one may start
+
+
+class Threads(unittest.TestCase):
+    """no1.py thread: each verb handed to engineer.py's `thread number-one`
+    (which holds the rules: test_no1_threads.py), and the shapes refused
+    before it is asked: no switch, no seed."""
+
+    def run_no1(self, *a):
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            try:
+                no1.main(list(a))
+            except SystemExit as e:
+                return e.code, json.loads(buf.getvalue())
+        return 0, json.loads(buf.getvalue())
+
+    def test_verbs_go_to_engineer_py(self):
+        calls = []
+        with mock.patch.object(no1, "engineer", side_effect=lambda *a, inp="": calls.append((a, inp)) or (0, {})):
+            self.run_no1("thread", "list")
+            self.run_no1("thread", "new", "deck", "Deck redesign")
+            self.run_no1("thread", "rename", "deck", "The bridge")
+            self.run_no1("thread", "close", "deck")
+        self.assertEqual(calls, [
+            (("thread", E.NO1, "list"), ""),
+            (("thread", E.NO1, "new", "deck", "Deck redesign"), ""),
+            (("thread", E.NO1, "rename", "deck", "The bridge"), ""),
+            (("thread", E.NO1, "close", "deck"), "")])
+
+    def test_refusals(self):
+        with mock.patch.object(no1, "engineer") as eng:
+            for a in (["thread"], ["thread", "fork", "x"], ["thread", "switch", "main"], ["thread", "rename", "deck"],
+                      ["thread", "new"], ["thread", "new", "deck", "Deck", "a seed"], ["thread", "close"]):
+                self.assertEqual(self.run_no1(*a)[0], 2, a)
+        eng.assert_not_called()
 
 
 class Bare(unittest.TestCase):
@@ -428,6 +473,44 @@ class Sync(unittest.TestCase):
         new, msg = self.land()  # no exception: the deploy stands
         self.assertEqual(sh("git", "rev-parse", "HEAD", cwd=self.live), new)
         self.assertIn(" - Number One's worktree not synced: eng/number-one has 1 commit(s)", msg)
+
+
+class Answers(unittest.TestCase):
+    """The tick-off typed to Number One (no1_answers): the console's Answer
+    block whole, a line per question, whatever its length."""
+
+    ASK = "Shared context.\n\nQ1: Ship it?\nOptions: A) now B) later\nQ2: Keep the view?\n" + "more context\n" * 200
+
+    def test_the_answer_block_goes_whole_and_the_context_is_clipped(self):
+        block = "Answer (captain, 2026-10-20 09:00):\nQ1: A (now); note: " + "x" * 1500 + "\nQ2: yes"
+        n = E.answer_notes(block + "\n\n" + self.ASK)
+        self.assertTrue(n.startswith(block), "every question's answer, past 1200 characters")
+        self.assertIn("Shared context.", n)
+        self.assertLess(len(n), len(block) + 700, "the ask under it clipped")
+
+    def test_a_plain_tick_is_clipped_as_before(self):
+        self.assertEqual(E.answer_notes("y" * 2000), "y" * 1200 + " …")
+        self.assertEqual(E.answer_notes("Answer (captain, t): fine"), "Answer (captain, t): fine")
+
+    def test_the_console_s_send_is_typed_with_its_answers(self):
+        import sqlite3
+        d = tempfile.mkdtemp(prefix="lcars-test-no1-")
+        self.addCleanup(shutil.rmtree, d, True)
+        con = sqlite3.connect(os.path.join(d, "lcars.db"))
+        con.execute("CREATE TABLE entries (id INTEGER PRIMARY KEY, kind TEXT, title TEXT, content TEXT,"
+                    " last_modified_at_utc TEXT, deleted INTEGER DEFAULT 0, done_bool INTEGER DEFAULT 0)")
+        con.execute("INSERT INTO entries VALUES (7, 'task_no1', 'Pins and the view', ?, '2099-01-01 00:00:00', 0, 1)",
+                    ("Answer (captain, 2026-10-20 09:00):\nQ1: A (now); note: " + "x" * 1300 + "\nQ2: yes\n\n" + self.ASK,))
+        con.commit()
+        con.close()
+        told = []
+        with mock.patch.object(E, "LIVE", d), mock.patch.object(E, "NO1_ANSWERS", os.path.join(d, "a.json")), \
+                mock.patch.object(E, "load", return_value={}), \
+                mock.patch.object(E, "no1_send", side_effect=lambda t, **kw: told.append(t) or True):
+            self.assertEqual(E.no1_answers(), [7])
+        self.assertEqual(len(told), 1)
+        self.assertIn("ticked off your question #7: Pins and the view", told[0])
+        self.assertIn("\nQ2: yes", told[0], "the last question's answer survives the clip")
 
 
 if __name__ == "__main__":

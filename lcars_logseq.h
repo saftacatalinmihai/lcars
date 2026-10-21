@@ -1288,6 +1288,12 @@ static inline bool LogseqExportDay(Arena *arena, const CliOptions *cli,
          strcmp(row->kind, exp->page_kind) == 0)) {
       continue;
     }
+    // A Secret entry has no text to export, and its line - the time and
+    // the kind - is more than it should leave behind in a graph of plain
+    // files (docs/design/confidential-entries.md)
+    if (row->classification != 0) {
+      continue;
+    }
     stats->considered++;
 
     int row_day = 0, hhmm = 0;

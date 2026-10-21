@@ -14,7 +14,7 @@ crew's models loaded.
 
 Headless Chromium draws WebGL in software (SwiftShader), so the milliseconds
 are the CPU's and a software GPU's, not a phone's: compare a run with one
-made the same way on deb (`--page` another checkout's lcars-ui), never with
+made the same way on main (`--page` another checkout's lcars-ui), never with
 a phone's own. Draw calls and triangles carry over as they are.
 
 Usage:  python3 test/deckshots.py [OUT_DIR] [--page DIR] [--gfx low|medium|high]

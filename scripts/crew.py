@@ -33,6 +33,7 @@ A role is a file in crew/ (crew/ops.md, ...): front matter, then the prompt.
     note_timeout: 300                a note turn's seconds
     writes: append #2291             the one write a run may make (scheduled_apply)
     writer: Science officer          who an appended block says added it (default: the title's)
+    heavy: true                      the run takes the cores: it waits for an engineer's job (qa)
     ---
 
 `brief: own` is for the two jobs folded in from ~/.claude in 0.143.0: the
@@ -114,7 +115,7 @@ ROLE_RE = re.compile(r"[a-z][a-z0-9-]{0,30}")
 DEFAULTS = {"model": "sonnet", "kind": "agent", "verbs": "today", "web": "", "read": "", "budget": "0.50",
             "timeout": "900", "min_free_mb": "1000", "lock_wait": "1800", "mem_wait": "600", "effort": "",
             "pre": "", "brief": "crew", "tools": "", "allow": "", "order": "", "notes": "",
-            "note_budget": "0.30", "note_timeout": "300", "writes": "", "writer": ""}
+            "note_budget": "0.30", "note_timeout": "300", "writes": "", "writer": "", "heavy": ""}
 HOME = os.path.expanduser("~")
 # Read verbs crew_tool.py has; a role's `verbs` must come from these
 READ_VERBS = {"today", "list", "get", "stats", "kinds", "agenda", "onthisday", "month", "weekstats",
@@ -841,7 +842,8 @@ def run(name, dry=False, no_post=False):
             die(f"{name}: {why}", 75)
         if fm["kind"] == "script":
             t0 = time.monotonic()
-            title, body, urgent, *extra = SCRIPTS[fm["script"]](fm, False)
+            with cores_for(fm, name):
+                title, body, urgent, *extra = SCRIPTS[fm["script"]](fm, False)
             extra = extra[0] if extra else {}
             meta = {"secs": time.monotonic() - t0}
             if not extra.get("raw"):
@@ -854,8 +856,9 @@ def run(name, dry=False, no_post=False):
             if not ok:
                 log_run(dict(rec, status="skipped", why=why))
                 die(f"{name}: {why}", 75)
-            pre = SCRIPTS[fm["pre"]](fm, False) if fm["pre"] else None
-            title, body, urgent, meta = agent_run(fm, prompt, day)
+            with cores_for(fm, name):
+                pre = SCRIPTS[fm["pre"]](fm, False) if fm["pre"] else None
+                title, body, urgent, meta = agent_run(fm, prompt, day)
         return finish(fm, rec, *with_pre(pre, title, body, urgent), meta, no_post)
     finally:
         lock.close()
@@ -874,6 +877,18 @@ def seat(role, wait):
         return
     with E.seat_hold("crew:" + role, wait) as got:
         yield got
+
+
+def cores_for(fm, role):
+    """A heavy role's run (`heavy: true`, the qa suite) on the cores one job
+    at a time, as an engineer's job (engineer.py `cores`, the job queue):
+    it waits for one running, and a job waits for it. Not a job itself - its
+    place is the crew lock's and the seat's line - and not with the seat off."""
+    import engineer as E
+    if fm.get("heavy", "").strip().lower() not in ("1", "true", "yes") or not E.seat_on():
+        return contextlib.nullcontext()
+    return E.cores(lambda who: print(f"{role}: waiting for the cores ({who})", file=sys.stderr, flush=True),
+                   "crew:" + role)
 
 
 def agent_run(fm, prompt, day):

@@ -25,11 +25,9 @@ set -a; . "${LCARS_LINK_ENV:-$HOME/.env}"; set +a
 export LCARS_URL="${LCARS_LINK_URL:-http://127.0.0.1:8080}"
 
 ENGINE="$(dirname "$(readlink -f "$0")")/lcars_linker.py"
-# The one binary's link the server makes at start, else the copied build it
-# replaced (kept while a rollback to a binary without the CLI is possible).
-CLI=$HOME/lcars/bin/lcars-cli
-[ -x "$CLI" ] || CLI=$HOME/lcars/lcars-cli/lcars-cli
-CLI="${LCARS_CLI:-$CLI}"
+# The one binary's link the server makes at start (the copied build it
+# replaced retired in 0.279.2).
+CLI="${LCARS_CLI:-$HOME/lcars/bin/lcars-cli}"
 SCRATCH="$HOME/.lcars-linker"
 mkdir -p "$SCRATCH"
 

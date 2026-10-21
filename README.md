@@ -1,5 +1,7 @@
 # LCARS
 
+![The 3D deck's main bridge, from the aft rail](docs/bridge.webp)
+
 [![C/C++ CI](https://github.com/saftacatalinmihai/lcars/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/saftacatalinmihai/lcars/actions/workflows/c-cpp.yml)
 
 A Star Trek console for your journal: one SQLite file, a small HTTP server
@@ -8,6 +10,11 @@ their own.
 
 **Try it in the browser, nothing installed:** [the demo](https://public.mihai-safta.dev/lcars-demo/index.html)
 (it runs on made-up entries in your browser, and saves nothing to a server).
+
+Built by a crew of Claude Code engineers run by an AI first officer: the
+rules they work to are [CLAUDE.md](CLAUDE.md), their roles [crew/](crew/),
+their seat and deploys [scripts/engineer.py](scripts/engineer.py). How it was made:
+[the blog post](https://blog.mihaisafta.com/posts/lcars_journal/).
 
 ## Run it
 

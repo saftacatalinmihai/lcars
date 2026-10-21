@@ -718,6 +718,18 @@ function btoa(s) {
   return out;
 }
 
+function atob(s) {
+  var C = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", out = "", n = 0, bits = 0;
+  s = String(s).replace(/=+$/, "");
+  for (var i = 0; i < s.length; i++) {
+    var v = C.indexOf(s[i]);
+    if (v < 0) throw new Error("atob: not base64");
+    n = (n << 6) | v; bits += 6;
+    if (bits >= 8) { bits -= 8; out += String.fromCharCode((n >> bits) & 255); }
+  }
+  return out;
+}
+
 /* ---------- missing standard bits ---------- */
 function TextEncoder() {}
 TextEncoder.prototype.encode = function (s) {

@@ -57,6 +57,14 @@ The copy's entry_media rows of the window are listed as a finding: their
 files are in the NAS's media store whichever journal was live, but a NEW
 row's attachment is not re-attached by this.
 
+Secret entries (docs/design/confidential-entries.md) are copied as they
+are: `classification` and `sealed`, the envelope, verbatim - the script
+never sees their text, and needs none. The server takes a write of either
+only with the vault's token (X-LCARS-Vault), which this sends from
+LCARS_VAULT_TOKEN in the environment (Config's Classified section copies
+it while unlocked); without it such a write fails with the server's 403,
+in the plan's result, and nothing of the row is written.
+
 What the API cannot carry, said rather than hidden: a NULL value_int or
 value_float is written as 0 (POST binds 0; the two compare equal here);
 value_float goes through the server's float (single precision); a title is
@@ -90,7 +98,10 @@ SKIP_KINDS = {"crew_inbox": "the seat's delivery slips, stale",
 # Compared, and written on a MOVED row; created_at_utc only on a NEW one
 # (it is the match key, so a MOVED row's is equal by construction or a
 # person changed it, which is a CONFLICT's business).
-FIELDS = ("title", "content", "value_int", "value_float", "done_bool", "deleted", "start_date", "end_date")
+FIELDS = ("title", "content", "value_int", "value_float", "done_bool", "deleted", "start_date", "end_date",
+          "classification", "sealed")
+# the two a write of carries the vault's token for (the server's guard)
+CLASSIFIED = ("classification", "sealed")
 CLASSES = ("NEW", "MOVED", "CONFLICT", "MISSING", "SKIPPED", "PRESENT", "SAME")
 WRITES = ("NEW", "MOVED")
 
@@ -154,7 +165,7 @@ def norm(field, v):
     """A field as the two sides are compared: NULL text as "", NULL numbers
     as 0 (what POST stores for one not given), the float rounded past what
     single precision keeps."""
-    if field in ("value_int", "done_bool", "deleted"):
+    if field in ("value_int", "done_bool", "deleted", "classification"):
         return int(v or 0)
     if field == "value_float":
         return float("%.6g" % float(v or 0))
@@ -172,9 +183,14 @@ def copy_rows(path, since, until):
         die(f"{path}: not a file", 75)
     db = sqlite3.connect(f"file:{urllib.parse.quote(os.path.abspath(path))}?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
+    # a copy made before classified entries has neither column: 0 and ''
+    cols = {r[1] for r in db.execute("PRAGMA table_info(entries)")}
+    classified = ("ifnull(classification, 0) AS classification" if "classification" in cols
+                  else "0 AS classification") + ", " + \
+                 ("ifnull(sealed, '') AS sealed" if "sealed" in cols else "'' AS sealed")
     rows = [dict(r) for r in db.execute(
         "SELECT id, kind, title, content, value_int, value_float, done_bool, deleted, created_at_utc,"
-        " last_modified_at_utc, start_date, end_date FROM entries"
+        " last_modified_at_utc, start_date, end_date, " + classified + " FROM entries"
         " WHERE (created_at_utc >= ? AND created_at_utc <= ?)"
         " OR (last_modified_at_utc >= ? AND last_modified_at_utc <= ?) ORDER BY id",
         (since, until, since, until))]
@@ -195,6 +211,12 @@ def live_match(api, r):
                        deleted="all", limit=1000)
     if st != 200:
         die(f"GET /entries for #{r['id']}: {st} {rows}")
+    if r.get("classification"):
+        # a Secret row's title is sealed (empty): its envelope is the match
+        for lv in rows:
+            if norm("sealed", lv.get("sealed")) == norm("sealed", r.get("sealed")):
+                return lv
+        return None
     for lv in rows:
         if norm("title", lv.get("title")) == norm("title", r["title"]):
             return lv
@@ -253,6 +275,12 @@ def save_undo(path, plan):
     return len(rows)
 
 
+def vault_headers(fields):
+    """X-LCARS-Vault for a write that carries a classified column."""
+    tok = os.environ.get("LCARS_VAULT_TOKEN", "")
+    return {"X-LCARS-Vault": tok} if tok and any(f in CLASSIFIED for f in fields) else {}
+
+
 def apply(api, plan):
     """The writes, NEW then MOVED. Each NEW create carries an
     Idempotency-Key from the copy row, so a retried request is the same
@@ -269,9 +297,11 @@ def apply(api, plan):
             for k in ("start_date", "end_date"):
                 if r[k]:
                     body[k] = r[k]
+            if r.get("classification"):
+                body.update(classification=int(r["classification"]), sealed=r.get("sealed") or "")
             body = {k: ("" if v is None else v) for k, v in body.items()}
             key = "merge-" + hashlib.sha1(f"{r['kind']}|{r['created_at_utc']}|{r['id']}".encode()).hexdigest()[:32]
-            st, got = api.call("POST", "/entries", body, {"Idempotency-Key": key})
+            st, got = api.call("POST", "/entries", body, {"Idempotency-Key": key, **vault_headers(body)})
             if st not in (200, 201) or not isinstance(got, dict) or not got.get("id"):
                 it["result"] = f"failed: {st} {got}"
                 continue
@@ -282,8 +312,13 @@ def apply(api, plan):
                 it["result"] = "inserted, deleted" if st == 200 else f"inserted, delete failed: {st} {got}"
         elif it["class"] == "MOVED":
             body = {f: norm(f, r.get(f)) for f in it["fields"]}
+            if any(f in CLASSIFIED for f in body):
+                # the level and the envelope go together: the server judges
+                # an envelope by the level it lands with
+                body.update(classification=norm("classification", r.get("classification")),
+                            sealed=norm("sealed", r.get("sealed")))
             body["if_modified"] = it["live"]["last_modified_at_utc"]
-            st, got = api.call("PATCH", f"/entries/{r['id']}", body)
+            st, got = api.call("PATCH", f"/entries/{r['id']}", body, vault_headers(body))
             it["result"] = "patched" if st == 200 else f"failed: {st} {got}"
 
 

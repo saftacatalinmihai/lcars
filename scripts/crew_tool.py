@@ -347,8 +347,7 @@ def cmd_cli(verb, a):
             die(f"{x} is not allowed: the journal is read through the server, as the crew login")
     url, user, pw = creds()
     cli = os.environ.get("LCARS_CLI") or next(
-        (p for p in (os.path.join(REPO, "bin", "lcars-cli"), os.path.join(REPO, "lcars-cli", "lcars-cli"),
-                     os.path.join(REPO, "lcars-cli"),
+        (p for p in (os.path.join(REPO, "bin", "lcars-cli"), os.path.join(REPO, "lcars-cli"),
                      shutil.which("lcars-cli") or "") if p and os.path.isfile(p) and os.access(p, os.X_OK)), None)
     if not cli:
         die("lcars-cli is not built (make lcars-cli)", 1)

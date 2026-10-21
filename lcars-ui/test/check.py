@@ -218,6 +218,25 @@ for m in re.finditer(r'(\w+) = document\.createElement\("(?:input|textarea)"\);'
         problems.append(f"line {at}: a field made in the script with a contact word ({', '.join(hits)}), "
                         "which iOS reads as a contact form")
 
+# ---------- the page's connect-src names every outside service it calls ----------
+# (the "csp" block in the head): a fetch, a WebSocket or a tile kept offline
+# to a host not in CSP_CONNECT is refused by the browser, so a new service
+# must be named there. Hosts only linked to (an attribution, a placeholder)
+# are listed here as such.
+LINK_ONLY = {"fonts.googleapis.com", "fonts.gstatic.com", "www.rainviewer.com", "www.openstreetmap.org",
+             "www.google.com", "waymarkedtrails.org", "opentopomap.org", "mapy.com", "your-journal-server",
+             "lcars.offline"}
+csp = re.search(r"const CSP_CONNECT = \[(.*?)\];", src, re.S)
+if path.endswith("index.html"):
+    if not csp:
+        problems.append("the csp block's CSP_CONNECT list is missing from the head")
+    else:
+        allowed = set(re.findall(r'"(?:https|wss)://([^"/]+)"', csp.group(1)))
+        used = set(re.findall(r"(?:https|wss)://([a-zA-Z0-9.-]*[a-zA-Z])", src))
+        for h in sorted(used - allowed - LINK_ONLY):
+            problems.append(f"{h}: called by the page but not in the csp block's CSP_CONNECT "
+                            "(add it there, or to check.py's LINK_ONLY if it is only a link)")
+
 if problems:
     print("FAIL")
     for x in problems: print("  •", x)

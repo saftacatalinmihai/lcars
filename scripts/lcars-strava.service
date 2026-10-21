@@ -6,8 +6,8 @@
 # gives lcars-cli the server's login (LCARS_AUTH_USER/LCARS_AUTH_PASS).
 # The CLI is the one the linker uses: ~/lcars/bin/lcars-cli, the link to
 # the one binary (./lcars) the server makes at start, so a deploy that
-# rebuilds the server rebuilds it too; else the copied build it replaced,
-# ~/lcars/lcars-cli/lcars-cli, while that is kept.
+# rebuilds the server rebuilds it too. (The copied build it replaced,
+# ~/lcars/lcars-cli/, retired in 0.279.2.)
 # Installed with the other user units:
 #   for u in lcars-strava.service lcars-strava.timer; do scripts/crew.py unit $u > ~/.config/systemd/user/$u; done
 #   systemctl --user daemon-reload && systemctl --user enable --now lcars-strava.timer
@@ -19,4 +19,4 @@ After=lcars.service
 Type=oneshot
 WorkingDirectory=%h/lcars
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/bin/bash -c 'set -a; . %h/.env; set +a; cli=%h/lcars/bin/lcars-cli; [ -x "$$cli" ] || cli=%h/lcars/lcars-cli/lcars-cli; exec "$${LCARS_CLI:-$$cli}" strava pull'
+ExecStart=/bin/bash -c 'set -a; . %h/.env; set +a; exec "$${LCARS_CLI:-%h/lcars/bin/lcars-cli}" strava pull'

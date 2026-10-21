@@ -971,16 +971,28 @@ static int HandleMediaUpload(int client_fd, Arena *arena, int entry_id,
   }
   {
     sqlite3_stmt *stmt;
-    bool exists = false;
-    if (sqlite3_prepare_v2(db, "SELECT 1 FROM entries WHERE id = ?1;", -1,
-                           &stmt, NULL) == SQLITE_OK) {
+    bool exists = false, secret = false;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT ifnull(classification, 0) FROM entries "
+                           "WHERE id = ?1;",
+                           -1, &stmt, NULL) == SQLITE_OK) {
       sqlite3_bind_int(stmt, 1, entry_id);
       exists = (sqlite3_step(stmt) == SQLITE_ROW);
+      secret = exists && sqlite3_column_int(stmt, 0) != 0;
       sqlite3_finalize(stmt);
     }
     if (!exists) {
       sqlite3_close(db);
       return SendJSONError(client_fd, 404, "No entry with id %d", entry_id);
+    }
+    // The files of an entry are stored as they come, in the clear on the
+    // media root: a Secret entry takes none until they are encrypted in the
+    // page too (docs/design/confidential-entries.md, phase 4).
+    if (secret) {
+      sqlite3_close(db);
+      return SendJSONError(client_fd, 409,
+                           "entry %d is Secret: it takes no files yet",
+                           entry_id);
     }
   }
 

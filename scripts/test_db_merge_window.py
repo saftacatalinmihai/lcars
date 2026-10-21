@@ -160,10 +160,12 @@ class Merge(unittest.TestCase):
         cls.state.write_text(json.dumps({"alt_slot": str(cls.copy), "in_live_slot": "lcars.db",
                                          "filtered_at": "2026-01-01T10:00:00Z", "swapped_at": "2026-01-01T11:00:00Z"}))
 
-    def run_script(self, *args, state=None):
+    def run_script(self, *args, state=None, extra=None):
         env = dict(os.environ, LCARS_URL=f"http://127.0.0.1:{self.port}", LCARS_AUTH_USER=USER[0],
                    LCARS_AUTH_PASS=USER[1], LCARS_MERGE_STATE=str(state or self.state),
                    LCARS_MERGE_ENV=str(TMP / "no.env"))
+        env.pop("LCARS_VAULT_TOKEN", None)
+        env.update(extra or {})
         return subprocess.run([sys.executable, str(SCRIPT), *args], env=env, capture_output=True, text=True)
 
     def plan(self, *args):
@@ -273,6 +275,72 @@ class Merge(unittest.TestCase):
         p = self.run_script("--copy", str(TMP / "nothing.db"))
         self.assertEqual(p.returncode, 75)
         self.assertFalse((TMP / "nothing.db").exists(), "a missing copy is not created")
+
+    def test_secret(self):
+        """Secret entries (lcars_vault.h): the copy's classification and
+        envelope written verbatim, which the server takes only with the
+        vault's token (LCARS_VAULT_TOKEN); without it, refused and left."""
+        token = "cd" * 32
+        env1, env2, env3 = "lcs1.aGVhZA.b2xk", "lcs1.aGVhZA.Y29weQ", "lcs1.aGVhZA.bmV3"
+
+        def call(method, path, body, tok=None):
+            h = {"Content-Type": "application/json",
+                 "Authorization": "Basic " + base64.b64encode(f"{USER[0]}:{USER[1]}".encode()).decode()}
+            if tok:
+                h["X-LCARS-Vault"] = tok
+            r = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", method=method,
+                                       data=json.dumps(body).encode(), headers=h)
+            try:
+                with urllib.request.urlopen(r, timeout=10) as resp:
+                    return resp.status, json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                return e.code, e.read().decode()
+
+        # a vault keeps exactly one password wrap (0.287.0, lcars_vault.h): its
+        # bytes are never read here, only the token guards the writes
+        wrap = {"type": "password", "kdf": "PBKDF2-SHA256", "iter": 600000,
+                "salt": "c2FsdA", "iv": "aXY", "wrapped": "d3JhcHBlZA"}
+        st, _ = call("PUT", "/vault", {"vault": {"v": 1, "wraps": [wrap]}, "token": token, "version": 0})
+        self.assertEqual(st, 200)
+        st, got = call("POST", "/entries", {"kind": "note", "classification": 2, "sealed": env1,
+                                            "created_at_utc": OLD, "last_modified_at_utc": OLD}, token)
+        self.assertEqual(st, 200, got)
+        sid = got["id"]
+        copy = TMP / "copy-secret.db"
+        db = sqlite3.connect(copy)
+        db.executescript(SCHEMA)
+        db.execute("ALTER TABLE entries ADD COLUMN classification INTEGER DEFAULT 0")
+        db.execute("ALTER TABLE entries ADD COLUMN sealed TEXT DEFAULT ''")
+        ins = ("INSERT INTO entries (id, kind, title, content, done_bool, deleted, created_at_utc,"
+               " last_modified_at_utc, start_date, end_date, classification, sealed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+        db.execute(ins, (sid, "note", "", "", 0, 0, OLD, "2026-01-01 10:31:00", "", "", 2, env2))
+        db.execute(ins, (9001, "note", "", "", 0, 0, "2026-01-01 10:32:00", "2026-01-01 10:32:00", "", "", 2, env3))
+        db.commit()
+        db.close()
+        args = ("--copy", str(copy), "--json", "--apply")
+
+        p = self.run_script(*args)
+        self.assertEqual(p.returncode, 1, "a refused write is the run's failure: " + p.stderr)
+        res = {r["copy_id"]: r for r in json.loads(p.stdout)["rows"]}
+        self.assertEqual((res[sid]["class"], res[9001]["class"]), ("MOVED", "NEW"))
+        self.assertTrue(res[sid]["result"].startswith("failed: 403"), res[sid]["result"])
+        self.assertTrue(res[9001]["result"].startswith("failed: 403"), res[9001]["result"])
+        self.assertEqual(self.req("GET", f"/entries/{sid}")[1]["sealed"], env1, "without the token: left as it was")
+
+        p = self.run_script(*args, extra={"LCARS_VAULT_TOKEN": token})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        res = {r["copy_id"]: r for r in json.loads(p.stdout)["rows"]}
+        self.assertEqual((res[sid]["result"], res[9001]["result"]), ("patched", "inserted"))
+        moved = self.req("GET", f"/entries/{sid}")[1]
+        self.assertEqual((moved["classification"], moved["sealed"], moved["title"]), (2, env2, ""),
+                         "the MOVED envelope, verbatim")
+        new = self.req("GET", f"/entries/{res[9001]['live_id']}")[1]
+        self.assertEqual((new["classification"], new["sealed"], new["title"], new["content"]), (2, env3, "", ""),
+                         "the NEW one, verbatim, with no title made up for it")
+        p = self.run_script(*args, extra={"LCARS_VAULT_TOKEN": token})
+        c = self.by_class(json.loads(p.stdout))
+        self.assertEqual((c.get("SAME"), c.get("PRESENT")), ({("note", sid)}, {("note", 9001)}),
+                         "a second run: SAME and PRESENT, nothing written")
 
 
 if __name__ == "__main__":

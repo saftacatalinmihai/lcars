@@ -60,6 +60,82 @@
   function lsJSON(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } }
   function lsPut(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
 
+  /* ---------- the Secret entry: sealed here, at the first load ----------
+     The fixture's rows marked `seal` are sealed the way the console seals
+     one (index.html's "classified" block, the same envelope), under a
+     vault made for this browser and kept with its edits. Its password is
+     no secret - the unlock dialog prints it (LCARS_DEMO.password) - and
+     its rounds are fewer than the app's, as a visitor waits on them. */
+  var VAULT = "lcars.demo.vault";        // {vault, version, sealed: {id: row}}
+  var DEMO_PW = "make it so";
+  var DEMO_ITER = 20000;
+  function b64(u8) {
+    var s = "";
+    for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function unb64(s) {
+    s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    var b = atob(s), u = new Uint8Array(b.length);
+    for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+    return u;
+  }
+  var utf8 = function (s) { return new TextEncoder().encode(s); };
+  function sealDemo(st) {
+    var kept = lsJSON(VAULT, null) || {};
+    st.vault = kept.vault || null;
+    st.vaultV = kept.version || 0;
+    kept.sealed = kept.sealed || {};
+    // sealed on an earlier load: that copy (kept with the vault, not the
+    // edits - it is the fixture's, and Reset must find no edits after it)
+    var todo = [];
+    st.rows.forEach(function (r) {
+      if (!r.seal) return;
+      if (st.vault && kept.sealed[r.id]) st.rows.set(r.id, kept.sealed[r.id]);
+      else todo.push(r);
+    });
+    if (!todo.length) return Promise.resolve();
+    // with no WebCrypto the row is left out: never shown in the clear
+    var drop = function () { todo.forEach(function (r) { st.rows.delete(r.id); }); };
+    if (!(window.crypto && crypto.subtle)) { drop(); return Promise.resolve(); }
+    var S = crypto.subtle, w = st.vault && st.vault.wraps && st.vault.wraps[0];
+    var salt = w ? unb64(w.salt) : crypto.getRandomValues(new Uint8Array(16));
+    return S.importKey("raw", utf8(DEMO_PW), "PBKDF2", false, ["deriveKey"]).then(function (base) {
+      return S.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: salt, iterations: w ? w.iter : DEMO_ITER },
+                         base, { name: "AES-GCM", length: 256 }, false, ["wrapKey", "unwrapKey"]);
+    }).then(function (kek) {
+      if (w) return S.unwrapKey("raw", unb64(w.wrapped), kek, { name: "AES-GCM", iv: unb64(w.iv) },
+                                { name: "AES-GCM" }, false, ["encrypt"]);
+      return S.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]).then(function (mk) {
+        var iv = crypto.getRandomValues(new Uint8Array(12));
+        return S.wrapKey("raw", mk, kek, { name: "AES-GCM", iv: iv }).then(function (wr) {
+          st.vault = { v: 1, kid: "k1", wraps: [{ type: "password", kdf: "PBKDF2-SHA256", iter: DEMO_ITER,
+                                                  salt: b64(salt), iv: b64(iv), wrapped: b64(new Uint8Array(wr)) }] };
+          st.vaultV = 1;
+          return mk;
+        });
+      });
+    }).then(function (mk) {
+      return Promise.all(todo.map(function (r) {
+        var iv = crypto.getRandomValues(new Uint8Array(12));
+        var head = b64(utf8(JSON.stringify({ kid: "k1", alg: "A256GCM", iv: b64(iv) })));
+        var plain = { title: r.title, content: r.content, value_int: r.value_int || 0, value_float: r.value_float || 0 };
+        return S.encrypt({ name: "AES-GCM", iv: iv, additionalData: utf8("lcs1." + head) }, mk,
+                         utf8(JSON.stringify(plain))).then(function (ct) {
+          var o = Object.assign({}, r, { title: "", content: "", value_int: 0, value_float: 0, classification: 2,
+                                         sealed: "lcs1." + head + "." + b64(new Uint8Array(ct)) });
+          delete o.seal;
+          o.content_length = o.sealed.length;
+          st.rows.set(o.id, o);
+          kept.sealed[o.id] = o;
+        });
+      }));
+    }).then(function () {
+      lsPut(VAULT, { vault: st.vault, version: st.vaultV, sealed: kept.sealed });
+    }).catch(drop);
+  }
+
   var state = null;                      // {rows: Map, media, emb, next, keys}
   var ready = null;
   function load() {
@@ -97,7 +173,7 @@
         state = { rows: rows, media: (fx.media || []).map(function (m) {
                     return Object.assign({}, m, { created_at_utc: moved(m.created_at_utc, days) }); }),
                   emb: fx.embeddings || null, next: next, ed: ed, keys: {} };
-        return state;
+        return sealDemo(state).then(function () { return state; });
       });
     return ready;
   }
@@ -160,18 +236,23 @@
       var x = a[key], y = b[key];
       return ((x < y ? -1 : x > y ? 1 : 0) || a.id - b.id) * (rev ? -1 : 1);
     });
-    if (qs.get("content") === "0") out = out.map(function (r) { var o = Object.assign({}, r); delete o.content; return o; });
+    if (qs.get("content") === "0") out = out.map(function (r) { var o = Object.assign({}, r); delete o.content; delete o.sealed; return o; });
     return out;
   }
   function clen(r) { r.content_length = new TextEncoder().encode(r.content || "").length; return r; }
   var COLS = ["kind", "title", "content", "value_int", "value_float", "done_bool", "deleted",
-              "created_at_utc", "start_date", "end_date"];
+              "created_at_utc", "start_date", "end_date", "classification", "sealed"];
   function apply(r, body) {
     var o = Object.assign({}, r);
     COLS.forEach(function (k) { if (body[k] !== undefined) o[k] = body[k]; });
     if (body.restore) o.deleted = 0;
     o.last_modified_at_utc = nowStamp();
-    return clen(o);
+    // a Secret row keeps its columns empty, as lcars_vault.h has the server do
+    if (Number(o.classification) === 2) { o.title = ""; o.content = ""; o.value_int = 0; o.value_float = 0; }
+    else o.sealed = "";
+    clen(o);
+    if (o.sealed) o.content_length = o.sealed.length;
+    return o;
   }
   var json = function (code, data) { return { code: code, data: data }; };
   var off = function (what) { return json(503, { error: what + " needs the journal's server, and this demo has none" }); };
@@ -204,7 +285,7 @@
       var row = apply({ id: state.next++, kind: "", title: "", content: "", value_int: 0, value_float: 0,
                         done_bool: 0, deleted: 0, created_at_utc: at, start_date: "", end_date: "" }, body);
       if (!row.kind) row.kind = "personal_log";
-      if (!row.title) row.title = "HTTP Entry";
+      if (!row.title && Number(row.classification) !== 2) row.title = "HTTP Entry";
       state.rows.set(row.id, row);
       keep(row);
       if (key) state.keys[key] = row.id;
@@ -236,6 +317,14 @@
     }
     if (/^\/entries\/\d+\/media\//.test(path)) return off("Changing a file");
     if (/^\/entries\/\d+\/caldav$/.test(path)) return off("Reminders (CalDAV)");
+    if (path === "/vault" && method === "GET") return json(200, { version: state.vaultV || 0, vault: state.vault || null });
+    if (path === "/vault" && method === "PUT") {
+      if ((body.version || 0) !== (state.vaultV || 0)) return json(409, { error: "the vault changed: read it again" });
+      state.vault = body.vault;
+      state.vaultV = (state.vaultV || 0) + 1;
+      lsPut(VAULT, Object.assign(lsJSON(VAULT, null) || {}, { vault: state.vault, version: state.vaultV }));
+      return json(200, { status: "ok", version: state.vaultV });
+    }
     if (path === "/media" && method === "GET") return json(200, state.media);
     if (path === "/reports" && method === "GET") return json(200, []);
     // GET /kinds/roles (lcars_kinds.h): every role its default, as a new
@@ -324,5 +413,5 @@
     return answer(method, url, init);
   };
 
-  window.LCARS_DEMO = { base: BASE, note: NOTE, reset: reset, ready: load };
+  window.LCARS_DEMO = { base: BASE, note: NOTE, reset: reset, ready: load, password: DEMO_PW };
 })();

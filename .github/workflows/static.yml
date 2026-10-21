@@ -1,4 +1,4 @@
-# The static release binary, built and checked on every push to deb (each
+# The static release binary, built and checked on every push to main (each
 # deploy pushes it) and on pull requests: the only place lcars-static is
 # proven, since the box that builds everything else has no docker or musl.
 # docs/design/open-source-build.md §4; release.yml is the same build on a
@@ -9,7 +9,8 @@ name: Static build
 
 on:
   push:
-    # deb is the private clone's live branch, main the public repo's
+    # main is the live branch and the public repo's; deb, the live
+    # branch before it, is kept until it is deleted
     branches: [ "deb", "main" ]
     # Only what the binary is built from, or how: a deploy of the page, the
     # docs or the python scripts alone runs no metered job. The page is

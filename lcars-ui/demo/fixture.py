@@ -438,6 +438,17 @@ def public():
                      NOW - datetime.timedelta(days=1)))
     rid -= 1
 
+    # A Secret entry (docs/design/confidential-entries.md). Its text is in
+    # journal.json in the clear - it is made up, and the demo has no server
+    # to keep it from - and demo/static.js seals it at the demo's first load,
+    # under a demo vault whose password the unlock dialog prints. It has no
+    # vector (static.py), as a Secret entry is never embedded.
+    rows.append(dict(_row(rid, "personal_log", "The surprise for the chief's birthday",
+                          "- The cake is in the galley's cold store, behind the plomeek soup.\n"
+                          "- Nobody tells her. Not even the computer.\n",
+                          NOW - datetime.timedelta(days=2, hours=3)), seal=True))
+    rid -= 1
+
     ids = [r["id"] for r in rows]
     assert len(ids) == len(set(ids)), "duplicate ids in the public journal"
     assert min(r["id"] for r in rows if r["id"] <= READINGS_FROM) > 0

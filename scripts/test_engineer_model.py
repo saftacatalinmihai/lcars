@@ -66,6 +66,7 @@ for _sig in (signal.SIGTERM, signal.SIGHUP):
 os.environ.update(LCARS_ENG_STATE=os.path.join(TMP, "state"), LCARS_ENG_ROOT=os.path.join(TMP, "eng"),
                   LCARS_ENG_SEAT="0")
 sys.path.insert(0, HERE)
+import testguard  # noqa: E402,F401 - no test reaches the live journal
 import engineer as E  # noqa: E402
 
 
@@ -403,7 +404,10 @@ class Say(unittest.TestCase):
 
 STUB = """#!/usr/bin/env python3
 import json, sys
-print(json.dumps({"argv": sys.argv[1:]}))
+data = sys.stdin.read()
+print(json.dumps(dict({"argv": sys.argv[1:]}, **({"in": data} if data else {}))))
+# a thread the script does not know: its exit 4, the route's 404
+sys.exit(4 if "nope" in sys.argv or '"nope"' in data else 0)
 """
 KEY = "k" * 24
 USER = ("t", "t")
@@ -474,12 +478,44 @@ class Route(unittest.TestCase):
     def test_get_is_a_405(self):
         self.assertEqual(self.req("GET", "/engineer/ada/model")[0], 405)
 
+    def test_a_job_cancel_reaches_the_script_as_argv(self):
+        """POST /engineer/<name>/job-cancel (the Queue view's Cancel)."""
+        st, j = self.req("POST", "/engineer/ada/job-cancel", {"id": "ada-20261021-140200"})
+        self.assertEqual((st, j), (200, {"argv": ["job-cancel", "ada", "ada-20261021-140200"]}))
+        self.assertEqual(self.req("POST", "/engineer/ada/job-cancel", {})[1], {"argv": ["job-cancel", "ada", ""]})
+        for bad in ("x;rm", "../etc", "ADA", "a b"):
+            self.assertEqual(self.req("POST", "/engineer/ada/job-cancel", {"id": bad})[0], 400, bad)
+        self.assertEqual(self.req("GET", "/engineer/ada/job-cancel")[0], 405)
+
     def test_past_reaches_the_poll_as_argv(self):
         st, j = self.req("GET", "/engineer/ada?off=-1&past=0a1b-c2d3")
-        self.assertEqual((st, j), (200, {"argv": ["poll", "ada", "-1", "-1", "0a1b-c2d3"]}))
-        self.assertEqual(self.req("GET", "/engineer/ada?off=5")[1], {"argv": ["poll", "ada", "5", "-1", "-"]})
+        self.assertEqual((st, j), (200, {"argv": ["poll", "ada", "-1", "-1", "0a1b-c2d3", "-"]}))
+        self.assertEqual(self.req("GET", "/engineer/ada?off=5")[1], {"argv": ["poll", "ada", "5", "-1", "-", "-"]})
         for bad in ("x;rm", "..%2Fetc", "ABC"):
             self.assertEqual(self.req("GET", "/engineer/ada?past=" + bad)[0], 400, bad)
+
+    def test_number_one_s_threads_reach_the_script(self):
+        # no1-threads.md, section 13: the poll's thread= (a filter), the say's
+        # thread, the chips' POST .../thread (its body on stdin), exit 4 a 404
+        self.assertEqual(self.req("GET", "/engineer/number-one?off=-1&thread=deck")[1],
+                         {"argv": ["poll", "number-one", "-1", "-1", "-", "deck"]})
+        self.assertEqual(self.req("GET", "/engineer/number-one?off=-1&thread=nope")[0], 404)
+        for bad in ("Deck", "a;b", "x" * 25, "-x", "9a"):
+            self.assertEqual(self.req("GET", "/engineer/number-one?thread=" + bad)[0], 400, bad)
+        st, j = self.req("POST", "/engineer/number-one/say", {"message": "hi", "thread": "deck"})
+        self.assertEqual((st, j), (200, {"argv": ["say", "number-one", "--thread", "deck"], "in": "hi"}))
+        self.assertEqual(self.req("POST", "/engineer/number-one/say", {"message": "hi"})[1],
+                         {"argv": ["say", "number-one"], "in": "hi"})
+        self.assertEqual(self.req("POST", "/engineer/number-one/say", {"message": "hi", "thread": ""})[1],
+                         {"argv": ["say", "number-one"], "in": "hi"})
+        self.assertEqual(self.req("POST", "/engineer/number-one/say", {"message": "hi", "thread": "nope"})[0], 404)
+        for bad in ("Deck", "a b", "x" * 30):
+            self.assertEqual(self.req("POST", "/engineer/number-one/say", {"message": "hi", "thread": bad})[0], 400, bad)
+        body = {"op": "new", "id": "web", "name": "Web app"}
+        st, j = self.req("POST", "/engineer/number-one/thread", body)
+        self.assertEqual((st, j["argv"], json.loads(j["in"])), (200, ["thread-req", "number-one"], body))
+        self.assertEqual(self.req("POST", "/engineer/number-one/thread", {"op": "rename", "id": "nope", "name": "x"})[0], 404)
+        self.assertEqual(self.req("GET", "/engineer/number-one/thread")[0], 405)
 
     def test_the_queue_is_its_own_read_only_route(self):
         # the Queue view's (engineer.py queue), never a poll of one called queue

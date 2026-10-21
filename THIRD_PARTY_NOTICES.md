@@ -17,6 +17,9 @@ The release binary embeds these too, so they ship with it.
 | Leaflet 1.9.4 | `lcars-ui/vendor/leaflet-1.9.4.js`, `.css` | BSD-2-Clause | Copyright (c) 2010-2023, Vladimir Agafonkin; Copyright (c) 2010-2011, CloudMade |
 | The crew's models, textures and clips, from Quaternius's Universal Base Characters and Universal Animation Library 1 and 2 | `lcars-ui/crew/` (its LICENSE.txt lists each) | CC0 1.0 | none (public domain dedication) |
 | Brass Vase 03 by Rico Cilliers, Carved Wooden Elephant by Greg Zaal (Poly Haven) | in `lcars-ui/deck/readyroom.glb` (`lcars-ui/deck/LICENSE.txt`) | CC0 1.0 | none (public domain dedication) |
+| The bridge's captain's chair, generated with Higgsfield (Tripo H3.1 multiview), 0.283.0 | in `lcars-ui/deck/bridge.glb` and its atlas (`lcars-ui/deck/LICENSE.txt`) | the captain's, under Higgsfield's terms for its outputs | the captain |
+| The bridge's skylight, generated with Higgsfield (Seedream 5.0 Flash), 0.284.4 | `lcars-ui/deck/bridge_skylight.webp` (`lcars-ui/deck/LICENSE.txt`) | the captain's, under Higgsfield's terms for its outputs | the captain |
+| The bridge's carpet and wall tiles, generated with Higgsfield (Seedream 5.0 Flash), 0.287.1 | `lcars-ui/deck/bridge_{carpet,wall}_*.webp` (`lcars-ui/deck/LICENSE.txt`) | the captain's, under Higgsfield's terms for its outputs | the captain |
 
 The deck's other models and textures are built by this repository's own
 Blender scripts (`scripts/deck-models/`) and are under its MIT licence.

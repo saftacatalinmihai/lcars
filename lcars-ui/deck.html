@@ -1047,27 +1047,51 @@ function texSet(N, gen) {
   if (rough) set.roughnessMap = tiled(grayCanvas(N, rough), false);
   return set;
 }
-const T = {
-  // TNG corridor panelling: a seam every 1.2m and one across, a recessed
-  // access plate with its four screws, faint mottling
-  panel: texSet(512, N => {
+// TNG corridor panelling: a seam every 1.2m and one across, a recessed
+// access plate with its four screws, faint mottling. With `reveal`, the
+// seam across (at 0.7 of the tile from its top: on the bridge's wall, whose
+// v is its height about the middle over 2.4 m, 3.02 m up, two thirds of its
+// 4.6) is the set's reveal instead: a channel, sunk deeper and
+// darker than a seam, its lower lip catching the overhead light. 6 cm
+// tall: 3 cm (the first try) did not read across the room.
+function panelSet(reveal = false) {
+  return texSet(512, N => {
     const n = fbm(N, 5, 4, 11), f = fbm(N, 80, 2, 12);
     const h = drawField(N, g => {
       g.filter = "blur(1px)"; g.fillStyle = "#000";
       g.fillRect(-2, 0, 4, N); g.fillRect(N - 2, 0, 4, N); g.fillRect(N / 2 - 2, 0, 4, N);
-      g.fillRect(0, N * 0.7 - 2, N, 4);
+      if (!reveal) g.fillRect(0, N * 0.7 - 2, N, 4);
+      else {
+        const r = N * 0.7, w = N * 0.06 / 2.4;   // 6 cm of the 2.4 m tile
+        g.fillRect(0, r - w / 2, N, w);
+        // the lip under it a little proud, so the normal map gives it an edge
+        g.fillStyle = "#fff"; g.fillRect(0, r + w / 2, N, 2);
+        g.fillStyle = "#000";
+      }
       g.fillStyle = "#8c8c8c"; g.fillRect(N * 0.06, N * 0.1, N * 0.16, N * 0.12);
       g.fillStyle = "#000";
       for (const [x, y] of [[0.075, 0.115], [0.205, 0.115], [0.075, 0.205], [0.205, 0.205]]) { g.beginPath(); g.arc(N * x, N * y, 2.2, 0, 7); g.fill(); }
     });
+    // the reveal's rows a shade darker again than a seam's floor (the channel
+    // is in shadow), so it reads at the phone's distance, not as one more seam
+    const r0 = Math.floor(N * 0.7 - N * 0.03 / 2.4), r1 = Math.ceil(N * 0.7 + N * 0.03 / 2.4);
     const tone = new Float32Array(N * N), rough = new Float32Array(N * N), height = new Float32Array(N * N);
     for (let i = 0; i < tone.length; i++) {
       tone[i] = (0.9 + 0.1 * n[i] + 0.05 * (f[i] - 0.5)) * (0.7 + 0.3 * h[i]);
+      if (reveal) { const y = (i / N) | 0; if (y >= r0 && y < r1) tone[i] *= 0.6; }
       height[i] = h[i] + 0.02 * f[i];
       rough[i] = 0.5 + 0.28 * n[i] + 0.1 * (1 - h[i]);
     }
     return { tone, height, rough, bump: 5 };
-  }),
+  });
+}
+const T = {
+  panel: panelSet(),
+  // the bridge's own (bridge-redesign.md slice 6): the same panelling with
+  // the set's horizontal reveal where the seam across was. M.wall is every
+  // deck 8 room's, so the bridge's wall clone takes this instead: its own
+  // material already, +0 draw calls.
+  panelBridge: panelSet(true),
   // The corridor's own (deck-style.md part 6, change 2): one rib bay,
   // 2.6 m square, its u from the first rib (wall() writes it for a corridor:
   // `corrUV`) and its v from the floor. Two panels 1.3 m wide, each framed:
@@ -1304,10 +1328,13 @@ const M = {
   rail: surf(T.grain, 1.2, 0x5a3a28, { metalness: 0.1, roughness: 0.35, envMapIntensity: 0.6 }),
   carpet: surf(T.carpet, 0.7, 0x3c4a60),
   // the bridge's (docs/design/deck-style.md part 1): a cooler carpet that
-  // lets the wood lead (the rail wood is M.rail), lighter brushed beams
-  carpetBridge: surf(T.carpet, 0.7, 0x5a4a44),
+  // lets the wood lead (the rail wood is M.rail), lighter brushed beams.
+  // The floor and the well are one cool grey-mauve family, the well a shade
+  // lighter (bridge-redesign.md section 4: the old terracotta well was the
+  // warmest, largest surface in every view, and nothing on the set is it)
+  carpetBridge: surf(T.carpet, 0.7, 0x4e4548),
   beam: surf(T.brushed, 0.8, 0xa49c90, { roughness: 0.6, metalness: 0.2 }),
-  carpetWell: surf(T.carpet, 0.7, 0x86624c),
+  carpetWell: surf(T.carpet, 0.7, 0x6a5e60),
   carpetTF: surf(T.carpet, 0.7, 0x3d3a58),
   ceil: surf(T.ceil, 1.2, 0xb4ada0, { envMapIntensity: 0.3 }),
   lightStrip: new THREE.MeshStandardMaterial({ color: 0xfff2d8, emissive: 0xffe2b8, emissiveIntensity: 0.6 }),
@@ -3391,6 +3418,33 @@ function buildShip() {
   }
   zoneRect("Corridor", -CW, CZ0 - 0.2, CW, CZ1 + 0.8, { corr: true });
 
+  // The bridge's generated tiles (bridge-redesign.md 8h; made by
+  // scripts/deck-models/tiles.py from Higgsfield images, deck/LICENSE.txt):
+  // a base, its normal and its roughness map, loaded over the materials'
+  // canvas sets, which are shown until all three land and kept if they never
+  // do. The base was matched in linear space to `base` (the palette colour
+  // the materials were made with) times its canvas tone's mean, so each
+  // material's colour becomes its own tint over that colour: 1 for the
+  // floor and the wall, the well's lighter shade over the same map. Same
+  // materials, same geometry: +0 draw calls, +0 triangles. (A walnut
+  // wainscot was made and tied with T.grooves at the phone's distance: not
+  // worth its 33 kB, so the wainscot keeps its canvas set.)
+  function bridgeTiles(name, base, ...mats) {
+    const b = new THREE.Color(base), got = {}, tl = new THREE.TextureLoader();
+    const tints = mats.map(m => new THREE.Color(m.color.r / b.r, m.color.g / b.g, m.color.b / b.b));
+    for (const k of ["base", "norm", "rough"]) tl.load(DECK_MODELS + `bridge_${name}_${k}.webp`, t => {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = maxAniso;
+      t.colorSpace = k === "base" ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      got[k] = t;
+      if (Object.keys(got).length < 3) return;
+      mats.forEach((m, i) => {
+        Object.assign(m, { map: got.base, normalMap: got.norm, roughnessMap: got.rough });
+        m.color.copy(tints[i]); m.needsUpdate = true;
+      });
+    }, undefined, () => {});
+  }
+  bridgeTiles("carpet", 0x4e4548, M.carpetBridge, M.carpetWell);
+
   // ---- main bridge: a circle of radius BR centred at z = BZ
   const floor = new THREE.Mesh(new THREE.CircleGeometry(BR, 72), M.carpetBridge);
   floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, BZ); aoFloor(add(floor));
@@ -3399,7 +3453,13 @@ function buildShip() {
   // the viewscreen looks out (at -z, VW either side of pi)
   const gap = 2.9 / BR, lgap = 2.7 / BR;
   const VW = Math.asin(5.25 / BR);
-  const bwMat = Object.assign(M.wall.clone(), { side: THREE.BackSide }), bwLowMat = Object.assign(cloneHooked(M.wallLow), { side: THREE.BackSide });
+  // (the wall's tile is the bridge's own, T.panelBridge, with the set's
+  // reveal across it: bridge-redesign.md slice 6)
+  const bwMat = Object.assign(M.wall.clone(), { side: THREE.BackSide, map: T.panelBridge.map, normalMap: T.panelBridge.normalMap, roughnessMap: T.panelBridge.roughnessMap }), bwLowMat = Object.assign(cloneHooked(M.wallLow), { side: THREE.BackSide });
+  // the wainscot a shade darker than the ship's, so the wall falls off toward
+  // the floor (bridge-redesign.md section 4; its own clone already, no new draw)
+  bwLowMat.color.multiplyScalar(0.82);
+  bridgeTiles("wall", 0xd6c4a6, bwMat);
   for (const [a0, a1] of [[gap / 2, Math.PI / 2 - lgap / 2], [Math.PI / 2 + lgap / 2, Math.PI - VW],
                           [Math.PI + VW, Math.PI * 1.5 - lgap / 2], [Math.PI * 1.5 + lgap / 2, Math.PI * 2 - gap / 2]]) {
     aoArcs.push([0, BZ, BR, a0, a1]);   // its foot, for the floor's bake (the walk's edge is zoneCircle's)
@@ -3411,8 +3471,12 @@ function buildShip() {
   const dome = new THREE.Mesh(new THREE.CircleGeometry(BR, 72), M.ceil); dome.rotation.x = Math.PI / 2; dome.position.set(0, BH, BZ); add(dome, false); ceilings.push(dome);
   const ring = new THREE.Mesh(new THREE.TorusGeometry(4.0, 0.14, 8, 72), M.lightStrip);
   ring.rotation.x = Math.PI / 2; ring.position.set(0, BH - 0.1, BZ); root.add(ring);
-  light(0, 3.2, BZ - 3.5, 0xfff0dd, 7, 18);
-  light(0, 3.2, BZ + 4.5, 0xfff0dd, 4, 12);
+  // the room's two pooled lights up under the dome and their reach shortened:
+  // the ceiling and the well brightest, the wall's foot at the edge of their
+  // reach, so the light falls off down the walls as on the set, not the
+  // even wash the lights at 3.2 m gave (bridge-redesign.md section 4)
+  light(0, 4.15, BZ - 3.5, 0xfff0dd, 9, 14.5);
+  light(0, 4.15, BZ + 4.5, 0xfff0dd, 5, 11.5);
   // the turbolifts, port and starboard
   for (const s of [-1, 1]) turbolift(s * (BR - 0.06), BZ, s < 0 ? "+x" : "-x", s < 0 ? "Bridge, port" : "Bridge, starboard");
   // the viewscreen at the forward wall: a window onto the sky ahead (the
@@ -3483,6 +3547,10 @@ function buildShip() {
     // theta measured from +z around the circle; the panel faces the centre
     const r = BR - 0.12, x = Math.sin(theta) * r, z = BZ + Math.cos(theta) * r;
     panel(2.6, 1.3, x, 2.05, z, theta + Math.PI, seedN);
+    // bridge.py's display_bezel round it, its face 2 cm proud of the display,
+    // so the display reads set into the wall (bridge-redesign.md slice 5);
+    // hung on the wall, so no contact patch
+    model([x, 2.05, z], "bridge", "display_bezel", { rot: theta + Math.PI, shadow: false });
   };
   bpanel(0.8, 60); bpanel(1.15, 61); bpanel(-0.8, 62); bpanel(-1.15, 63); bpanel(2.2, 64); bpanel(-2.2, 65);
   zoneCircle("Main bridge", 0, BZ, BR);
@@ -4213,16 +4281,31 @@ function dressShip({ gap }) {
   corn.position.set(0, BH - 0.28, BZ); add(corn, false);
   arc(BR - 0.1, 0.02, BH - 0.57, M.glowWarm);
   // ribs between the stations
-  for (const a of [0.5, 0.98, 1.36, 1.85, 2.55]) for (const sg of [-1, 1]) {
+  for (const a of [0.5, 0.98, 1.36, 1.85]) for (const sg of [-1, 1]) {
     const th = a * sg, r = BR - 0.08;
     const rib = rbox(0.36, BH - 0.6, 0.14, M.trim, Math.sin(th) * r, (BH - 0.6) / 2, BZ + Math.cos(th) * r, 0.03);
     rib.rotation.y = th;
     glowBox(0.05, 1.5, 0.012, M.glowWarm, Math.sin(th) * (r - 0.075), 2.0, BZ + Math.cos(th) * (r - 0.075)).rotation.y = th;
   }
+  // the viewscreen's bulkheads, where the last ribs stood: bridge.py's
+  // screen_fin, the set's sculpted fins, from the floor to the ceiling
+  // either side of the screen, their backs on the wall and facing the
+  // centre as the stations do. A model with no stand-in (its contact patch
+  // comes with it), and a block of its own: the viewscreen's ends at x 5.4,
+  // and a fin's foot (0.82 by 0.7 m) stands off the wall out to x 5.8
+  for (const sg of [-1, 1]) {
+    const th = 2.545 * sg, x = Math.sin(th) * BR, z = BZ + Math.cos(th) * BR;
+    model([x, 0, z], "bridge", "screen_fin", { rot: th + Math.PI });
+    const fx = Math.sin(th) * (BR - 0.38), fz = BZ + Math.cos(th) * (BR - 0.38);
+    block(fx - 0.42, fz - 0.42, fx + 0.42, fz + 0.42);
+  }
   // standing stations under the wall displays, facing the centre
   let seed = 90;
+  // (the pair either side of the viewscreen, at +-2.2, is bridge.py's
+  // station_long, one counter 2.6 long round the same stand-in: its lit slot
+  // and its blocks stretched to the counter's length)
   for (const th of [0.8, 1.15, 2.2, -0.8, -1.15, -2.2]) {
-    const r = BR - 0.55, x = Math.sin(th) * r, z = BZ + Math.cos(th) * r;
+    const r = BR - 0.55, x = Math.sin(th) * r, z = BZ + Math.cos(th) * r, long = Math.abs(th) === 2.2;
     const g = new THREE.Group();
     g.position.set(x, 0, z); g.rotation.y = th + Math.PI;   // local +z toward the centre
     const base = new THREE.Mesh(rgeo(1.8, 0.84, 0.45, 0.04), M.console); base.position.y = 0.42;
@@ -4234,11 +4317,11 @@ function dressShip({ gap }) {
     // the display and the lit slot stay over bridge.py's station, which is
     // built round them
     top.userData.over = true;
-    glowBox(1.7, 0.015, 0.01, M.glowAmber, 0, 0.1, 0.228, g).userData.over = true;
+    glowBox(long ? 2.5 : 1.7, 0.015, 0.01, M.glowAmber, 0, 0.1, 0.228, g).userData.over = true;
     blinkRow(10, 0, 0.66, 0.228, g, 0.12);
     root.add(grounded(g));
-    model(g, "bridge", "station");
-    for (const u of [-0.6, 0, 0.6]) { const bx = x - Math.cos(th) * u, bz = z + Math.sin(th) * u; block(bx - 0.28, bz - 0.28, bx + 0.28, bz + 0.28); }
+    model(g, "bridge", long ? "station_long" : "station");
+    for (const u of long ? [-1, -0.5, 0, 0.5, 1] : [-0.6, 0, 0.6]) { const bx = x - Math.cos(th) * u, bz = z + Math.sin(th) * u; block(bx - 0.28, bz - 0.28, bx + 0.28, bz + 0.28); }
   }
   // conn and ops get their chairs: bridge.py's conn_chair (armless, built
   // at the 0.9 stand-in's width, so unscaled) over the stand-in's seat
@@ -4252,8 +4335,15 @@ function dressShip({ gap }) {
   // skylight: a cove, in the cornice's shared glow
   const cove = new THREE.Mesh(new THREE.TorusGeometry(4.22, 0.02, 6, 128), M.glowWarm);
   cove.rotation.x = Math.PI / 2; cove.position.set(0, BH - 0.04, BZ); root.add(cove);
-  const skyMat = new THREE.MeshBasicMaterial({ map: skylightTex(), toneMapped: false });
-  skyMat.color.setScalar(0.55);
+  const skyMat = new THREE.MeshBasicMaterial({ map: skylightTex(true), toneMapped: false });
+  skyMat.color.setScalar(0.45);
+  // the coffer's picture (bridge-redesign.md slice 6: one generated image,
+  // deck/LICENSE.txt), in place of the canvas drawing once it lands; the
+  // drawing is shown until then, and kept if it never does
+  new THREE.TextureLoader().load(DECK_MODELS + "bridge_skylight.webp", t => {
+    t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = maxAniso;
+    skyMat.map.dispose(); skyMat.map = t; skyMat.needsUpdate = true;
+  }, undefined, () => {});
   const sky = new THREE.Mesh(new THREE.CircleGeometry(3.85, 96), skyMat);
   sky.rotation.x = Math.PI / 2; sky.position.set(0, BH - 0.012, BZ); root.add(sky);
   // the viewscreen: a light around its edge and a step below it
@@ -5261,16 +5351,23 @@ function buildArboretum() {
   zoneRect("Arboretum", X0 - 0.9, 2.5 - DW / 2, X0 + 0.9, 2.5 + DW / 2);
 }
 
-// The bridge's ceiling panel: rings of warm light in segments.
-function skylightTex() {
+// A ceiling panel: rings of warm light in segments. `coffer` is the
+// bridge's (bridge-redesign.md section 4): warm grey mullions in place of
+// black, and the panels graded across the whole disc, brightest at the
+// centre, so it reads as a lit coffer and not an even white graphic; the
+// concourse's and the generated rooms' keep the black and each ring's own
+// gradient.
+function skylightTex(coffer = false) {
   return canvasTex(1024, 1024, (g, w) => {
     const c = w / 2;
-    g.fillStyle = "#1a140e"; g.fillRect(0, 0, w, w);
+    g.fillStyle = coffer ? "#7a7268" : "#1a140e"; g.fillRect(0, 0, w, w);
+    const disc = g.createRadialGradient(c, c, 0, c, c, 0.96 * c);
+    disc.addColorStop(0, "#fffaf0"); disc.addColorStop(0.3, "#fbebcc"); disc.addColorStop(1, "#a08058");
     for (const [r0, r1, n] of [[0.0, 0.18, 1], [0.23, 0.42, 10], [0.47, 0.68, 16], [0.73, 0.96, 24]]) {
       for (let i = 0; i < n; i++) {
         const a0 = i / n * Math.PI * 2 + (n > 1 ? 0.025 : 0), a1 = (i + 1) / n * Math.PI * 2 - (n > 1 ? 0.025 : 0);
-        const grd = g.createRadialGradient(c, c, r0 * c, c, c, r1 * c);
-        grd.addColorStop(0, "#fff3dc"); grd.addColorStop(1, "#e2bf88");
+        let grd = disc;
+        if (!coffer) { grd = g.createRadialGradient(c, c, r0 * c, c, c, r1 * c); grd.addColorStop(0, "#fff3dc"); grd.addColorStop(1, "#e2bf88"); }
         g.fillStyle = grd; g.beginPath(); g.arc(c, c, r1 * c, a0, a1); g.arc(c, c, r0 * c, a1, a0, true); g.closePath(); g.fill();
       }
     }
@@ -14466,8 +14563,22 @@ function patchUndo(ps) {
   ps.undo.length = 0;
   renderer.shadowMap.needsUpdate = true;
 }
+/* Classified entries (index.html's "classified" block): a patch is code an
+   agent wrote, run with the page's reach - and the console in its frame is
+   this page's to reach. So none runs while the console holds the key, and
+   one that has run this load keeps the console from unlocking at all
+   (window.lcarsDeckPatched, which it asks). */
+let patchRan = false;
+const consoleUnlocked = () => {
+  try { const w = cframe.contentWindow; return !!w && typeof w.lcarsClsUnlocked === "function" && w.lcarsClsUnlocked() === true; }
+  catch (e) { return false; }
+};
+window.lcarsDeckPatched = () => patchRan;
 async function patchApply(c) {
   const ps = { id: c.id, undo: [], pending: [], names: new Set(), dead: false };
+  if (consoleUnlocked())
+    return { ok: false, id: c.id, err: "the console's classified entries are unlocked: lock them, then apply it", line: 0, names: [] };
+  patchRan = true;
   const before = new Set(scene.children);
   // what the patch put in the scene without the API is its own too
   const adopt = () => {

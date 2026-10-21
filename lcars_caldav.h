@@ -106,8 +106,22 @@ static int HandleEntryCalDAV(int client_fd, Arena *arena, const char *method,
   "e.last_modified_at_utc, c.resource_name, c.uid, c.extra_ical, "             \
   "c.extra_vcal, e.kind, e.start_date, e.end_date, c.sync_start, "             \
   "c.sync_end, e.deleted"
+// What CalDAV reads as `entries`: the table with every Secret entry
+// (lcars_vault.h) shown as deleted and textless. A raised task then leaves
+// the lists the way a deleted one does - a sync-collection report names it
+// gone, a calendar-query no longer has it - and nothing of it is published,
+// not even the empty title it now has. Every read below goes through this,
+// so none can forget the rule; SQLite flattens the subquery into each one.
+#define CALDAV_ENTRIES                                                         \
+  "(SELECT id, kind, done_bool, created_at_utc, last_modified_at_utc, "        \
+  "start_date, end_date, "                                                     \
+  "CASE WHEN ifnull(classification, 0) = 0 THEN title ELSE '' END AS title, "  \
+  "CASE WHEN ifnull(classification, 0) = 0 THEN content ELSE '' END AS "       \
+  "content, "                                                                  \
+  "CASE WHEN ifnull(classification, 0) = 0 THEN deleted ELSE 1 END AS "        \
+  "deleted FROM entries)"
 #define CALDAV_TASK_FROM                                                       \
-  " FROM entries e LEFT JOIN caldav_tasks c ON c.entry_id = e.id "
+  " FROM " CALDAV_ENTRIES " e LEFT JOIN caldav_tasks c ON c.entry_id = e.id "
 
 typedef enum CalDAVColumn {
   CALDAV_COL_ID = 0,
@@ -1505,10 +1519,12 @@ static int caldav_lookup_entry_id(sqlite3 *db, const char *kind,
     sqlite3_stmt *stmt = NULL;
     const char *sql =
         include_deleted
-            ? "SELECT e.id FROM entries e LEFT JOIN caldav_tasks c ON "
+            ? "SELECT e.id FROM " CALDAV_ENTRIES
+              " e LEFT JOIN caldav_tasks c ON "
               "c.entry_id = e.id WHERE e.id = ?1 AND e.kind = ?2 AND "
               "c.resource_name IS NULL;"
-            : "SELECT e.id FROM entries e LEFT JOIN caldav_tasks c ON "
+            : "SELECT e.id FROM " CALDAV_ENTRIES
+              " e LEFT JOIN caldav_tasks c ON "
               "c.entry_id = e.id WHERE e.id = ?1 AND e.kind = ?2 AND "
               "c.resource_name IS NULL AND (e.deleted IS NULL OR e.deleted "
               "= 0);";
@@ -1528,9 +1544,11 @@ static int caldav_lookup_entry_id(sqlite3 *db, const char *kind,
   sqlite3_stmt *stmt = NULL;
   const char *sql =
       include_deleted
-          ? "SELECT e.id FROM caldav_tasks c JOIN entries e ON e.id = "
+          ? "SELECT e.id FROM caldav_tasks c JOIN " CALDAV_ENTRIES
+            " e ON e.id = "
             "c.entry_id WHERE c.resource_name = ?1 AND e.kind = ?2;"
-          : "SELECT e.id FROM caldav_tasks c JOIN entries e ON e.id = "
+          : "SELECT e.id FROM caldav_tasks c JOIN " CALDAV_ENTRIES
+            " e ON e.id = "
             "c.entry_id WHERE c.resource_name = ?1 AND e.kind = ?2 AND "
             "(e.deleted IS NULL OR e.deleted = 0);";
   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -1558,7 +1576,8 @@ static int caldav_find_elsewhere(sqlite3 *db, const char *name,
 
   // Client-chosen names and UIDs, in the side table.
   const char *by_side =
-      "SELECT c.entry_id FROM caldav_tasks c JOIN entries e ON e.id = "
+      "SELECT c.entry_id FROM caldav_tasks c JOIN " CALDAV_ENTRIES " e ON "
+      "e.id = "
       "c.entry_id WHERE (c.resource_name = ?2 OR (?3 <> '' AND c.uid = ?3)) "
       "AND " CALDAV_SQL_TASKISH("e.kind") " ORDER BY c.resource_name = ?2 "
                                           "DESC, (e.deleted IS NULL OR "
@@ -1585,7 +1604,8 @@ static int caldav_find_elsewhere(sqlite3 *db, const char *name,
     return 0;
   }
   const char *by_id =
-      "SELECT e.id FROM entries e LEFT JOIN caldav_tasks c ON c.entry_id = "
+      "SELECT e.id FROM " CALDAV_ENTRIES " e LEFT JOIN caldav_tasks c ON "
+      "c.entry_id = "
       "e.id WHERE e.id = ?2 AND c.entry_id IS NULL AND " CALDAV_SQL_TASKISH(
           "e.kind") ";";
   if (sqlite3_prepare_v2(db, by_id, -1, &stmt, NULL) == SQLITE_OK) {
@@ -2136,7 +2156,8 @@ static void caldav_collection_state(sqlite3 *db, const CalDAVList *l,
   const char *sql =
       "SELECT e.id, e.last_modified_at_utc, e.done_bool, e.deleted, "
       "length(e.title), length(e.content), e.start_date, e.end_date, "
-      "c.extra_ical FROM entries e LEFT JOIN caldav_tasks c ON c.entry_id = "
+      "c.extra_ical FROM " CALDAV_ENTRIES " e LEFT JOIN caldav_tasks c ON "
+      "c.entry_id = "
       "e.id WHERE e.kind = ?1 ORDER BY e.id;";
   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
     sqlite3_bind_text(stmt, 1, l->kind, -1, SQLITE_TRANSIENT);
@@ -3489,7 +3510,7 @@ static bool caldav_store_task(sqlite3 *db, const char *kind, const char *name,
         "?3, deleted = 0, start_date = CASE WHEN ?6 THEN ?7 ELSE start_date "
         "END, end_date = CASE WHEN ?6 THEN ?8 ELSE end_date END, "
         "last_modified_at_utc = strftime('%Y-%m-%d %H:%M:%S', 'now', 'utc') "
-        "WHERE id = ?4;";
+        "WHERE id = ?4 AND ifnull(classification, 0) = 0;";
     ok = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK;
     if (ok) {
       sqlite3_bind_text(stmt, 1, title, -1, SQLITE_TRANSIENT);
@@ -3500,7 +3521,9 @@ static bool caldav_store_task(sqlite3 *db, const char *kind, const char *name,
       sqlite3_bind_int(stmt, 6, reschedule ? 1 : 0);
       sqlite3_bind_text(stmt, 7, s, -1, SQLITE_TRANSIENT);
       sqlite3_bind_text(stmt, 8, e, -1, SQLITE_TRANSIENT);
-      ok = sqlite3_step(stmt) == SQLITE_DONE;
+      // no row changed: a Secret entry, which a stale client's PUT must not
+      // write its old text back into (CALDAV_ENTRIES hides it otherwise)
+      ok = sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0;
     }
   } else {
     const char *sql = "INSERT INTO entries (kind, title, content, done_bool, "
@@ -4410,7 +4433,8 @@ static void caldav_backfill_schedule(sqlite3 *db) {
   sqlite3_stmt *stmt = NULL;
   if (sqlite3_prepare_v2(db,
                          "SELECT c.entry_id, c.extra_ical, e.start_date, "
-                         "e.end_date FROM caldav_tasks c JOIN entries e ON "
+                         "e.end_date FROM caldav_tasks c JOIN " CALDAV_ENTRIES
+                         " e ON "
                          "e.id = c.entry_id WHERE c.sync_start IS NULL;",
                          -1, &stmt, NULL) != SQLITE_OK) {
     return;

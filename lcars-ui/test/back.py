@@ -136,6 +136,30 @@ def run(p, srv):
     s = where()
     check(s[0].startswith("thread:computer-") and s[1].startswith("/ui/chats/computer-"), f"./ask lands in the computer's thread  (got {s})")
 
+    # Number One's threads (no1-threads.md, section 13): a chip filters the
+    # same conversation, not a step - Back is the list, then out.
+    # The engineer routes are stood in for (the scratch server has none)
+    no1 = {"name": "number-one", "title": "Number One", "status": "idle", "session": "s", "past": [], "git": {},
+           "deploy": {}, "events": [], "next": 0, "first": 0,
+           "threads": [{"id": "main", "name": "Main"}, {"id": "deck", "name": "Deck redesign"}]}
+    page.route("**/engineer**", lambda r: r.fulfill(json=no1 if "/engineer/number-one?" in r.request.url else
+                                                    {"engineers": [dict(no1, active=1)], "deploy": {}}))
+    boot(base)
+    page.evaluate("localStorage.setItem('lcars.deck.engkey', JSON.stringify('k-test-key-0123456789'))")
+    page.evaluate("chatsList()"); page.wait_for_timeout(300)
+    # opened as the list's row does (engNo1 asks /features first, which a bare server has off)
+    page.evaluate("chatsOpen(engThread(NO1, NO1_TITLE).id)"); page.wait_for_timeout(900)
+    expect(where(), "thread:eng-number-one", "/ui/chats/eng-number-one", "Number One's conversation")
+    check(page.is_visible('.chth .chthr [data-thr="deck"]'), "his threads are chips at a phone's size")
+    wide = page.evaluate("() => { const r = document.querySelector('.chth .chthr'); return [r.scrollWidth, r.clientWidth, document.documentElement.scrollWidth]; }")
+    check(wide[2] <= 390, f"the chips never widen the page  ({wide})")
+    page.click('.chth .chthr [data-thr="deck"]'); page.wait_for_timeout(500)
+    check(page.evaluate("chat.eng.thread") == "deck", "a tap shows his deck thread")
+    expect(where(), "thread:eng-number-one", "/ui/chats/eng-number-one", "a thread's view keeps the url")
+    expect(back("no1 thread"), "list", "/ui/chats", "Back from a thread's filter: the list, not the other thread")
+    expect(back("no1 list"), "out", "/ui/", "then out")
+    page.unroute("**/engineer**")
+
     check(not page.query_selector("#dock"), "a phone has no chat dock")
     check(not errs, "no page error" + ("" if not errs else ": " + errs[0]))
     desk(browser, srv, cfg)
