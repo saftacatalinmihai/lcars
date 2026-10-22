@@ -53,7 +53,7 @@ PERF = {
     "what arrived while you were away": LIST, "activity heatmap": ["idle-desktop", "scroll-desktop"],
     "filter + search": ["search"] + LIST, "day view + dialogs": [], "the list": LIST + ["search", "open", "morph", "morph-desktop"],
     "date scrubber": LIST, "picking several entries": [], "editor": EDIT, "drafts": EDIT,
-    "stats": [], "the task board": [], "the media view": [], "the reports": [], "the server's features": [], "the blog post's shares": [], "the calendar": [],
+    "stats": [], "the task board": [], "the media view": [], "the reports": [], "the server's features": [], "the blog post's shares": [], "the Share sheet": [], "the calendar": [],
     "topic trends": [], "templates": [], "measurements": [], "the series explorer": [],
     "quick capture": [], "saved views": [], "ambient mode": IDLE,
     "the rail's numbers": IDLE + ["rail"], "config dialog": [], "the app's own updates": [], "row swipe actions": LIST,

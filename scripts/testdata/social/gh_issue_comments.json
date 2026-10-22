@@ -1,0 +1,46 @@
+[
+ {
+  "id": 101,
+  "html_url": "https://github.com/captain-gh/journal/issues/5#issuecomment-101",
+  "issue_url": "https://api.github.com/repos/captain-gh/journal/issues/5",
+  "created_at": "2026-10-19T10:00:00Z",
+  "user": {
+   "login": "dave",
+   "type": "User"
+  },
+  "body": "Same here on 0.2."
+ },
+ {
+  "id": 102,
+  "html_url": "https://github.com/captain-gh/journal/issues/5#issuecomment-102",
+  "issue_url": "https://api.github.com/repos/captain-gh/journal/issues/5",
+  "created_at": "2026-10-19T11:00:00Z",
+  "user": {
+   "login": "captain-gh",
+   "type": "User"
+  },
+  "body": "Fixed in 0.3."
+ },
+ {
+  "id": 103,
+  "html_url": "https://github.com/captain-gh/journal/issues/2#issuecomment-103",
+  "issue_url": "https://api.github.com/repos/captain-gh/journal/issues/2",
+  "created_at": "2026-10-20T12:00:00Z",
+  "user": {
+   "login": "frank",
+   "type": "User"
+  },
+  "body": "Any news?"
+ },
+ {
+  "id": 104,
+  "html_url": "https://github.com/captain-gh/journal/pull/6#issuecomment-104",
+  "issue_url": "https://api.github.com/repos/captain-gh/journal/issues/6",
+  "created_at": "2026-10-20T12:30:00Z",
+  "user": {
+   "login": "github-actions[bot]",
+   "type": "Bot"
+  },
+  "body": "CI passed."
+ }
+]

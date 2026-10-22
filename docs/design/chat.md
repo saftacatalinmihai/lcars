@@ -403,6 +403,30 @@ In the chat that means:
 
 The rule is written into CLAUDE.md's conventions for all UI, not only chat.
 
+### 3.4 Who a line is from (0.298.0)
+
+An engineer's (and Number One's) session gets every line as a user turn:
+the captain's words, and the ship's - `[crew]` reports, `[deploy
+finished]`/`[deploy failed]`, `[rollback]`, `[job]`, `[seat]`,
+`[refresh]`, a `[from …]` hand-on - and the captain's words the ship
+carries (`[captain] ticked off your question #id`, `[captain] A note to
+you … (crew note #id)`), and in an engineer's, Number One's `[No.1]`
+orders. `engineer.py`'s `user_from` reads the leading tag (after a
+`[thread <id>]` line and the inbox's "(held since …)") into the event's
+`from` - `captain`, `via`, `no1`, `ship` - with `tag`, `who` (the engineer
+a report to Number One names) and, for `via`, `ref`/`id`. The page's
+`engFrom` is the same rules, for a server older than the field.
+
+- **ship / no1**: a notice on the left, never his side: the engineer's
+  name (Number One, or Ship) as its label in its colour (`shipHue`), the
+  tag a chip, the text folded past four lines or 280 characters with
+  more / less (the class at once; `SHIP_OPEN`, by the event's key, keeps
+  it across polls and refolds). Never matched to a pending bubble.
+- **via**: his bubble, a label above it naming what it answers, a tap
+  opening the question's entry or the note's card.
+- The events keep `r: "me"`, so narration and quick answers read exactly
+  what they did; the quick answer's context labels them "Ship [tag]".
+
 ---
 
 ## 4. Phases

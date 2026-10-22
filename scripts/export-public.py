@@ -53,6 +53,10 @@ EXCLUDE = [
     "reports/", "lcars-ui/report/", "docs/qa/",
     # the release's own design, which surveys the private names it removes
     "docs/design/open-source.md",
+    # the explainer film's production: built on the captain's own media
+    # store (the music, the narration), his shots and his trip; the film
+    # itself is what is shown
+    "video/", "docs/design/explainer-video.md",
     # replaced by the public ones (write_changelog, write_todo)
     "CHANGELOG.md", "TODO.md",
 ]

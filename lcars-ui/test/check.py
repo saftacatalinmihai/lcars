@@ -225,7 +225,9 @@ for m in re.finditer(r'(\w+) = document\.createElement\("(?:input|textarea)"\);'
 # are listed here as such.
 LINK_ONLY = {"fonts.googleapis.com", "fonts.gstatic.com", "www.rainviewer.com", "www.openstreetmap.org",
              "www.google.com", "waymarkedtrails.org", "opentopomap.org", "mapy.com", "your-journal-server",
-             "lcars.offline"}
+             "lcars.offline",
+             # the Share sheet's composers (social-publish.md 1.11): tabs opened by a tap, never fetched
+             "news.ycombinator.com", "www.reddit.com", "x.com", "bsky.app", "www.linkedin.com", "www.threads.net"}
 csp = re.search(r"const CSP_CONNECT = \[(.*?)\];", src, re.S)
 if path.endswith("index.html"):
     if not csp:

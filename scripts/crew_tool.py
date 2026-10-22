@@ -1665,17 +1665,25 @@ def cmd_docs(_a):
 
 # ---- the runner's one write --------------------------------------------------
 
-def post(role, title, content, urgent=False, value_int=None):
+def post(role, title, content, urgent=False, value_int=None, fields=None, notice=None):
     """One crew_<role> entry, or <task>_crew for an urgent finding; its id.
-    value_int makes it a reading (the shares role's)."""
+    value_int makes it a reading (the shares role's); fields are more of
+    the row's own (the social watch's done_bool); notice a list of the
+    crew's reminders, <task>_crew_<notice> (the watch's "social"), which the
+    crew login owns as it does <task>_crew (lcars_logins.h)."""
     if os.environ.get("CREW_IN_AGENT"):
         die("post is the runner's: an agent's report is its final answer", 3)
     if not re.fullmatch(r"[a-z][a-z0-9_]{0,30}", role or ""):
         die(f"bad role {role!r}")
-    kind = urgent_kind() if urgent else "crew_" + role
+    if notice is not None and not re.fullmatch(r"[a-z][a-z0-9]{0,20}", notice):
+        die(f"bad notice list {notice!r}")
+    kind = urgent_kind() + "_" + notice if notice else urgent_kind() if urgent else "crew_" + role
     body = {"kind": kind, "title": title[:200], "content": content}
     if value_int is not None:
         body["value_int"] = int(value_int)
+    for k, v in (fields or {}).items():
+        if k in ("done_bool", "value_float", "start_date", "end_date"):
+            body[k] = v
     status, text = http("POST", "/entries", body)
     if not 200 <= status < 300:
         raise RuntimeError(f"POST /entries ({kind}): {status} {text[:300]}")

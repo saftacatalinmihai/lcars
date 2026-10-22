@@ -355,6 +355,9 @@ static const char *http_status_text(int status) {
     return "Bad Gateway";
   case 503:
     return "Service Unavailable";
+  case 504:
+    // POST /quick: the computer gave no answer within QUICK_TIMEOUT_MS
+    return "Gateway Timeout";
   case 507:
     return "Insufficient Storage";
   default:
@@ -3640,6 +3643,11 @@ static int HandleIndex(int client_fd) {
       "audio/mpeg as it is made; GET says {provider}; GET /say/token a ~30s "
       "Deepgram key for listening\"},";
   static const char tail[] =
+      "{\"method\":\"POST\",\"path\":\"/quick\","
+      "\"description\":\"the ship's computer on a small spoken question: "
+      "body {question (300 bytes), context (4 KB of lines)}, answers "
+      "{text,ms} or {pass:true,ms}; haiku, no tools, one at a time (429), "
+      "8 s (504). The owner's login only\"},"
       "{\"method\":\"GET\",\"path\":\"/maps\","
       "\"description\":\"the web UI's map settings for plotting a "
       "course: {mapy_key} from $LCARS_MAPY_KEY, or null\"},"
@@ -4041,7 +4049,10 @@ static bool PathIs(const char *path, const char *route) {
 
 // The patch kinds (docs/design/architect.md 2.2): an entry of kind deck_patch
 // or ui_patch is code the captain's pages run with everything they hold (the
-// password, the engineer key), so only the pages may write one. A page says
+// password, the engineer key), so only the pages may write one. social_post
+// (docs/design/social-publish.md 3.1) is held the same way: the text the
+// ship may post for him, and (from slice 3) his approval of a schedule, so
+// no chat agent or crew note may write or approve one. A page says
 // so with X-LCARS-Client on every request; lcars-cli sends none, and it is
 // the only tool of the /chat agents, who write as the captain and read the
 // web - a page found by a search must not be able to make the computer write
@@ -4054,15 +4065,16 @@ static bool PathIs(const char *path, const char *route) {
 // speaks no CalDAV.
 static bool IsPatchKind(const char *kind) {
   assert(kind != NULL);
-  return strcmp(kind, "deck_patch") == 0 || strcmp(kind, "ui_patch") == 0;
+  return strcmp(kind, "deck_patch") == 0 || strcmp(kind, "ui_patch") == 0 ||
+         strcmp(kind, "social_post") == 0;
 }
 
 static int PatchKindRefuse(int client_fd) {
   assert(client_fd >= 0);
   return SendJSONError(client_fd, 403,
-                       "deck_patch and ui_patch entries are written by the "
-                       "LCARS pages only (X-LCARS-Client), never by lcars-cli "
-                       "or a chat agent");
+                       "deck_patch, ui_patch and social_post entries are "
+                       "written by the LCARS pages only (X-LCARS-Client), "
+                       "never by lcars-cli or a chat agent");
 }
 
 // True when the request may go on; false with *status answered
@@ -4448,6 +4460,12 @@ static bool ServeHTTPRequest(int client_fd, Arena *arena, char *req_buf,
                       ? HandleChat(client_fd, arena, body, content_type, true)
                       : SendJSONError(client_fd, 405,
                                       "Method %s not allowed on /ask", method);
+  } else if (PathIs(path, "/quick")) {
+    status_code =
+        strcmp(method, "POST") == 0
+            ? HandleQuick(client_fd, arena, body, content_type)
+            : SendJSONError(client_fd, 405, "Method %s not allowed on /quick",
+                            method);
   } else if (IsEngineerPath(path)) {
     status_code =
         HandleEngineer(client_fd, arena, method, path, query, req_buf, body);

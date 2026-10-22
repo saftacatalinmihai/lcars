@@ -323,8 +323,37 @@ shippable alone; the first a minor, each after a patch.
    the drawing: the panels read as frosted glass lit from behind, the
    mullions as metal. The six looks: calls and triangles +0, bytes +67 kB.
 
-Later, its own order: **night watch** (direction 3), a lighting state of
-the bridge with a voice order and a key, +0 calls.
+**Night watch** (direction 3, 0.297.0, Number One's order of
+2026-10-22): built as a lighting state, as section 3 meant. `NIGHT` in
+deck.html holds the state (`lcars.deck.night` in localStorage, off by
+default) and a setter per part, registered as the bridge is built;
+`nightWatch(on)` runs them. At night:
+
+| part | day | night | how |
+|---|---|---|---|
+| the two pooled lights | 9 and 5, `#fff0dd` | x0.17, `#ffd2a0` | the light spots' values |
+| the key spot over the well | 36 | 8 | its intensity (the shadow map is not redrawn) |
+| the fill on the bridge | `ROOM_FILL` or 0.55/0.35 | x0.22 / x0.25 | scaled in the tick for the zone "Main bridge" |
+| the skylight's panel | 0.45 | 0.12 | the bridge's own `skyMat` |
+| wall, cornice / wainscot | as built | x0.7 / x0.55 | the bridge's own clones |
+| the dome's light ring | lit | x0.18 | a per-vertex mask in the shared batch |
+| displays, viewscreen, amber and warm strips | lit | lit | untouched |
+
+The ring is `M.lightStrip`, merged by `mergeStatic` with a halo and a
+lift's ring into one draw, so a bridge-only clone would be a call more.
+Instead the material lists an attribute `aNight` (`userData.attrs`),
+the ring's geometry carries it as 1 and the others get zeros from
+`copyGeo`'s `fill`, and a shader hook (`hookShader`, key "night")
+multiplies the emissive and the diffuse by `mix(1, uNight, aNight)`.
+The shared glows (`M.glowAmber`, `M.glowWarm`, `M.glowDim`) stay as by
+day: they are the strips that carry the room at night. Toggled by **U**,
+a Night/Day pill shown on the bridge (`data-when="bridge"`), and the
+orders "night watch" and "day watch" with their aliases. Measured (deckshots
+390x844, graphics low, main 0.295.3 beside it): the six looks' calls
+65/81/60/210/77/210 day and night, as main (main's 211 on one look is the
+culling's noise), triangles identical; no texture, render target or
+material added. Following the clock (night in `LCARS_TZ`) is in
+TODO.md as a later order.
 
 ## 8. Scouting: Blender and image-to-3D
 
@@ -1141,3 +1170,97 @@ the room's models against the 40 k; deckshots, 390x844, graphics low):
   atlas 380.5, the skylight 67.1, the tiles 88.7). Boot within noise
   (37.7 s main, 36.4-36.7 s the slices; one run at 59.6 s on a loaded box,
   its high run 45.1 against main's 44.7).
+
+- **Slice 4, the conn chairs generated (0.288.1;** Number One's order:
+  budget (a), Higgsfield's road, cap 15 credits). Four Seedream 5.0 Flash
+  views (1:1, 2k, none re-rolled): the front from a crop of concept B's
+  port helm chair and the whole concept, the back from the new front and
+  the crop, the two sides from the front and back; the chair alone on a
+  plain grey ground, level with the arms. Then `tripo_h3_1_multiview_to_3d`
+  in the order front, left, back, right, `face_limit` 2,400 (0.8 x the
+  budget), PBR: 3 min 30 s, **2,238 triangles** (2,234 welded), 1.0 m
+  tall, front +X. **Credits: 11** (760.75 to 749.75): four images 2.0, the
+  job 9.
+  - **The fit** (`<media>/deck-models/conn_chair/raw/fit.py`, with the raw
+    glb, the views and prompts): turned -90°, on the floor; z x1.41 so the
+    cushion's top (0.41 of the raw height) is the stand-in's 0.58, x and y
+    x1.1 so the arms are +-0.31 (`block()`'s +-0.315) and the foot r 0.27;
+    faces under the pan (0.27 of the height) and inside r 0.29 in `trim`
+    (600); the foot's axis on the origin. 0.63 x 0.66 x 1.42 m against the
+    scripted 0.58 x 0.62 x ~1.30. The folder is
+    `<media>/deck-models/conn_chair/` (`conn_chair.glb`, 2.3 MB, and
+    `LICENSE.txt`), as the captain's chair's.
+  - **The wiring:** `build.sh`'s `fetch()` copies each chair the store has
+    into `~/.cache/lcars-deck-models/generated/bridge/<prop>/` and passes
+    that folder; `bridge.py`'s `generated_chairs` imports both through one
+    `import_pack` (`GEN_BUDGETS`: captain_chair **5,000**, conn_chair 2,400,
+    so Tripo's mesh is not decimated), puts each axis on the origin and
+    pulls each source's leather and plate; `conn_chair()` and
+    `captain_chair()` stay the fallbacks, each on its own. `deck.html`
+    needed nothing but two comments: the model is placed unscaled over
+    `chair(x, z, 0.9, true, false)`, whose armrest lights stay off (its
+    arms are bare).
+  - **Metalness x0.35** (`satin`, the conn chair only): Tripo's ORM made
+    the back plate and the headrest stem full metal, and a mirror on the
+    deck reflects the dark room: from behind a smudged near-black slab.
+    The plate's remaining mottle at 1.6 m is the atlas's texel density on
+    Tripo's fragmented islands; the captain's plate, live since 0.283.0,
+    shows the same at that distance. A clean plate would need the plate's
+    faces in `trim` (Tripo's coarse faces do not follow its outline) or
+    the chairs their own atlas: not done.
+  - **Measured** (deckshots, 390x844, main 0.287.6 against this; graphics
+    low for the counts, high for the looks, which counts only the
+    composer's pass): view B 60 calls both, 494,872 to 493,836 triangles
+    (-1,036: the captain's -1,000 each where all three show, the conn
+    chairs +982 each); view C 203 both, 951,587 to 950,551;
+    `prop:conn_chair` from the front 205/202 to 206/202 (the culling's
+    noise: 1-180, 0-135 and 1-135 equal), from behind 52 both. **The
+    room's models 37,744 of 40,000** (the captain's 3 x 5,000, the conn
+    chairs 2 x 2,234). The bridge's glb and atlas **380.5 to 397 kB**
+    (+16.5; the room's files ~553 kB with the skylight and tiles, under
+    section 6's ~600). Boot within noise (low 41.5 s main, 36.9-60.8 s
+    this on a shared box). From view B the helm chairs now read as the
+    concept's tall squared backs with the brushed plate and the headrest
+    on its stem, a generation level with the captain's.
+
+- **Slice 5, the leftovers (0.291.1;** Number One's order of 2026-10-21
+  night, 0 credits; deckshots 390x844, main 0.289.1 against this):
+  - **The stations' faces:** the body's near face below the status
+    lights (0.62 m) is an inset raked back 15° to the foot, 13 cm in at
+    0.13, between the end panels and over the lit slot, which stays at the
+    front: two more points in `station()`'s profile. 1,036 to 1,048
+    triangles each (+12, under the plan's +50), x6.
+  - **The conn consoles' rounded far corners:** `far_round()` (r 0.2 in
+    six steps) for the slab, extruded by `plate()`, and the rim one
+    12-sided bullnose (r 3.5 cm) swept along it by `along()`, where the far
+    edge and the two cheeks were three bevelled boxes meeting square. The
+    display (1.4 x 0.5) clears the rim's inside at the corners by 1.3 cm.
+    1,752 to **1,696** each (-56: one sweep is cheaper than three bevelled
+    boxes).
+  - **The rail's LCARS tiles:** a black bed 6.4 cm wide on the cap's
+    crown, 0.13-0.4 rad either side of the panel (`TILE_A`, swept in six
+    steps), 2,386 to 2,490 each (+104); the tiles in it are the page's:
+    `blink()` takes a phase and a gain, and a phase under 0.33 is steady,
+    so each arc's tiles (lengths cycling 0.22, 0.07, 0.12, 0.3, 0.07, 0.16
+    m with 2 cm gaps, colours from `LCV`) are boxes in `blinkMat`, merged
+    with the panel's lights: +0 materials and calls, lit as the panel is.
+    Baked into the atlas they would have been paint under the room's light.
+    `blinkR`'s sequence is untouched (both arguments passed), so every
+    other light keeps its colour and phase.
+  - **The chairs' plates:** `pull_plate` no longer streaks (a streak along
+    the texture's u lands in patches at every angle on Tripo's fragmented
+    islands) and pulls the plate's texels 75% of the way to their mean
+    before the x0.68: both generated chairs' plates read one clean brushed
+    grey from behind at 1.6 m, where main's were blotchy. +0 triangles,
+    calls, materials: the cheaper of the two roads, and the trim faces or
+    an atlas of their own are not needed.
+  - **Measured** (graphics low): the six looks' calls identical
+    (65/81/60/209/77/209), triangles +456 each (the models +168 where all
+    show, the tiles' merged lights ~+288); the prop views the same calls
+    within the culling's noise of one (as slice 4's), +456 triangles. **The
+    room's models 37,912 of 40,000** (2,088 left). The bridge's glb and
+    atlas 397 to 401 kB. Boot within noise (low 63.0 s main, 46.3 s this,
+    on a shared box; the rail views 35.8 against 36.4; high 45.7 main 0.291.0,
+    47.1 this). deckboot and `run.sh --changed` pass. The report, the six
+    looks low and high and the props, main beside this:
+    <https://<server>/media/reports/2026/10/bridge-slice-5-faces-corners-rail-tiles-plates-88697742.html>.

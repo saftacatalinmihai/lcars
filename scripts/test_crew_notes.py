@@ -599,6 +599,7 @@ else:
 sys.exit(rc)
 """
 
+import teststate  # noqa: E402,F401 - engineer.py's state a scratch one
 import engineer as E  # noqa: E402
 
 

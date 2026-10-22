@@ -1,0 +1,35 @@
+{
+ "data": {
+  "repository": {
+   "discussions": {
+    "nodes": [
+     {
+      "number": 19,
+      "title": "posts/one/",
+      "url": "https://github.com/captain-gh/journal/discussions/19",
+      "createdAt": "2026-10-18T10:00:00Z",
+      "bodyText": "# posts/one/",
+      "author": {
+       "login": "giscus",
+       "__typename": "Bot"
+      },
+      "comments": {
+       "nodes": [
+        {
+         "databaseId": 301,
+         "url": "https://github.com/captain-gh/journal/discussions/19#discussioncomment-301",
+         "createdAt": "2026-10-20T14:00:00Z",
+         "bodyText": "Loved the deck.",
+         "author": {
+          "login": "mallory",
+          "__typename": "User"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ }
+}

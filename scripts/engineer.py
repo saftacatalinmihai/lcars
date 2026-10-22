@@ -412,6 +412,26 @@ def owner_is(what="the app's owner"):
     return f"{n}, {what}" if n else what
 
 
+# A message the captain said aloud (hold to talk, a conversation, the deck's
+# talk sheet, dictation into a chat box) reaches a session with "[spoken] "
+# before the words (the page's chatSpokenMark). The answer may be listened
+# to, not read, and a silence while tools run sounds like nothing heard: so
+# the first thing written is a sentence saying what comes, then the work.
+# Both briefs carry it, word for word; lcars_chat.h's prompt has its own.
+SPOKEN_RULE = """Spoken messages: a message that begins [spoken] was said aloud by the captain, and the answer may be \
+heard rather than read. Answer it first in one or two short sentences, before any tool call, saying what you are about \
+to look up or do; then do the work. Keep the last message short and plain enough to listen to."""
+
+# The ship's computer answers a small spoken question to Number One aloud
+# before Number One does (docs/design/voice-quick-answer.md 9), and the
+# page tells Number One what it said: on a line of its own after the
+# words, or as a message of its own (index.html's quickLine, word for
+# word). Number One's brief only.
+QUICK_RULE = """A line [computer answered the captain aloud: "..."] means the ship's computer has already said that \
+to the captain. Do not repeat it. If it was wrong or incomplete, say so first, in one sentence ("Correction: ..."); \
+if it was right and complete, add nothing about it."""
+
+
 def brief(name, st):
     if name == NO1:
         return brief_no1(name, st)
@@ -462,6 +482,8 @@ Number One: a message that begins [No.1] is from Number One, the captain's first
 captain. Take its orders as the captain's own, and do not deploy for it: Number One reviews and deploys. If the \
 captain says otherwise, the captain's word stands.
 
+{SPOKEN_RULE}
+
 Notes from the captain's journal: a message that begins "[captain] A note to you" (or "More in a note to you") and \
 names a "(crew note #<id>)" is an order the captain wrote as an @{name.split('-')[0]} line in one of the journal's entries. Take it as the \
 captain's word. The last message of the turn that takes it is put under the note, in that thread: make it the answer, \
@@ -509,7 +531,7 @@ to you hours after it was sent, and several may come together: read them all bef
 
 Heavy jobs: the cores take one heavy run at a time. Heavy is the full or PERF=0 `lcars-ui/test/run.sh` (and \
 `--changed` when it says it runs the behaviour, keyboard or perf stages), perf.py, buttons.py, qa_chat.py, \
-keyboard.py, dates.sh, architect.py, deckvoice.py, editor.py, classified.py, deckshots.py, shots.py, \
+keyboard.py, dates.sh, architect.py, deckvoice.py, editor.py, classified.py, deckshots.py, deckmem.py, shots.py, \
 deck-models/build.sh, and `make lcars-release|lcars-one|lcars-embed|lcars-static`; a hook refuses them bare. Run \
 each as `{eng} job {name} [--label TEXT] -- <the command>`. When nobody waits it runs there and then, as before. \
 When it answers "queued", end your turn at once (one line: what you submitted) and edit nothing until it is back: \
@@ -572,6 +594,10 @@ the Claude app or a terminal - the same session. You act on the captain's behalf
 change the LCARS app, so that the captain only has to decide what really needs the captain.
 
 Replies are read on a phone: short and plain. Stay in character lightly; be a precise engineering lead first.
+
+{SPOKEN_RULE}
+
+{QUICK_RULE}
 
 Your controls are `{n1}` and nothing else (run it with no arguments for its usage). You do not edit code, build, or \
 run git that changes anything; your permissions allow only that script, reading files, and read-only git. \
@@ -1054,11 +1080,24 @@ def clip(s, n=TEXT_MAX):
 
 
 def tool_line(b):
+    """A tool call's chip (`t`), and for the thread's status line, which
+    words it for a person ("reading index.html…", engToolWords), its name
+    (`n`) and the one argument that says what it is about (`a`): a Bash
+    call's description, a search's pattern, an edit's file."""
     i = b.get("input") or {}
+    name = b.get("name") or "tool"
     what = i.get("command") or i.get("file_path") or i.get("pattern") or i.get("url") or i.get("description") or ""
     if isinstance(what, str) and what.startswith(HOME):
         what = "~" + what[len(HOME):]
-    return {"r": "tool", "t": (b.get("name") or "tool") + (": " + str(what).splitlines()[0][:160] if what else "")}
+    pats = i.get("patterns")
+    arg = i.get("description") if name == "Bash" else \
+        " or ".join(str(p) for p in pats[:3]) if isinstance(pats, list) and pats else \
+        i.get("file_path") or i.get("pattern") or i.get("query") or i.get("url") or ""
+    ev = {"r": "tool", "t": name + (": " + str(what).splitlines()[0][:160] if what else ""), "n": name}
+    arg = str(arg or "").strip()
+    if arg:
+        ev["a"] = os.path.basename(arg) if i.get("file_path") and arg == i.get("file_path") else arg.splitlines()[0][:80]
+    return ev
 
 
 # Claude Code wraps a pasted or quoted message - the captain's quote reply
@@ -1083,7 +1122,58 @@ def chat_text(t):
     return re.sub(r"\n{3,}", "\n\n", t).strip()
 
 
-def events_of(line):
+# Who a user message of a session is from, by its leading tag (after a
+# "[thread <id>]" line and the inbox's "(held since ...)"): every line the
+# ship types in arrives as a user turn, like the captain's own words, and
+# the chats draw them apart (docs/design/chat.md §3.4). The page has the
+# same rules (engFrom) for a server older than this field: keep them alike.
+#   captain  the captain's own words: plain text, [spoken], a quote reply pasted
+#   via      the captain's words the ship carries: a question of yours ticked off
+#            ("[captain] ticked off your question #id"), a journal note
+#            ("[captain] A note to you ... (crew note #id)"), an answer
+#   no1      Number One's order to an engineer ("[No.1] ...")
+#   ship     the ship's own line: SHIP_TAGS, and "[from <who>]" (a yield's
+#            hand-on from another engineer)
+SHIP_TAGS = ("crew", "deploy finished", "deploy failed", "rollback", "job", "seat", "refresh")
+FROM_LEAD_RE = re.compile(r"^(?:\[thread [a-z][a-z0-9-]{0,23}\][ \t]*\n)?(?:\(held since [^)\n]*\) )?\[([^\]\n]{1,60})\]")
+# the engineer a [crew] or [deploy ...] line to Number One is about
+# (only as those to Number One write it: "name: ...", "name (title) ...",
+# "name context ..."; an engineer's own "[deploy failed] the suite ..." names nobody)
+FROM_WHO_RE = re.compile(r"^ ([a-z][a-z0-9-]{0,23})(?=:| \(| context )")
+
+
+def user_from(t):
+    """The fields an "me" event gets for who it is from: {"from": ...}, and
+    for one not plainly the captain's its `tag`, the engineer it names
+    (`who`), and what a carried word answers (`ref` "ask" or "note", `id`)."""
+    m = FROM_LEAD_RE.match(t or "")
+    tag = m.group(1) if m else ""
+    low, rest = tag.lower(), (t or "")[m.end():] if m else ""
+    if low in SHIP_TAGS:
+        f = {"from": "ship", "tag": low}
+        w = FROM_WHO_RE.match(rest) if low in ("crew", "deploy finished", "deploy failed") else None
+        return dict(f, who=w.group(1)) if w else f
+    if low.startswith("from "):
+        return {"from": "ship", "tag": "from", "who": tag[5:].strip()[:40]}
+    if tag == "No.1":
+        return {"from": "no1", "tag": "No.1"}
+    if low == "captain":
+        n = re.search(r"\(crew note #(\d+)\)", rest)
+        if n and re.match(r"\s*(?:A note|More in a note)\b", rest):
+            return {"from": "via", "tag": "note", "ref": "note", "id": int(n.group(1))}
+        q = re.match(r"\s*ticked off your question #(\d+)", rest)
+        if q:
+            return {"from": "via", "tag": "question", "ref": "ask", "id": int(q.group(1))}
+        return {"from": "via", "tag": "captain"}
+    return {"from": "captain"}
+
+
+def events_of(line, key=None):
+    """A transcript line's bubbles. With `key` (the session and the line's
+    byte offset, which only the poll knows) each also carries `k`, the key
+    the page says a line once by (docs/design/voice-live-narration.md 2.1),
+    and `at`, the line's own time in epoch seconds, by which a page that
+    slept through a turn does not say its old lines (2.2)."""
     try:
         o = json.loads(line)
     except ValueError:
@@ -1097,13 +1187,19 @@ def events_of(line):
                 [b.get("text") for b in c if b.get("type") == "text"] if isinstance(c, list) else []:
             t = chat_text(t)
             if t:
-                ev.append({"r": "me", "t": clip(t)})
+                ev.append(dict({"r": "me", "t": clip(t)}, **user_from(t)))
     else:
         for b in c if isinstance(c, list) else []:
             if b.get("type") == "text" and b.get("text", "").strip():
                 ev.append({"r": "them", "t": clip(b["text"].strip())})
             elif b.get("type") == "tool_use":
                 ev.append(tool_line(b))
+    if key is not None:
+        at = iso_ts(o.get("timestamp"))
+        for i, e in enumerate(ev):
+            e["k"] = f"{key}:{i}"
+            if at is not None:
+                e["at"] = round(at, 1)
     return ev
 
 
@@ -1474,17 +1570,22 @@ def poll_take(taken, used, evs):
     return not taken or (taken + len(evs) <= POLL_MAX_EVENTS and used + size <= POLL_MAX_TEXT), size
 
 
+def poll_key(path):
+    """The session part of an event's key: its transcript's name, short."""
+    return os.path.basename(path)[:8]
+
+
 def poll_forward(path, off, size):
     """Events of the whole lines from byte `off` up to `size`; returns them and
     the offset after the last line taken, where the next poll goes on."""
-    events, used, nxt = [], 0, off
+    events, used, nxt, sk = [], 0, off, poll_key(path)
     with open(path, "rb") as f:
         f.seek(off)
         while nxt < size:
             line = f.readline()
             if not line.endswith(b"\n"):
                 break          # still being written: next time
-            evs = events_of(line.decode("utf-8", "replace"))
+            evs = events_of(line.decode("utf-8", "replace"), f"{sk}:{nxt}")
             ok, n = poll_take(len(events), used, evs)
             if not ok:
                 break
@@ -1499,7 +1600,7 @@ def poll_back(path, end):
     first until the page is full; returns them in order and the offset of the
     oldest line taken (0: the transcript's start), which is where the page
     before this one ends."""
-    pages, taken, used, first = [], 0, 0, end
+    pages, taken, used, first, sk = [], 0, 0, end, poll_key(path)
     pos, rest = end, b""
     with open(path, "rb") as f:
         while pos > 0:
@@ -1517,7 +1618,7 @@ def poll_back(path, end):
             for part, start in reversed(list(zip(parts, starts))):
                 if not part:
                     continue
-                evs = events_of(part.decode("utf-8", "replace"))
+                evs = events_of(part.decode("utf-8", "replace"), f"{sk}:{start}")
                 ok, n = poll_take(taken, used, evs)
                 if not ok:
                     return [e for p in reversed(pages) for e in p], first
@@ -1609,7 +1710,9 @@ def cmd_poll(name, off="-1", before=None, past=None, thread=None):
             events = thread_marks(events, thread_at(path, at))[0]
             if thread:
                 events = [e for e in events if e["th"] == thread]
-    res["events"], res["next"], res["first"] = events, nxt, first
+    # the server's clock, which events' `at` is measured against: the
+    # phone's own may be minutes out
+    res["events"], res["next"], res["first"], res["now"] = events, nxt, first, round(time.time(), 1)
     out(res)
 
 
@@ -1894,15 +1997,52 @@ TEST_TMP_ROOTS = [tempfile.gettempdir(), os.path.join(HOME, ".cache")]
 TEST_TMP_KEEP_H = float(os.environ.get("LCARS_TEST_TMP_KEEP_H") or 24)
 TEST_TMP_RE = re.compile(
     r"(lcars-(perf-base|seat-test|model-test|logins|metrics|caldav|framing|uigzip|transcribe|api|config|onebin|measure|back|btn|editor|dbswap"
-    r"|qachat|off|upd|rec|media|reports|prune|dedupe|demo|features|architect|kinds|conncap|classified)-|lcars-run\.|(brief|crew|crew-notes|ctx|no1-inbox|no1|queue|reap|deploy-suite|prune|merge|export|jobs)-test-|no1-refresh-"
+    r"|qachat|off|upd|rec|media|reports|prune|dedupe|demo|features|architect|kinds|conncap|classified|quick)-|lcars-run\.|(brief|crew|crew-notes|ctx|no1-inbox|no1|queue|reap|deploy-suite|prune|merge|export|jobs|guard)-test-|no1-refresh-"
     r"|playwright-artifacts-|playwright_(chromium|webkit)dev_profile-)[A-Za-z0-9_]+")
 RUN_SH_OUTPUTS = {"deck", "behaviour", "keyboard", "qjs.out", "kb.out"}
+# Remotion's scratch (video/explainer: render.sh, stills.mjs, the studio):
+# each bundle is a webpack build of the explainer, 57-174MB, which Remotion
+# leaves in os.tmpdir() - RAM here, and then swap: 18 of them, 1.66GB, had
+# filled the swap by 2026-10-22. render.sh now bundles into an lcars-render-
+# dir of its own and removes it on exit; these are what a killed render, or
+# a bundle made outside render.sh, leaves. A render reads its bundle until
+# it ends, so none is taken while any Remotion process of ours runs,
+# nor before REMOTION_KEEP_H: a bundle is written at the render's start and
+# only read after, so its age is the render's, and a job's longest is 60
+# minutes (JOB_TIMEOUT_MAX_MIN) - two hours is twice that.
+REMOTION_TMP_RE = re.compile(r"(remotion-webpack-bundle-|remotion-v[0-9.]+-assets|lcars-render-)[A-Za-z0-9_]+")
+REMOTION_KEEP_H = float(os.environ.get("LCARS_REMOTION_KEEP_H") or 2)
+
+
+def remotion_running():
+    """Whether a process of ours is Remotion's: a word of its argv names
+    remotion (`npx remotion render`, node_modules/@remotion/..., Remotion's
+    Chromium) or stills.mjs. A word with a space in it is a script handed to
+    a shell (`zsh -c '...'`, a Claude Code tool call that merely mentions
+    remotion) and is not read. Unreadable processes are skipped; a false
+    yes only puts the sweep off to the next reap. render.sh itself is not
+    looked for: its bundle is read only while `remotion render` runs."""
+    me = os.getuid()
+    for d in os.listdir("/proc"):
+        if not d.isdigit() or int(d) == os.getpid():
+            continue
+        try:
+            if os.stat("/proc/" + d).st_uid != me:
+                continue
+            with open(f"/proc/{d}/cmdline", "rb") as f:
+                words = f.read().decode("utf-8", "replace").lower().split("\0")
+        except OSError:
+            continue
+        if any(not re.search(r"\s", w) and ("remotion" in w or w.endswith("stills.mjs")) for w in words):
+            return True
+    return False
 
 
 def reap_test_tmp(now=None):
     """Delete killed test runs' scratch under TEST_TMP_ROOTS; ([path], bytes)."""
     now = now or time.time()
     gone, freed = [], 0
+    rendering = None  # asked once, and only when there is a Remotion dir to judge
     for root in TEST_TMP_ROOTS:
         try:
             names = sorted(os.listdir(root))
@@ -1913,11 +2053,18 @@ def reap_test_tmp(now=None):
             try:
                 if os.path.islink(d) or not os.path.isdir(d) or os.lstat(d).st_uid != os.getuid():
                     continue
-                if not TEST_TMP_RE.fullmatch(n):
+                keep_h = TEST_TMP_KEEP_H
+                if REMOTION_TMP_RE.fullmatch(n):
+                    if rendering is None:
+                        rendering = remotion_running()
+                    if rendering:
+                        continue
+                    keep_h = REMOTION_KEEP_H
+                elif not TEST_TMP_RE.fullmatch(n):
                     inside = set(os.listdir(d))
                     if not (re.fullmatch(r"tmp\.[A-Za-z0-9]{10}", n) and inside and inside <= RUN_SH_OUTPUTS):
                         continue
-                if now - newest_mtime(d) < TEST_TMP_KEEP_H * 3600:
+                if now - newest_mtime(d) < keep_h * 3600:
                     continue
                 size = tree_bytes(d)
                 shutil.rmtree(d)
@@ -2889,7 +3036,9 @@ def thread_marks(events, cur="main"):
     res = []
     for ev in events:
         parts, cur = thread_split(ev, cur)
-        res += [dict(e, th=th) for th, e in parts]
+        # an event cut in two keeps a key of its own per part
+        res += [dict(e, th=th, **({"k": f"{e['k']}.{j}"} if len(parts) > 1 and "k" in e else {}))
+                for j, (th, e) in enumerate(parts)]
     return res, cur
 
 
@@ -3782,7 +3931,7 @@ def bash_kind(cmd):
 # (slice 3); `run.sh --changed` is light here, as most of its runs are
 # (changed.py would have to run to tell), and the brief says when it is not.
 HEAVY_SCRIPTS = {"run.sh", "perf.py", "buttons.py", "qa_chat.py", "keyboard.py", "dates.sh", "architect.py",
-                 "deckvoice.py", "editor.py", "classified.py", "deckshots.py", "shots.py"}
+                 "deckvoice.py", "editor.py", "classified.py", "deckshots.py", "deckmem.py", "shots.py"}
 HEAVY_MAKE = {"lcars-release", "lcars-one", "lcars-embed", "lcars-static"}
 HEAVY_DENY = ("{what} is a heavy command: run it as `{eng} job {name} -- <the command>` "
               "(inline when nobody waits; else queued, and you end your turn - docs/design/job-queue.md)")
@@ -4967,6 +5116,16 @@ def job_settled(r, now=None):
     return job_result_write(r["id"], {"outcome": "died", "why": why})
 
 
+# A job unit's bounds. MemoryHigh/Max: the largest job measured, the
+# explainer's render, peaks at 3.1GB (docs/design/job-queue.md, "More than
+# one"). OOMScoreAdjust=900: if the box runs out anyway, the kernel takes a
+# job's process (a Chromium, a render) long before the journal's server,
+# which, like every user unit, the Claude Codes and llama-server, sits at
+# the user manager's 200 - 900 adds 0.9 of RAM to the job's score. Raising
+# it needs no privilege; lowering the server's would need root.
+JOB_UNIT_PROPS = ("-p", "MemoryHigh=3G", "-p", "MemoryMax=4G", "-p", "OOMScoreAdjust=900")
+
+
 def job_launch(job):
     """Start `job-run <id>` outside any session: a transient user unit (it
     outlives the engineer's stopped tab; RuntimeMaxSec and MemoryMax bound
@@ -4985,7 +5144,7 @@ def job_launch(job):
         return f"pid:{p.pid}"
     unit = "lcars-job-" + job["id"]
     p = run(["systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}", f"--working-directory={job['wt']}",
-             "-p", f"RuntimeMaxSec={job['timeout'] + 300}", "-p", "MemoryHigh=3G", "-p", "MemoryMax=4G",
+             "-p", f"RuntimeMaxSec={job['timeout'] + 300}", *JOB_UNIT_PROPS,
              "-p", f"StandardOutput=append:{log}", "-p", f"StandardError=append:{log}",
              "--setenv=LCARS_ENG_DETACHED=1", *unit_env(), *argv], timeout=30)
     if p.returncode != 0:

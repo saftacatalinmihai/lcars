@@ -19,6 +19,7 @@ a phone's own. Draw calls and triangles carry over as they are.
 
 Usage:  python3 test/deckshots.py [OUT_DIR] [--page DIR] [--gfx low|medium|high]
         [--size 390x844] [--only Bridge,Ten\\ Forward] [--secs 2] [--no-models]
+        [--no-hud] [--scale 3]
 """
 import argparse
 import functools
@@ -67,6 +68,14 @@ ap.add_argument("--views-deck", type=int, default=8)
 # the rooms' glbs refused (deck/<room>.glb, not the crew's): the deck as it
 # is offline or before its models land, its code-built stand-ins only
 ap.add_argument("--no-models", action="store_true")
+# the deck's own buttons and labels hidden (the HUD, the pills, the FPS
+# readout, a notice): only the 3D canvas in the picture - stills for a
+# video or a page, where the deck's chrome would sit under captions
+ap.add_argument("--no-hud", action="store_true")
+# the device pixel ratio: 3 is a phone's (the default, what the budgets
+# are measured at); a 1920x1080 still for video wants 1 or 2 (3 there is
+# 5760x3240 drawn in software)
+ap.add_argument("--scale", type=float, default=3)
 args = ap.parse_args()
 OUT = pathlib.Path(args.out)
 OUT.mkdir(parents=True, exist_ok=True)
@@ -133,6 +142,24 @@ def pct(a, p):
     return a[min(len(a) - 1, int(len(a) * p))] if a else 0
 
 
+# every element that neither is nor holds a canvas, hidden; run again before
+# each shot, since the deck adds its notices and labels as it goes
+NO_HUD = """() => {
+  for (const el of document.body.querySelectorAll('*')) {
+    if (el.tagName === 'CANVAS' || el.querySelector('canvas')) continue;
+    el.style.setProperty('visibility', 'hidden', 'important');
+  }
+}"""
+
+
+def shot(path):
+    if args.no_hud:
+        pg.evaluate(NO_HUD)
+    # the concourse's views (1.3 M triangles, ~3 s a frame in software)
+    # outlast playwright's 30 s for a screenshot at 3x
+    pg.screenshot(path=path, timeout=180000)
+
+
 def look(room, i, x, z, yaw, pitch=-0.08):
     pg.evaluate("([x, z, a, p]) => { window.__deck.setView(x, z, a, p); window.__deck.tickRooms(true); window.__deck.tickLights(0, true); }", [x, z, yaw, pitch])
     pg.wait_for_timeout(600)   # rooms built one a frame, lights eased in
@@ -146,16 +173,14 @@ def look(room, i, x, z, yaw, pitch=-0.08):
          "frames": len(m["ms"]), "shadow_frames": m["shadowFrames"]}
     report["views"].append(v)
     if args.shots:
-        # the concourse's views (1.3 M triangles, ~3 s a frame in software)
-        # outlast playwright's 30 s for a screenshot at 3x
-        pg.screenshot(path=str(OUT / f"{room.replace(' ', '_').lower()}-{i}.png"), timeout=180000)
+        shot(str(OUT / f"{room.replace(' ', '_').lower()}-{i}.png"))
     print(f"  {room:20s} {i} p50 {v['p50']:6.1f}ms p99 {v['p99']:6.1f}ms calls {v['calls']:4d} tris {v['tris']:8d} shadow redraws {v['shadow_frames']}/{v['frames']}")
 
 
 report = {"url": URL, "size": args.size, "gfx": args.gfx, "views": []}
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, args=["--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
-    ctx = b.new_context(viewport={"width": W, "height": H}, device_scale_factor=3, has_touch=True, is_mobile=True)
+    ctx = b.new_context(viewport={"width": W, "height": H}, device_scale_factor=args.scale, has_touch=True, is_mobile=True)
     ctx.add_init_script(f"""localStorage.setItem("lcars.deck.gfx", {json.dumps(json.dumps(args.gfx))});
                            localStorage.setItem("lcars.deck.view", JSON.stringify("first"));""")
     if args.no_models:

@@ -244,7 +244,7 @@ body:has(> .sheet:not(.hidden)) #help{visibility:hidden}
 #tbtns .pill{min-height:42px;min-width:64px;font-size:15px;padding:10px 14px 8px;background:rgba(255,204,102,.9)}
 #tbtns .pill.alt{background:rgba(204,153,204,.9)}#tbtns .pill.blue{background:rgba(153,204,255,.9)}#tbtns .pill.red{background:rgba(204,102,102,.9)}
 #tbtns [data-when]{display:none}
-#tbtns[data-ctx~="pad"] [data-when~="pad"],#tbtns[data-ctx~="media"] [data-when~="media"],#tbtns[data-ctx~="held"] [data-when~="held"],#tbtns[data-ctx~="lift"] [data-when~="lift"],#tbtns[data-ctx~="seat"] [data-when~="seat"],#tbtns[data-ctx~="seated"] [data-when~="seated"],#tbtns[data-ctx~="desk"] [data-when~="desk"],#tbtns[data-ctx~="holo"] [data-when~="holo"]{display:inline-flex}
+#tbtns[data-ctx~="pad"] [data-when~="pad"],#tbtns[data-ctx~="media"] [data-when~="media"],#tbtns[data-ctx~="held"] [data-when~="held"],#tbtns[data-ctx~="lift"] [data-when~="lift"],#tbtns[data-ctx~="seat"] [data-when~="seat"],#tbtns[data-ctx~="seated"] [data-when~="seated"],#tbtns[data-ctx~="desk"] [data-when~="desk"],#tbtns[data-ctx~="holo"] [data-when~="holo"],#tbtns[data-ctx~="bridge"] [data-when~="bridge"]{display:inline-flex}
 #walkto{position:fixed;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;border:2px solid var(--amber);border-radius:50%;
   pointer-events:none;display:none;opacity:.8}
 body.touch canvas#gl,body.touch #hud{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
@@ -328,6 +328,7 @@ body.touch #near{left:calc(10px + env(safe-area-inset-left));right:calc(10px + e
   <div id="help">
     <b>WASD</b> walk · <b>Shift</b> run · <b>Space</b> jump · <b>mouse</b> look<br>
     <b>F</b> sit on the chair you look at, and stand up<br>
+    <b>Z</b> crouch, and rise (Space and F rise too)<br>
     <b>D</b> at the ready room's desk: dictate a log<br>
     <b>Tab</b> PADD: entries and views · <b>C</b> full console<br>
     <b>O</b> leave the deck for the console's page<br>
@@ -335,6 +336,7 @@ body.touch #near{left:calc(10px + env(safe-area-inset-left));right:calc(10px + e
     <b>wheel</b> size · <b>1–9</b> hand slot · <b>Q</b> empty hand<br>
     <b>T</b> or <b>right-click</b> throw the tablet in hand<br>
     <b>R</b> open · <b>G</b> graphics · <b>M</b> sound · <b>Esc</b> release mouse<br>
+    <b>U</b> on the bridge: night watch, the lights low, and back<br>
     <b>L</b> turbolift: go to another deck<br>
     <b>P</b> in a holodeck: run a day as a program<br>
     <b>B</b> transporter: straight to a room, or rename this one<br>
@@ -353,8 +355,8 @@ body.touch #near{left:calc(10px + env(safe-area-inset-left));right:calc(10px + e
   <div id="tbtns">
     <div class="row"><button class="pill" data-t="take" data-when="pad">Take</button><button class="pill red" data-t="unpin" data-when="pad">Unpin</button><button class="pill blue" data-t="open" data-when="media">Read</button></div>
     <div class="row"><button class="pill blue" data-t="read" data-when="held">Read</button><button class="pill red" data-t="throw" data-when="held">Throw</button><button class="pill alt" data-t="away" data-when="held">Put away</button></div>
-    <div class="row"><button class="pill" data-t="lift" data-when="lift">Decks</button><button class="pill" data-t="holo" data-when="holo">Program</button><button class="pill alt" data-t="beam">Beam</button><button class="pill alt" data-t="helm">Helm</button><button class="pill blue" data-t="console">Console</button><button class="pill alt" data-t="arch">Architect</button><button class="pill" data-t="menu">PADD</button></div>
-    <div class="row"><button class="pill" data-t="sit" data-when="seat">Sit</button><button class="pill" data-t="stand" data-when="seated">Stand</button><button class="pill red" data-t="dict" data-when="desk">Dictate</button><button class="pill alt" data-t="jump">Jump</button><button class="pill dim" data-t="view" id="viewb">3D view</button><button class="pill alt" data-t="voice" id="voiceb">Voice</button></div>
+    <div class="row"><button class="pill" data-t="lift" data-when="lift">Decks</button><button class="pill" data-t="holo" data-when="holo">Program</button><button class="pill alt" data-t="beam">Beam</button><button class="pill alt" data-t="helm">Helm</button><button class="pill blue" data-t="console">Console</button><button class="pill alt" data-t="arch">Architect</button><button class="pill dim" data-t="night" data-when="bridge">Night</button><button class="pill" data-t="menu">PADD</button></div>
+    <div class="row"><button class="pill" data-t="sit" data-when="seat">Sit</button><button class="pill" data-t="stand" data-when="seated">Stand</button><button class="pill red" data-t="dict" data-when="desk">Dictate</button><button class="pill alt" data-t="jump">Jump</button><button class="pill alt" data-t="crouch" id="crouchb">Crouch</button><button class="pill dim" data-t="view" id="viewb">3D view</button><button class="pill alt" data-t="voice" id="voiceb">Voice</button></div>
   </div>
 </div>
 <div id="stick"><i></i></div>
@@ -552,12 +554,24 @@ function mirrorRead() {
 // Number One's questions to the captain (kind task_no1, see "engineers"):
 // each open one is said on the HUD once, when it is first seen
 const no1Seen = new Set();
+// The social watch's notice (task_crew_social, scripts/social.py: "3 new
+// comments: HN 2, GitHub 1"), said the same way, once per row - and once
+// on this device, not on every boot: it waits in the console's Open
+// questions for days, where a question of Number One's is answered within
+// the hour. The ids said are kept (SOCIAL_SEEN_KEY), the newest 50.
+const SOCIAL_SEEN_KEY = "lcars.deck.socialSeen";
+const socialSeen = new Set([].concat(lsGet(SOCIAL_SEEN_KEY, [])));
 function takeRows(list) {
   if (list.length) rowsGen++;          // the view pads are drawn from all of them
   for (const r of list) {
     if (r.kind === "task_no1" && !r.done_bool && !r.deleted && !no1Seen.has(r.id)) {
       no1Seen.add(r.id);
       flashHint("Number One asks: " + (r.title || "a decision"), 9000);
+    }
+    if (r.kind === "task_crew_social" && !r.done_bool && !r.deleted && !socialSeen.has(r.id)) {
+      socialSeen.add(r.id);
+      lsSet(SOCIAL_SEEN_KEY, [...socialSeen].slice(-50));
+      flashHint("New comments: " + (r.title || "on your posts"), 9000);
     }
     rows.set(r.id, r);
     if (r.id > maxId) maxId = r.id;
@@ -931,6 +945,10 @@ function applyGfx() {
   contactMat.opacity = contactOpacity();
   bloom.enabled = gfx !== "low";
   coveU.value = gfx === "low" ? 1 : 0;
+  // low draws straight to the screen: the composer's targets (the 4x
+  // multisampled half-float one, ~25 MB at a phone's 1.5x, and its two
+  // ping-pong buffers) are let go; three makes them again on first use
+  if (gfx === "low") { composer.renderTarget1.dispose(); composer.renderTarget2.dispose(); }
   lsSet("lcars.deck.gfx", gfx);
 }
 function sizeAll() {
@@ -947,6 +965,27 @@ function sizeAll() {
   spaceU.scale.value = steamMat.uniforms.scale.value = dustMat.uniforms.scale.value = VH() * renderer.getPixelRatio() / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
 }
 addEventListener("resize", sizeAll);
+// A lost context: a phone's GPU process reclaims its memory (iOS does it to
+// a tab in the background, or under pressure), and every texture, buffer and
+// render target is gone. three already asks for it back (preventDefault) and,
+// when it comes, uploads again what it still holds: textures from their
+// images and canvases, geometry from its arrays. What was drawn into a
+// target and never kept is ours to draw again: the environment map (PMREM)
+// and the shadow maps. Without this the deck stayed black after a context
+// came back. The hint says what happened, and that the view is coming back.
+let glLost = false;
+canvas.addEventListener("webglcontextlost", () => {
+  glLost = true;
+  flashHint("Graphics memory ran out - restoring the view…", 60000);
+});
+canvas.addEventListener("webglcontextrestored", () => {
+  glLost = false;
+  scene.environment.dispose();
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  renderer.shadowMap.needsUpdate = true;
+  sizeAll();
+  flashHint("View restored");
+});
 // toolbars sliding in and out resize the box without always resizing the window
 if (window.ResizeObserver) new ResizeObserver(() => sizeAll()).observe(canvas);
 
@@ -1335,7 +1374,10 @@ const M = {
   carpetBridge: surf(T.carpet, 0.7, 0x4e4548),
   beam: surf(T.brushed, 0.8, 0xa49c90, { roughness: 0.6, metalness: 0.2 }),
   carpetWell: surf(T.carpet, 0.7, 0x6a5e60),
-  carpetTF: surf(T.carpet, 0.7, 0x3d3a58),
+  // Ten Forward's, the ready room's and the lounge's carpets, and MX.carpets:
+  // each 15% lighter in value, hue kept, in 0.298.1 (deck-polish.md, slice
+  // 7): at the old values a carpet was the darkest thing in its room
+  carpetTF: surf(T.carpet, 0.7, 0x464365),
   ceil: surf(T.ceil, 1.2, 0xb4ada0, { envMapIntensity: 0.3 }),
   lightStrip: new THREE.MeshStandardMaterial({ color: 0xfff2d8, emissive: 0xffe2b8, emissiveIntensity: 0.6 }),
   door: surf(T.grooves, 1.2, 0xa89d8c, { metalness: 0.3 }),
@@ -1367,7 +1409,7 @@ const M = {
   planks: surf(T.planks, 0.9, 0x8a5a3a),
   // the ready room's grey-blue carpet (deck-style.md part 1: it had the
   // planks, and read as a log cabin)
-  carpetReady: surf(T.carpet, 0.7, 0x4a5260),
+  carpetReady: surf(T.carpet, 0.7, 0x555e6e),
   grass: surf(T.carpet, 0.45, 0x2c4520),
   // the arboretum's stepping stones, pond rim and fountain stand-in
   // (deck-style.md part 1): T.pebble's relief under a map of its own with
@@ -1377,7 +1419,7 @@ const M = {
   // the arboretum's walls: stone, as a garden's are, not the corridor's panels
   ashlar: surf(T.ashlar, 2.0, 0xc2b294),
   ashlarLow: surf(T.ashlar, 2.0, 0x8e8068),
-  carpetLounge: surf(T.carpet, 0.7, 0x4a3c52),
+  carpetLounge: surf(T.carpet, 0.7, 0x55455e),
   // warm grey (deck-style.md part 1): the red it was is the bridge's
   sofa: surf(T.pebble, 0.25, 0x6a6460),
   cushion: surf(T.pebble, 0.25, 0x5a6a7a),
@@ -2448,9 +2490,15 @@ function rgeo(w, h, d, r = 0.012) {
 // a geometry's attributes copied into a plain BufferGeometry: clone() would
 // first build a default instance of the geometry's own class, which for a
 // rounded box is most of the cost
-function copyGeo(src, names = ["position", "normal", "uv"]) {
+// `fill`, a material's userData.fill ({ name: itemSize }): an attribute of
+// its batch that only some of its meshes carry, given to the rest as zeros
+// so the batch still merges into one (mergeGeometries refuses a mix)
+function copyGeo(src, names = ["position", "normal", "uv"], fill = null) {
   const g = new THREE.BufferGeometry();
-  for (const n of names) if (src.attributes[n]) g.setAttribute(n, src.attributes[n].clone());
+  for (const n of names) {
+    if (src.attributes[n]) g.setAttribute(n, src.attributes[n].clone());
+    else if (fill && fill[n]) g.setAttribute(n, new THREE.BufferAttribute(new Float32Array(src.attributes.position.count * fill[n]), fill[n]));
+  }
   if (src.index) g.setIndex(src.index.clone());
   return g;
 }
@@ -3127,10 +3175,28 @@ let meshoptDec = null, roomLoader = null;
 const meshoptLoader = () => (meshoptDec ??= import("./vendor/meshopt_decoder-1.3.0.mjs")
   .then(async ({ MeshoptDecoder }) => { await MeshoptDecoder.ready; return MeshoptDecoder; })).then(d => new GLTFLoader().setMeshoptDecoder(d));
 const gltfRooms = () => roomLoader ??= meshoptLoader();
+// A phone's atlases are 1024 at most. Ten Forward's three are 2048 (the
+// rest 1024): 67 MB of GPU memory with their mipmaps, kept all the time
+// (modelAssets), and as much again decoded beside them in an iPhone's tab,
+// for props a phone shows a few hundred pixels across. Halved once on
+// load, in a canvas (the files have no colour profile or alpha, so the
+// normal map's and the ORM's values come through as they are), 17 MB.
+const ATLAS_MAX = TOUCH ? 1024 : Infinity;
+function capAtlas(t) {
+  const im = t.image, big = im ? Math.max(im.width, im.height) : 0;
+  if (big <= ATLAS_MAX) return t;
+  const c = document.createElement("canvas"), k = ATLAS_MAX / big;
+  c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+  const g = c.getContext("2d");
+  g.imageSmoothingQuality = "high";
+  g.drawImage(im, 0, 0, c.width, c.height);
+  t.image = c; t.needsUpdate = true;
+  return t;
+}
 function modelAsset(room) {
   if (modelAssets.has(room)) return modelAssets.get(room);
   const tl = new THREE.TextureLoader();
-  const tex = async (f, srgb) => { const t = await tl.loadAsync(DECK_MODELS + f); t.flipY = false; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; };
+  const tex = async (f, srgb) => { const t = capAtlas(await tl.loadAsync(DECK_MODELS + f)); t.flipY = false; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; };
   const pr = (async () => Promise.all([gltfRooms().then(l => l.loadAsync(DECK_MODELS + room + ".glb")), tex(room + "_base.webp", true), tex(room + "_norm.webp"), tex(room + "_orm.webp")]))()
     .then(([doc, base, norm, orm]) => {
       doc.scene.updateMatrixWorld(true);
@@ -3280,8 +3346,11 @@ blinkMat.onBeforeCompile = sh => {
     "#include <color_fragment>\ndiffuseColor.rgb *= mix(0.12, 1.0, vOn);");
 };
 const blinkR = rng(77), BLINK_COL = [0xff9933, 0xffcc66, 0x66aaff, 0xff3322, 0x99ffaa];
-function blink(w, h, d, x, y, z, parent = root, hex = BLINK_COL[Math.floor(blinkR() * BLINK_COL.length)]) {
-  const geo = new THREE.BoxGeometry(w, h, d), n = geo.attributes.position.count, c = new THREE.Color(hex).multiplyScalar(2.2), ph = blinkR();
+// (`ph` under 0.33 is a steady light, `gain` its brightness: the tactical
+// rail's LCARS tiles pass both, and leave blinkR's sequence, every other
+// light's colour and phase, as it was)
+function blink(w, h, d, x, y, z, parent = root, hex = BLINK_COL[Math.floor(blinkR() * BLINK_COL.length)], ph = blinkR(), gain = 2.2) {
+  const geo = new THREE.BoxGeometry(w, h, d), n = geo.attributes.position.count, c = new THREE.Color(hex).multiplyScalar(gain);
   geo.setAttribute("color", new THREE.Float32BufferAttribute(Array.from({ length: n }, () => [c.r, c.g, c.b]).flat(), 3));
   geo.setAttribute("aPh", new THREE.Float32BufferAttribute(new Float32Array(n).fill(ph), 1));
   const m = new THREE.Mesh(geo, blinkMat);
@@ -3316,9 +3385,9 @@ const blinkRow = (n, x0, y, z, parent, step = 0.07, w = 0.035, h = 0.018, d = 0.
 // padded top on each arm and its little panel of lights. The rest (the
 // lounge's dozen, the ready room's) keep the plainer back: every part of a
 // deck-8 chair is drawn wherever deck 8 is (mergeStatic). `lights: false`
-// leaves the armrest lights off a rich one whose model has no arms (the
-// conn's and ops', bridge.py's conn_chair): they stay over a model, and
-// would float beside it.
+// leaves the armrest lights off a rich one whose model has no armrest
+// consoles (the conn's and ops', bridge.py's conn_chair: slim bare arms):
+// they stay over a model, and would float beside it.
 function chair(x, z, s = 1, rich = false, lights = rich) {
   const g = new THREE.Group();
   const seat = new THREE.Mesh(rgeo(0.6 * s, 0.13, 0.56, 0.06), M.leather); seat.position.y = 0.52;
@@ -3369,6 +3438,47 @@ const CORR_DOORS = { [-1]: [[-22, "Ready room"], [-7.5, "Observation lounge"], [
 // one to the next.
 const hemi = new THREE.HemisphereLight(0xfff4e6, 0x3a3040, 0.55);
 const ROOM_FILL = { "Ready room": [0.28, 0.2], "Observation lounge": [0.42, 0.3], "Arboretum": [0.8, 0.45], "Concourse": [0.6, 0.4] };
+// The bridge at night watch (bridge-redesign.md section 2, direction 3): a
+// lighting state of the room, not a rebuild. Its two pooled lights and the
+// key spot cut hard, the fill under them, the skylight's panel and the
+// walls darkened; the displays, the viewscreen and the amber strips stay
+// as lit as by day, so they carry the room. Only values change: the lights'
+// intensities, the fill's two numbers and the colours of materials the
+// bridge owns already (its own clones). The shared glows (M.glowAmber,
+// M.glowWarm) are merged deck-wide by mergeStatic, so a bridge-only copy of
+// one would be a draw call more, and they are left as they are. Each part
+// registers its setter in `set` as the bridge is built; remembered per
+// device, off by default.
+const NIGHT = { on: lsGet("lcars.deck.night", false) === true, set: [], fill: [0.22, 0.25] };
+// on deck 8's bridge, where the Night pill shows
+function onBridge() { const zn = curDeck === 8 && zoneAt(player.position.x, player.position.z); return !!zn && zn.name === "Main bridge"; }
+// The dome's light ring is M.lightStrip, merged with the deck's other strips
+// (a halo, a lift's ring) into one draw: a bridge-only copy would split it.
+// So the batch carries a per-vertex mask instead, aNight, 1 on the ring's
+// vertices and 0 (copyGeo's fill) on the others', and the shader dims what
+// is masked by one uniform: the ring falls to a faint glow at night and the
+// rest are untouched, in the same call.
+const nightU = { value: 1 };
+M.lightStrip.userData.attrs = ["position", "normal", "uv", "aNight"];
+M.lightStrip.userData.fill = { aNight: 1 };
+hookShader(M.lightStrip, "night", sh => {
+  sh.uniforms.uNight = nightU;
+  sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float aNight;\nvarying float vNight;")
+    .replace("#include <begin_vertex>", "#include <begin_vertex>\nvNight = aNight;");
+  sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform float uNight;\nvarying float vNight;")
+    .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n{ float nk = mix(1.0, uNight, vNight); totalEmissiveRadiance *= nk; diffuseColor.rgb *= nk; }");
+});
+NIGHT.set.push(on => { nightU.value = on ? 0.18 : 1; });
+function nightWatch(on, quiet) {
+  NIGHT.on = !!on;
+  for (const f of NIGHT.set) f(NIGHT.on);
+  // the pill names the watch it would change to
+  const pill = document.querySelector('#tbtns [data-t="night"]');
+  if (pill) pill.textContent = NIGHT.on ? "Day" : "Night";
+  if (quiet) return;
+  lsSet("lcars.deck.night", NIGHT.on);
+  flashHint(NIGHT.on ? "The bridge at night watch" : "The bridge at day watch");
+}
 // Ten Forward: x 2.2..19, z -27.5..-10.5, windows to starboard and forward
 const TF = { X0: CW, X1: 19, Z0: -27.5, Z1: -10.5, H: 4.8 };
 // how far Ten Forward's window glass leans in from upright (deck-style.md part 2)
@@ -3470,13 +3580,26 @@ function buildShip() {
   }
   const dome = new THREE.Mesh(new THREE.CircleGeometry(BR, 72), M.ceil); dome.rotation.x = Math.PI / 2; dome.position.set(0, BH, BZ); add(dome, false); ceilings.push(dome);
   const ring = new THREE.Mesh(new THREE.TorusGeometry(4.0, 0.14, 8, 72), M.lightStrip);
+  // night watch's mask (nightU): this ring dims, the batch's others do not
+  ring.geometry.setAttribute("aNight", new THREE.BufferAttribute(new Float32Array(ring.geometry.attributes.position.count).fill(1), 1));
   ring.rotation.x = Math.PI / 2; ring.position.set(0, BH - 0.1, BZ); root.add(ring);
   // the room's two pooled lights up under the dome and their reach shortened:
   // the ceiling and the well brightest, the wall's foot at the edge of their
   // reach, so the light falls off down the walls as on the set, not the
   // even wash the lights at 3.2 m gave (bridge-redesign.md section 4)
-  light(0, 4.15, BZ - 3.5, 0xfff0dd, 9, 14.5);
-  light(0, 4.15, BZ + 4.5, 0xfff0dd, 5, 11.5);
+  {
+    const pools = [light(0, 4.15, BZ - 3.5, 0xfff0dd, 9, 14.5), light(0, 4.15, BZ + 4.5, 0xfff0dd, 5, 11.5)];
+    NIGHT.pools = pools;   // for deckboot
+    const day = pools.map(s => s.intensity), dayC = new THREE.Color(0xfff0dd), nightC = new THREE.Color(0xffd2a0);
+    // at night a low warm glow from the dome, a fifth and less of the day's:
+    // enough to find the chairs by, the walls fallen into shadow
+    const bwC = bwMat.color.clone(), lowC = bwLowMat.color.clone();
+    NIGHT.set.push(on => {
+      pools.forEach((s, i) => { s.intensity = day[i] * (on ? 0.17 : 1); s.color.copy(on ? nightC : dayC); });
+      bwMat.color.copy(bwC).multiplyScalar(on ? 0.7 : 1);
+      bwLowMat.color.copy(lowC).multiplyScalar(on ? 0.55 : 1);
+    });
+  }
   // the turbolifts, port and starboard
   for (const s of [-1, 1]) turbolift(s * (BR - 0.06), BZ, s < 0 ? "+x" : "-x", s < 0 ? "Bridge, port" : "Bridge, starboard");
   // the viewscreen at the forward wall: a window onto the sky ahead (the
@@ -3522,7 +3645,7 @@ function buildShip() {
   // centre. Its tactical panel, a black face in the swollen cap at the arc's
   // middle, is lit here in shared materials (glowDim, the blinking lights),
   // outside the stand-in: the code-built rail's top is at the same 1.14.
-  const TR = 4.0, TZ = BZ + 0.3, ARC = Math.PI * 0.33;
+  const TR = 4.0, TZ = BZ + 0.3, ARC = Math.PI * 0.33, RAIL_TILES = [0.22, 0.07, 0.12, 0.3, 0.07, 0.16];
   const twMat = Object.assign(cloneHooked(M.wallLow), { side: THREE.DoubleSide });
   for (const th0 of [Math.PI * 0.1, -Math.PI * 0.1 - ARC]) {
     const rg = new THREE.Group();
@@ -3538,6 +3661,19 @@ function buildShip() {
     glowBox(0.5, 0.004, 0.12, M.glowDim, 0, 0, 0, pg);
     blinkRow(7, 0, 0.003, 0.03, pg, 0.07, 0.03, 0.006, 0.02);
     blinkRow(5, 0, 0.003, -0.035, pg, 0.09, 0.05, 0.006, 0.016);
+    // the LCARS tiles along the cap's crown either side of the panel, in
+    // bridge.py's black bed (TILE_A there: 0.13-0.4 rad off the middle):
+    // steady lights in the deck's palette, blocks of a few lengths with
+    // gaps, as an LCARS bar. The blinking lights' material: +0 calls.
+    for (const sg of [-1, 1]) {
+      let u = 0.13 * TR + 0.02, i = 0;
+      while (u < 0.4 * TR - 0.06) {
+        const len = Math.min(RAIL_TILES[i % RAIL_TILES.length], 0.4 * TR - 0.02 - u), a = th0 + ARC / 2 + sg * (u + len / 2) / TR;
+        blink(len, 0.004, 0.05, Math.sin(a) * TR, 1.1445, TZ + Math.cos(a) * TR, root,
+              LCV[(i * 3 + (sg > 0 ? 1 : 0)) % LCV.length], 0.1, 0.9).rotation.y = a;
+        u += len + 0.02; i++;
+      }
+    }
     for (let i = 0; i <= 5; i++) {
       const th = th0 + ARC * i / 5, x = Math.sin(th) * TR, z = TZ + Math.cos(th) * TR;
       block(x - 0.3, z - 0.3, x + 0.3, z + 0.3);
@@ -4276,8 +4412,8 @@ function dressShip({ gap }) {
   rim.rotation.x = -Math.PI / 2; rim.position.set(0, 0.012, BZ); add(rim, false);
   // skirting light, and the sloped cornice with a light under it
   arc(BR - 0.07, 0.018, 0.11, M.glowDim);
-  const corn = new THREE.Mesh(new THREE.CylinderGeometry(BR - 0.6, BR - 0.02, 0.55, 112, 1, true, gap / 2, Math.PI * 2 - gap),
-                              Object.assign(M.wall.clone(), { side: THREE.DoubleSide }));
+  const cornMat = Object.assign(M.wall.clone(), { side: THREE.DoubleSide });
+  const corn = new THREE.Mesh(new THREE.CylinderGeometry(BR - 0.6, BR - 0.02, 0.55, 112, 1, true, gap / 2, Math.PI * 2 - gap), cornMat);
   corn.position.set(0, BH - 0.28, BZ); add(corn, false);
   arc(BR - 0.1, 0.02, BH - 0.57, M.glowWarm);
   // ribs between the stations
@@ -4323,8 +4459,8 @@ function dressShip({ gap }) {
     model(g, "bridge", long ? "station_long" : "station");
     for (const u of long ? [-1, -0.5, 0, 0.5, 1] : [-0.6, 0, 0.6]) { const bx = x - Math.cos(th) * u, bz = z + Math.sin(th) * u; block(bx - 0.28, bz - 0.28, bx + 0.28, bz + 0.28); }
   }
-  // conn and ops get their chairs: bridge.py's conn_chair (armless, built
-  // at the 0.9 stand-in's width, so unscaled) over the stand-in's seat
+  // conn and ops get their chairs: bridge.py's conn_chair (generated, or
+  // its scripted fallback; fitted to the 0.9 stand-in's seat, so unscaled)
   for (const x of [-1.3, 1.3]) model(chair(x, BZ - 3.45, 0.9, true, false), "bridge", "conn_chair", { rot: Math.PI });
   // the ceiling: sixteen radial beams and a luminous panel inside the ring
   for (let i = 0; i < 16; i++) {
@@ -4352,7 +4488,19 @@ function dressShip({ gap }) {
   for (const sg of [-1, 1]) glowBox(0.03, 3.92, 0.01, M.glowAmber, sg * 5.05, 2.3, vz);
   rbox(10.8, 0.3, 0.6, M.trim, 0, 0.15, vz + 0.2, 0.04);
   block(-5.4, BZ - BR, 5.4, vz + 0.5);
-  spot(0, BH - 0.15, BZ + 0.4, 0, BZ + 0.4, 36, 1.1, 14);
+  const key = spot(0, BH - 0.15, BZ + 0.4, 0, BZ + 0.4, 36, 1.1, 14);
+  // night watch (NIGHT, by ROOM_FILL): the key light over the well a pool
+  // the chairs sit in, the skylight's panel near dark (0.45 by day, 0.12),
+  // the cornice in the walls' shadow. Its shadow map is drawn once and a
+  // spot's intensity is not in it, so nothing is redrawn
+  {
+    const cornC = cornMat.color.clone();
+    NIGHT.set.push(on => {
+      key.intensity = on ? 8 : 36;
+      skyMat.color.setScalar(on ? 0.12 : 0.45);
+      cornMat.color.copy(cornC).multiplyScalar(on ? 0.7 : 1);
+    });
+  }
 
   // ---- Ten Forward: chairs at every table, stools at the bar, the lit
   // shelves of bottles behind it, beams overhead, plants in the corners
@@ -5188,6 +5336,34 @@ function buildLounge() {
 // a mirror for the sky and the lights above it (the room's environment),
 // ruffled by a few slow ripples in the shader (blinkU's clock). It was a
 // flat glowing blue disc, the same as the fish tank's water.
+// Its mirror is a night sky of its own (deck-polish.md, slice 6): with the
+// scene's environment, three's RoomEnvironment, its white light boxes
+// showed on the water as big white blobs, a studio under a glass roof. An
+// equirect canvas (the zenith deep blue down to black at the horizon, a
+// few hundred stars, a faint warm band low down for the room's own walls
+// and lamps) through the scene's PMREM once, when the pond is first made;
+// the canvas is disposed then and the cube kept with the pond's material,
+// which is never let go (keepMat), so nothing grows as rooms come and go.
+function pondSky() {
+  const tex = canvasTex(512, 256, (g, w, h) => {
+    const gr = g.createLinearGradient(0, 0, 0, h);
+    // lighter than a real night: the mirror is seen at a glancing angle
+    // through the water's own dark map, and a first cut at #14284a read as
+    // a hole in the lawn
+    gr.addColorStop(0, "#3a5a8a"); gr.addColorStop(0.3, "#22406e"); gr.addColorStop(0.47, "#16284a");
+    gr.addColorStop(0.5, "#5a4a34"); gr.addColorStop(0.56, "#0c0e14"); gr.addColorStop(1, "#040406");
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    const r = rng(611);
+    for (let i = 0; i < 320; i++) {
+      const y = Math.pow(r(), 1.6) * h * 0.46, b = 190 + r() * 65 | 0, sz = r() < 0.15 ? 3 : 2;
+      g.fillStyle = `rgb(${b},${b},${Math.min(255, b + 20)})`; g.fillRect(r() * w, y, sz, sz);
+    }
+  });
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  const env = pmrem.fromEquirectangular(tex).texture;
+  tex.dispose();
+  return env;
+}
 let pondM = null;
 function pondMat() {
   if (pondM) return pondM;
@@ -5197,6 +5373,7 @@ function pondMat() {
       grd.addColorStop(0, "#04121a"); grd.addColorStop(0.6, "#0a2228"); grd.addColorStop(0.88, "#2a3a2a"); grd.addColorStop(1, "#4a4232");
       g.fillStyle = grd; g.fillRect(0, 0, w, w);
     }) }));
+  pondM.envMap = pondSky();
   pondM.onBeforeCompile = sh => {
     sh.uniforms.bT = blinkU.t;
     sh.vertexShader = "varying vec3 vPw;\n" + sh.vertexShader.replace("#include <worldpos_vertex>",
@@ -6049,13 +6226,81 @@ const crateTex = canvasTex(256, 256, (g, w) => {
   g.fillStyle = "#8a806f"; for (let i = 0; i < 8; i++) g.fillRect(0, i * 32 + 12, w, 6);
   g.strokeStyle = "#2a2622"; g.lineWidth = 10; g.strokeRect(5, 5, w - 10, w - 10);
   g.fillStyle = "#d8a020"; g.fillRect(18, 18, 56, 18);
-  g.font = "600 34px Antonio, 'Arial Narrow', sans-serif"; g.fillStyle = "#e8e2d6"; g.fillText("STARFLEET", 70, 150);
-  g.font = "22px ui-monospace, monospace"; g.fillText("CARGO 7-" + 412, 70, 186);
+  g.font = "600 34px Antonio, 'Arial Narrow', sans-serif"; g.fillStyle = "#e8e2d6"; g.fillText("STARFLEET", 40, 150, w - 80);
+  // a maxWidth on each: without Antonio (offline, the first frames) the
+  // fallback face ran past the rim
+  g.font = "22px ui-monospace, monospace"; g.fillText("CARGO 7-" + 412, 40, 186, w - 80);
 });
 const hazardTex = canvasTex(256, 64, (g, w, h) => {
   for (let i = -2; i < 12; i++) { g.fillStyle = i % 2 ? "#1a1a1a" : "#d8a020"; g.beginPath(); g.moveTo(i * 32, h); g.lineTo(i * 32 + 32, h); g.lineTo(i * 32 + 64, 0); g.lineTo(i * 32 + 32, 0); g.fill(); }
 });
 hazardTex.wrapS = THREE.RepeatWrapping;
+// The glow shapes' faces (deck-polish.md, slice 3): until 0.291.6 the
+// transporter's pads and emitters, the cargo bay's pad, the replicators and
+// the shuttles' windows were flat unshaded blue, a sticker with no depth.
+// Each is now a canvas map on an unshaded material, shared, so a room pays
+// one program, not one a mesh; the brightest parts sit over the high
+// composer's bloom threshold (1.0) and the rest under it, so only the rim
+// and the centre bloom.
+// A transporter emitter seen face on: a frosted centre, concentric rings, a
+// bright metal rim. CircleGeometry's uvs span the disc's square, so the
+// rings are drawn round the canvas's middle.
+const emitterTex = canvasTex(256, 256, (g, w) => {
+  const c = w / 2;
+  g.fillStyle = "#2c4466"; g.fillRect(0, 0, w, w);
+  const fr = g.createRadialGradient(c, c, 0, c, c, c * 0.42);
+  fr.addColorStop(0, "#ffffff"); fr.addColorStop(0.6, "#c8dcf4"); fr.addColorStop(1, "#5a7aa0");
+  g.fillStyle = fr; g.beginPath(); g.arc(c, c, c * 0.42, 0, Math.PI * 2); g.fill();
+  for (let i = 0; i < 3; i++) {
+    const rr = c * (0.54 + i * 0.12);
+    g.strokeStyle = "#8cb0dc"; g.lineWidth = 5;
+    g.beginPath(); g.arc(c, c, rr, 0, Math.PI * 2); g.stroke();
+  }
+  g.strokeStyle = "#162238"; g.lineWidth = 5; g.beginPath(); g.arc(c, c, c * 0.9, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = "#e8eef6"; g.lineWidth = 9; g.beginPath(); g.arc(c, c, c * 0.96, 0, Math.PI * 2); g.stroke();
+});
+// A replicator's lit niche: a light from the top falling off down the back,
+// a shelf near the bottom, an LCARS strip over the opening.
+const nicheTex = canvasTex(256, 200, (g, w, h) => {
+  const back = g.createLinearGradient(0, 0, 0, h);
+  back.addColorStop(0, "#e8f0ff"); back.addColorStop(0.35, "#7a92b8"); back.addColorStop(1, "#1e2836");
+  g.fillStyle = back; g.fillRect(0, 0, w, h);
+  const side = g.createLinearGradient(0, 0, w, 0);
+  side.addColorStop(0, "rgba(0,0,0,.55)"); side.addColorStop(0.12, "rgba(0,0,0,0)"); side.addColorStop(0.88, "rgba(0,0,0,0)"); side.addColorStop(1, "rgba(0,0,0,.55)");
+  g.fillStyle = side; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#10141c"; g.fillRect(0, 0, w, 26);
+  g.fillStyle = "#ff9c3a"; g.fillRect(8, 7, 70, 12); g.fillStyle = "#c89ad8"; g.fillRect(84, 7, 110, 12); g.fillStyle = "#9cc0ea"; g.fillRect(200, 7, 48, 12);
+  g.fillStyle = "#3a4250"; g.fillRect(14, h - 46, w - 28, 8);
+  g.fillStyle = "rgba(255,255,255,.35)"; g.fillRect(14, h - 46, w - 28, 2);
+});
+// A shuttle's window: dark glass, a little sky caught at the top, a soft
+// diagonal sheen.
+const glassTex = canvasTex(128, 64, (g, w, h) => {
+  const gr = g.createLinearGradient(0, 0, 0, h);
+  gr.addColorStop(0, "#6a8aac"); gr.addColorStop(0.4, "#1c2c40"); gr.addColorStop(1, "#080c14");
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  g.fillStyle = "rgba(200,225,255,.18)"; g.beginPath(); g.moveTo(w * 0.2, 0); g.lineTo(w * 0.38, 0); g.lineTo(w * 0.22, h); g.lineTo(w * 0.04, h); g.fill();
+});
+// A hologram table's projector disc, seen from above: a soft light rising
+// from the middle, fine rings, tick marks round the rim and two arcs of a
+// readout, in place of a flat saturated blue (slice 4).
+const holoDiscTex = canvasTex(256, 256, (g, w) => {
+  const c = w / 2;
+  const gr = g.createRadialGradient(c, c, 0, c, c, c);
+  gr.addColorStop(0, "#c8e4ff"); gr.addColorStop(0.25, "#4a7ab0"); gr.addColorStop(0.75, "#142a48"); gr.addColorStop(1, "#0a1424");
+  g.fillStyle = gr; g.fillRect(0, 0, w, w);
+  g.strokeStyle = "rgba(140,190,240,.55)"; g.lineWidth = 1.5;
+  for (let i = 1; i <= 6; i++) { g.beginPath(); g.arc(c, c, c * i * 0.14, 0, Math.PI * 2); g.stroke(); }
+  g.strokeStyle = "rgba(170,210,255,.8)"; g.lineWidth = 2;
+  for (let i = 0; i < 72; i++) {
+    const a = i / 72 * Math.PI * 2, r0 = c * (i % 6 ? 0.88 : 0.84);
+    g.beginPath(); g.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0); g.lineTo(c + Math.cos(a) * c * 0.93, c + Math.sin(a) * c * 0.93); g.stroke();
+  }
+  g.strokeStyle = "#ff9c3a"; g.lineWidth = 5; g.beginPath(); g.arc(c, c, c * 0.76, -0.4, 0.5); g.stroke();
+  g.strokeStyle = "#c89ad8"; g.beginPath(); g.arc(c, c, c * 0.76, 2.6, 3.4); g.stroke();
+  g.strokeStyle = "#dce8f6"; g.lineWidth = 4; g.beginPath(); g.arc(c, c, c * 0.97, 0, Math.PI * 2); g.stroke();
+});
+const glowMap = (tex, hex, k) => { const m = glow(hex, k); m.map = tex; return m; };
 const MX = {
   // stone tiles 0.9 m (the concourse, the labs, sickbay): the pebble at
   // 2.2 m it was read as a grey felt
@@ -6066,14 +6311,27 @@ const MX = {
   holo: new THREE.MeshStandardMaterial({ color: 0x050503, emissive: 0xffffff, emissiveMap: gridTex, emissiveIntensity: 0.9, map: gridTex, roughness: 0.6 }),
   crate: new THREE.MeshStandardMaterial({ map: crateTex, roughness: 0.75, metalness: 0.05 }),
   hazard: new THREE.MeshStandardMaterial({ map: hazardTex, roughness: 0.6 }),
+  emitter: glowMap(emitterTex, 0xb0d0ff, 1.5),
+  niche: glowMap(nicheTex, 0xffffff, 1.15),
+  glass: glowMap(glassTex, 0xffffff, 1.0),
+  holoDisc: glowMap(holoDiscTex, 0xffffff, 1.2),
   white: std(0xe8e6e0, { roughness: 0.35 }),
   sheet: std(0xd8dde4, { roughness: 0.8 }),
   blanket: [std(0x3a4a6a, { roughness: 0.9 }), std(0x6a3a3a, { roughness: 0.9 }), std(0x4a5a3a, { roughness: 0.9 }), std(0x5a4a6a, { roughness: 0.9 })],
-  carpets: [surf(T.carpet, 0.7, 0x4a4a5c), surf(T.carpet, 0.7, 0x5a4638), surf(T.carpet, 0.7, 0x3a4a4a), surf(T.carpet, 0.7, 0x54405a), surf(T.carpet, 0.7, 0x44485a)],
-  lightPanel: new THREE.MeshStandardMaterial({ color: 0xfff6e8, emissive: 0xfff0dc, emissiveIntensity: 1.1 }),
-  coolPanel: new THREE.MeshStandardMaterial({ color: 0xeef6ff, emissive: 0xe0f0ff, emissiveIntensity: 1.2 }),
+  carpets: [surf(T.carpet, 0.7, 0x55556a), surf(T.carpet, 0.7, 0x685140), surf(T.carpet, 0.7, 0x435555), surf(T.carpet, 0.7, 0x614a68), surf(T.carpet, 0.7, 0x4e5368)],
+  // The rooms' ceiling panels: a lit diffuser, a dark body under a glow just
+  // over the bloom's threshold (1.0). Until 0.291.4 they were white bodies
+  // (0xfff6e8) under emissive 1.1-1.2, and the pooled light hung under each
+  // lit the body as well: ~3x the threshold, which the high composer's
+  // bloom spread into a white blob twice the panel's size over every
+  // generated room (deck-polish.md, slice 1). Low (no composer) clips
+  // them to the same near-white either way.
+  lightPanel: new THREE.MeshStandardMaterial({ color: 0x2a2826, emissive: 0xfff0dc, emissiveIntensity: 1.05 }),
+  coolPanel: new THREE.MeshStandardMaterial({ color: 0x262a2e, emissive: 0xe0f0ff, emissiveIntensity: 1.1 }),
   growLight: glow(0xff66dd, 2.2),
-  mat: std(0x2a4a7a, { roughness: 0.9 }),
+  // the gym's mats: white under vertex colours (gymMat), so that a mat and
+  // its lighter piping are one material and merge into the cell's one draw
+  mat: std(0xffffff, { roughness: 0.9, vertexColors: true }),
   leafy: std(0x3a6a2a, { roughness: 0.7, flatShading: true }),
   core: null,   // the warp core's, made below
   // wall skins: a lab's white, and grey plate for the working spaces
@@ -6082,12 +6340,16 @@ const MX = {
   bush: null,   // leaf-card bushes, below
 };
 MX.holo.userData.tile = 1;
-MX.crate.userData.tile = 1.2;
+// No tile for MX.crate: its boxes keep BoxGeometry's own 0-1 uvs, one crate
+// face a side. With a tile (1.2 until 0.291.5) autoUV mapped a unit box's
+// faces to -0.42..0.42, and crateTex, clamped, drew three quarters of each
+// face in its edge pixel, the dark rim: near-black crates with a corner of
+// label (deck-polish.md, slice 2).
 MX.hazard.userData.tile = 0.6;
 for (const sk of [MX.skinLab, MX.skinInd]) hookShader(sk.wallLow, "cove", coveHook);
 // every material the rooms may use without owning it
 const sharedMats = new Set([...Object.values(M), ...Object.values(MX).flat(), ...Object.values(MX.skinLab), ...Object.values(MX.skinInd)].filter(m => m && m.isMaterial));
-const sharedTex = new Set([gridTex, crateTex, hazardTex]);
+const sharedTex = new Set([gridTex, crateTex, hazardTex, emitterTex, nicheTex, glassTex, holoDiscTex]);
 const shareMat = m => { sharedMats.add(m); return m; };
 
 // A pool of wall displays for the generated rooms: one canvas each would be
@@ -6464,7 +6726,7 @@ function finishCell(g) {
     if (all.length < 2) { standinRanges(all, [0], null); continue; }
     const { list, cut } = dressOrder(all, g);
     const geos = list.map(o => {
-      const gg = copyGeo(o.geometry, mat.userData.attrs);
+      const gg = copyGeo(o.geometry, mat.userData.attrs, mat.userData.fill);
       return (gg.index ? gg.toNonIndexed() : gg).applyMatrix4(m4.multiplyMatrices(inv, o.matrixWorld));
     });
     const merged = mergeGeometries(geos), counts = geos.map(gg => gg.attributes.position.count);
@@ -6494,6 +6756,12 @@ function dropCell(g) {
   if (g.userData.models) {
     g.userData.dropped = true;
     for (let i = modelPlaces.length - 1; i >= 0; i--) if (modelPlaces[i].cell === g) modelPlaces.splice(i, 1);
+    // and from the names (placeName): a placement there holds its cell
+    // (`parent`, `g`) and the merged meshes' arrays, so a dropped cell left
+    // there was the whole room kept on the heap after its GPU copies went -
+    // every room walked past, until a phone's tab ran out (0.295.5). The
+    // room built again names its placements again.
+    for (const [k, p] of placeByName) if (p.cell === g || p.parent === g) placeByName.delete(k);
   }
   for (let i = noAO.length - 1; i >= 0; i--) { let p = noAO[i]; while (p && p !== g) p = p.parent; if (p === g) noAO.splice(i, 1); }
   // its floors' atlas and the clones that drew with it (kept from the
@@ -6530,6 +6798,13 @@ function tickRooms(all) {
   if (best) buildRoom(best);
 }
 
+// The light a room's panels give hangs 1.2 m under its ceiling. At 0.7 m
+// (until 0.291.4) the pooled light (decay 1.6) lit the ceiling round each
+// panel about six times as brightly as the floor, a bright halo round each
+// (deck-polish.md, slice 1; the panels' own glare is MX.lightPanel's).
+// Lowered, the ceiling gets ~0.4 of that; the intensity is scaled by the
+// decay so the floor gets what it did at 0.7, and the room's level holds.
+const LIGHT_DROP = 1.2, LIGHT_KEEP = h => Math.pow((h - LIGHT_DROP) / (h - 0.7), 1.6);
 // The room's box: floor, ceiling, the three walls that are its own (the one
 // at its back a window if it is on the hull), a wall above the corridor's if
 // the room is taller, lit panels in the ceiling and the light they give.
@@ -6556,7 +6831,7 @@ function shell(rm, o = {}) {
   for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
     const x = -W / 2 + (i + 0.5) * W / nx, z = -D / 2 + (j + 0.5) * D / nz;
     if (!o.noPanels) rbox(o.pw || 1.3, 0.03, o.pw || 1.3, o.panel || MX.lightPanel, x, h - 0.015, z, 0.01, false);
-    if ((i + j) % 2 === 0 || nx * nz <= 2) light(x, h - 0.7, z, o.lc ?? 0xffe8d0, (o.lk ?? 1) * 3.4, Math.max(7, Math.min(16, Math.max(W, D) * 0.9)));
+    if ((i + j) % 2 === 0 || nx * nz <= 2) light(x, h - LIGHT_DROP, z, o.lc ?? 0xffe8d0, (o.lk ?? 1) * 3.4 * LIGHT_KEEP(h), Math.max(7, Math.min(16, Math.max(W, D) * 0.9)));
   }
 }
 // keep the way in from the door clear
@@ -6585,11 +6860,11 @@ function shuttleCraft(x, z, rot) {
   const part = (w, hh, d, mat, px, py, pz, rr = 0.12, rx = 0) => { const m = new THREE.Mesh(rgeo(w, hh, d, rr), mat); m.position.set(px, py, pz); m.rotation.x = rx; add(m, true, g); return m; };
   part(3.0, 1.9, 4.4, M.hull, 0, 1.3, 0.5, 0.25);
   part(2.7, 1.2, 1.9, M.hull, 0, 1.05, -2.1, 0.3, -0.32);
-  part(2.3, 0.45, 0.06, glow(0x9ec4e8, 0.7), 0, 1.45, -2.98, 0.02, -0.32);
+  part(2.3, 0.45, 0.06, MX.glass, 0, 1.45, -2.98, 0.02, -0.32);
   for (const s of [-1, 1]) {
     part(0.62, 0.55, 4.8, M.hull, s * 1.86, 0.85, 0.6, 0.22);
     part(0.05, 0.16, 4.2, M.glowBlue, s * 2.18, 0.85, 0.6, 0.02);
-    part(0.04, 0.34, 2.6, glow(0x9ec4e8, 0.5), s * 1.51, 1.55, 0.3, 0.02);
+    part(0.04, 0.34, 2.6, MX.glass, s * 1.51, 1.55, 0.3, 0.02);
     part(0.03, 0.12, 4.0, M.pillowC, s * 1.515, 0.95, 0.5, 0.01);
     part(0.18, 0.28, 3.4, M.console, s * 1.1, 0.14, 0.4, 0.04);
   }
@@ -6751,6 +7026,33 @@ function doorWallPlanes(rm, mat, z, y0 = 0) {
   if (y0 < 0) pl(DW, -y0, dx, y0 / 2);
 }
 
+// A gym mat at (x, z): a greyer navy pad, 2.2 x 3.0, on a lighter piping
+// 5 cm wider each side and 2 cm lower, so a pale rim shows round it
+// (deck-polish.md, slice 7; until 0.298.1 one saturated 0x2a4a7a box).
+// The colour is in the vertices, not the material, so the two boxes are
+// MX.mat both and merge into the cell's one draw of it: +0 calls, +1
+// rounded box (300 triangles) a mat. The two geometries are made once
+// and shared, as rgeo's are; the colours go in linear, as a vertex
+// colour is read (THREE.Color converts the sRGB hex).
+let gymMatGeo = null;
+function gymMat(x, z) {
+  if (!gymMatGeo) {
+    const tint = (g, hex) => {
+      const c = new THREE.Color(hex), n = g.attributes.position.count, a = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3);
+      g = copyGeo(g); g.setAttribute("color", new THREE.BufferAttribute(a, 3)); g.userData.shared = true;
+      return g;
+    };
+    gymMatGeo = [tint(rgeo(2.2, 0.06, 3.0, 0.02), 0x3a4f70), tint(rgeo(2.3, 0.04, 3.1, 0.015), 0x8a9ab4)];
+    MX.mat.userData.attrs = ["position", "normal", "uv", "color"];
+  }
+  for (const [g, y] of [[gymMatGeo[0], 0.03], [gymMatGeo[1], 0.02]]) {
+    const m = new THREE.Mesh(g, MX.mat);
+    m.position.set(x, y, z);
+    add(m);
+  }
+}
+
 // Room kinds. Each gets (rm, r): the room and its seeded random.
 const ROOM_T = {
   // Crew quarters: a suite. The bed's head against a side wall at the
@@ -6847,10 +7149,13 @@ const ROOM_T = {
       const tg = new THREE.Group(); tg.position.set(hx, 0, hz); root.add(tg);
       workSpot(hx + 1.25, hz, hx, hz);
       const base = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.85, 36), M.console); base.position.y = 0.425; add(base, true, tg);
-      const disc = new THREE.Mesh(new THREE.CircleGeometry(0.62, 36), M.glowBlue); disc.rotation.x = -Math.PI / 2; disc.position.y = 0.856; tg.add(disc);
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(0.62, 36), MX.holoDisc); disc.rotation.x = -Math.PI / 2; disc.position.y = 0.856; tg.add(disc);
       disc.userData.over = true;
       model(tg, "lab", "holo_table");
-      const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28, 1), holoMat); orb.position.set(hx, 1.35, hz); orb.userData.dynamic = true; root.add(orb);
+      // detail 3 (320 triangles: three's is 20 (d+1)^2): at 1 (80) the
+      // fresnel lit every facet, and from the table's side it read as a
+      // cut-glass ball (slice 4)
+      const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28, 3), holoMat); orb.position.set(hx, 1.35, hz); orb.userData.dynamic = true; root.add(orb);
       tickers.push(owned(t => { orb.rotation.y = t * 0.5; orb.rotation.x = t * 0.2; }, owner));
       block(hx - 0.8, hz - 0.8, hx + 0.8, hz + 0.8);
     }
@@ -6975,7 +7280,7 @@ const ROOM_T = {
     // the gantry: two rails the length of the bay, a bridge across them
     for (const s of [-1, 1]) rbox(0.3, 0.4, D - 0.6, M.grey, s * (W / 2 - 1), h - 1.0, 0, 0.03, false);
     rbox(W - 1.6, 0.35, 0.5, M.trim, 0, h - 1.4, -D / 2 + D * (0.3 + r() * 0.4), 0.03, false);
-    const pad = new THREE.Mesh(new THREE.CircleGeometry(1.4, 48), M.glowBlue); pad.rotation.x = -Math.PI / 2;
+    const pad = new THREE.Mesh(new THREE.CircleGeometry(1.4, 48), MX.emitter); pad.rotation.x = -Math.PI / 2;
     const px = rm.dx + (rm.dx > 0 ? -3.2 : 3.2), pz = D / 2 - 2.2;
     pad.position.set(Math.max(-W / 2 + 1.6, Math.min(W / 2 - 1.6, px)), 0.01, pz); root.add(pad);
     screen(1.8, 1.0, -W / 2 + 0.13, 1.9, D / 2 - 2, Math.PI / 2, rm.seed);
@@ -7006,7 +7311,7 @@ const ROOM_T = {
       if (inAisle(rm, x, rz, 0.4)) continue;
       rbox(1.3, 1.9, 0.25, M.trim, x, 1.45, rz + (rm.win ? 0.1 : -0.1), 0.03, true);
       block(x - 0.65, rz - 0.2, x + 0.65, rz + 0.2);
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.7), glow(0x88bbff, 0.9)); p.position.set(x, 1.45, rz + (rm.win ? -0.03 : 0.03)); p.rotation.y = rm.win ? Math.PI : 0; root.add(p);
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.7), MX.niche); p.position.set(x, 1.45, rz + (rm.win ? -0.03 : 0.03)); p.rotation.y = rm.win ? Math.PI : 0; root.add(p);
     }
     plant(-W / 2 + 0.6, -D / 2 + 0.6, 1.2); plant(W / 2 - 0.6, -D / 2 + 0.6, 1.1);
   },
@@ -7018,7 +7323,7 @@ const ROOM_T = {
     shell(rm, { floor: M.planks, lk: 1.2 });
     for (let x = -W / 2 + 2; x < W / 2 - 1.5; x += 2.6) for (let z = -D / 2 + 2 + (rm.win ? 0.5 : 0); z < D / 2 - 3; z += 3.4) {
       if (inAisle(rm, x, z, 1)) continue;
-      rbox(2.2, 0.06, 3.0, MX.mat, x, 0.03, z, 0.02);
+      gymMat(x, z);
     }
     const mir = new THREE.Mesh(new THREE.PlaneGeometry(D - 1.6, 1.9), std(0xdfe8ee, { roughness: 0.02, metalness: 1 }));
     mir.position.set(W / 2 - 0.08, 1.35, 0); mir.rotation.y = -Math.PI / 2; add(mir);
@@ -7124,12 +7429,15 @@ const ROOM_T = {
     shell(rm, { floor: MX.floorTile, lc: 0xe0ecff, skin: MX.skinInd });
     const px = 0, pz = -D / 2 + 2.2 + (rm.win ? 0.4 : 0);
     const step = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.1, 0.2, 6), M.console); step.position.set(px, 0.1, pz); add(step);
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 0.2, 6), M.trim); top.position.set(px, 0.3, pz); add(top);
-    const em = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.9, 0.3, 6), M.trim); em.position.set(px, h - 0.15, pz); add(em, false);
+    // the platform and the emitter overhead in brushed grey, not the trim's
+    // warm tone, which read as a wooden hexagon (the consoles' near-black
+    // was tried: a hole in the floor)
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 0.2, 6), M.grey); top.position.set(px, 0.3, pz); add(top);
+    const em = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.9, 0.3, 6), M.grey); em.position.set(px, h - 0.15, pz); add(em, false);
     for (let i = 0; i < 6; i++) {
       const a = i / 6 * Math.PI * 2, x = px + Math.cos(a) * 1.05, z = pz + Math.sin(a) * 1.05;
-      const pad = new THREE.Mesh(new THREE.CircleGeometry(0.34, 24), M.glowBlue); pad.rotation.x = -Math.PI / 2; pad.position.set(x, 0.405, z); root.add(pad);
-      const up = new THREE.Mesh(new THREE.CircleGeometry(0.34, 24), M.glowBlue); up.rotation.x = Math.PI / 2; up.position.set(x, h - 0.31, z); root.add(up);
+      const pad = new THREE.Mesh(new THREE.CircleGeometry(0.34, 24), MX.emitter); pad.rotation.x = -Math.PI / 2; pad.position.set(x, 0.405, z); root.add(pad);
+      const up = new THREE.Mesh(new THREE.CircleGeometry(0.34, 24), MX.emitter); up.rotation.x = Math.PI / 2; up.position.set(x, h - 0.31, z); root.add(up);
     }
     block(px - 2, pz - 2, px + 2, pz + 2);
     const cx = W / 2 - 1.6, cz = D / 2 - 2.6;
@@ -8353,7 +8661,7 @@ function mergeStatic() {
     if (all.length < 2) { standinRanges(all, [0], null); continue; }
     const { list, cut } = dressOrder(all, null);
     const geos = list.map(o => {
-      const g = copyGeo(o.geometry, mat.userData.attrs);
+      const g = copyGeo(o.geometry, mat.userData.attrs, mat.userData.fill);
       return (g.index ? g.toNonIndexed() : g).applyMatrix4(o.matrixWorld);
     });
     const merged = mergeGeometries(geos), counts = geos.map(g => g.attributes.position.count);
@@ -8369,6 +8677,7 @@ function mergeStatic() {
   }
 }
 mergeStatic();
+if (NIGHT.on) nightWatch(true, true);
 // the windows are painted first and leave the depth clear, so what is outside
 // draws over them (see "space outside")
 scene.traverse(o => { if (o.material === skyMat) o.renderOrder = 1; });
@@ -11589,11 +11898,17 @@ function nearPinnable() {
 // asks `walkable` — a seat is inside an obstacle by construction — so the
 // standing spot is kept, and it is what the place remembers meanwhile.
 // A jump is the eye's alone: movement is a 2D test, so it clears nothing, it
-// only feels like one.
+// only feels like one. A crouch (Z, the Crouch pill) is the eye's too, and a
+// slower step: Z again, Space, F or the "stand up" order rise from it first,
+// a seat ends it, and standing from a seat is standing. CROUCH_EYE sits
+// above the floor's props (the bridge rail, a corridor's benches, a console's
+// desk): lower and the near plane cuts into them as you walk up. In a headset
+// the eye is the headset's own, so a crouch does nothing there.
 let aimSeat = null;                 // the aim's hit while it is a seat in reach
 let seated = null;                  // {eye, stand: [x, z]} while sitting
+let crouched = false;
 let jumpY = 0, jumpV = 0, eyeY = EYE;
-const SIT_REACH = 2.6, SEAT_EYE = 0.68, JUMP_V = 4.6, JUMP_G = 13;
+const SIT_REACH = 2.6, SEAT_EYE = 0.68, JUMP_V = 4.6, JUMP_G = 13, CROUCH_EYE = 0.9, CROUCH_PACE = 0.5;
 const _sm = new THREE.Matrix4(), _sv = new THREE.Vector3(), _sd = new THREE.Vector3();
 function sitDown(hit) {
   const m = hit.object, rec = m.userData.seat;
@@ -11611,6 +11926,7 @@ function sitDown(hit) {
   player.position.set(best.x, 0, best.z);
   yaw = Math.atan2(-_sd.x, -_sd.z); pitch = -0.08;
   jumpY = jumpV = 0; walkTo = null;
+  setCrouch(false);
   sfx(520, 0.04);
 }
 function standUp() {
@@ -11619,8 +11935,23 @@ function standUp() {
   player.position.set(seated.stand[0], 0, seated.stand[1]);
   seated = null;
 }
+// the toggle: from a seat it stands up into the crouch
+function setCrouch(on) {
+  crouched = !!on;
+  setText($("#crouchb"), crouched ? "Rise" : "Crouch");
+}
+function crouch(on = !crouched) {
+  if (renderer.xr.isPresenting) return;
+  if (on && TOP) { flashHint("Crouch in the walking view"); return; }
+  if (on && seated) standUp();
+  if (on !== crouched) sfx(on ? 300 : 420, 0.03);
+  setCrouch(on);
+}
+// what a step is multiplied by: half a pace crouched
+function walkPace() { return crouched ? CROUCH_PACE : 1; }
 function jump() {
   if (seated) { standUp(); return; }
+  if (crouched) { crouch(false); return; }
   if (jumpY > 0 || jumpV) return;
   jumpV = JUMP_V;
 }
@@ -11630,7 +11961,7 @@ function tickBody(dt) {
     jumpY += jumpV * dt; jumpV -= JUMP_G * dt;
     if (jumpY <= 0) { jumpY = 0; jumpV = 0; sfx(140, 0.05); }
   }
-  eyeY += ((seated ? seated.eye : EYE) - eyeY) * Math.min(1, dt * 7);
+  eyeY += ((seated ? seated.eye : crouched ? CROUCH_EYE : EYE) - eyeY) * Math.min(1, dt * 7);
   camera.position.y = eyeY + jumpY;
 }
 
@@ -11682,7 +12013,7 @@ function updateAim() {
   const plays = aimPad && isMedia(aid) && mediaAsset(aid).el;
   const inLift = !!hereLift(), inHolo = !!holoHere();
   if (TOUCH) {
-    const ctx = (aimPad ? "pad " + (plays ? "media " : "") : "") + (holding ? "held " : "") + (inLift ? "lift " : "") + (inHolo ? "holo " : "") + (seated ? "seated" + (seated.desk ? " desk" : "") : aimSeat && !holding ? "seat" : "");
+    const ctx = (aimPad ? "pad " + (plays ? "media " : "") : "") + (holding ? "held " : "") + (inLift ? "lift " : "") + (inHolo ? "holo " : "") + (onBridge() ? "bridge " : "") + (seated ? "seated" + (seated.desk ? " desk" : "") : aimSeat && !holding ? "seat" : "");
     if (tbtns.dataset.ctx !== ctx) tbtns.dataset.ctx = ctx;
   }
   setText(hud.hint, performance.now() < flashUntil ? flashMsg
@@ -12392,6 +12723,7 @@ addEventListener("keydown", ev => {
   if (k === "y" && !ev.ctrlKey && !ev.metaKey) { deckVoiceToggle(); return; }
   if (k === "g") { setGfx(GFX[(GFX.indexOf(gfx) + 1) % GFX.length]); return; }
   if (k === "m") { cycleSound(); return; }
+  if (k === "u") { nightWatch(!NIGHT.on); return; }
   if (k === "v" && !riding) { setTop(!TOP); return; }
   if (k === "k" && !anySheet() && !riding) { summonCrew(); return; }
   if (k === "i" && !anySheet() && !riding) { openArchitect(); return; }
@@ -12399,7 +12731,8 @@ addEventListener("keydown", ev => {
   if (ev.key === "Enter" && aimCrew) { ev.preventDefault(); openTalk(aimCrew); return; }
   keys.add(ev.code);
   if (ev.code === "Space") { ev.preventDefault(); if (!TOP) jump(); }
-  else if (k === "f") { if (seated) standUp(); else if (aimSeat) sitDown(aimSeat); }
+  else if (k === "f") { if (seated) standUp(); else if (aimSeat) sitDown(aimSeat); else if (crouched) crouch(false); }
+  else if (k === "z" && !TOP) crouch();
   else if (k === "d" && (dict.phase || seated && seated.desk)) { dict.phase ? dictEnd() : dictStart(); }
   else if (k === "e" && aimStar) carry(aimStar);
   else if (k === "e" && aimPad) takePad(aimPad);
@@ -12540,9 +12873,11 @@ function holdAt(x, y) {
     else if (w === "stand") standUp();
     else if (w === "dict") dict.phase ? dictEnd() : dictStart();
     else if (w === "jump") jump();
+    else if (w === "crouch") crouch();
     else if (w === "view") setTop(!TOP);
     else if (w === "voice") deckVoiceToggle();
     else if (w === "arch") openArchitect();
+    else if (w === "night") nightWatch(!NIGHT.on);
   };
 }
 
@@ -12560,7 +12895,7 @@ function tickTouch(dt) {
     if (m > 0.12) {
       // a light push walks, the rim runs
       if (seated) standUp();
-      const sp = (m < 0.92 ? 2.6 * m / 0.92 : 7) * dt, f = -vy / m, s = vx / m;
+      const sp = (m < 0.92 ? 2.6 * m / 0.92 : 7) * walkPace() * dt, f = -vy / m, s = vx / m;
       const sy = Math.sin(yaw), cy = Math.cos(yaw);
       moveBy((-sy * f + cy * s) * sp, (-cy * f - sy * s) * sp);
     }
@@ -12571,7 +12906,7 @@ function tickTouch(dt) {
     if (d < 0.25 || walkTo.t > 0.4 && d > walkTo.d - 0.02) walkTo = null;
     else {
       if (walkTo.t > 0.4) { walkTo.t = 0; walkTo.d = d; }
-      const sp = Math.min(d, 2.6 * dt);
+      const sp = Math.min(d, 2.6 * walkPace() * dt);
       moveBy(dx / d * sp, dz / d * sp);
     }
   }
@@ -12710,6 +13045,21 @@ function renderSettings() {
       try { fw?.convSetOutput?.(nv); } catch (e) {}
     });
   }
+  // how much of a turn the chats say (chatNarrate in index.html), the frame's at once
+  const nr = lsGet("lcars.chat.narrate", "") === "answers" ? "answers" : "all";
+  add("Chat voice: " + (nr === "all" ? "everything" : "answers only"), () => {
+    const nv = nr === "all" ? "answers" : "all";
+    lsSet("lcars.chat.narrate", nv);
+    try { fw?.chatNarrateSet?.(nv); } catch (e) {}
+  });
+  // the computer's quick answers to Number One (chatQuick in index.html):
+  // conv, always, off in turn, the frame's at once
+  const QK = ["conv", "always", "off"], qk = QK.includes(lsGet("lcars.chat.quick", "")) ? lsGet("lcars.chat.quick", "") : "conv";
+  add("Quick answers: " + (qk === "conv" ? "in a conversation" : qk), () => {
+    const nv = QK[(QK.indexOf(qk) + 1) % QK.length];
+    lsSet("lcars.chat.quick", nv);
+    try { fw?.chatQuickSet?.(nv); } catch (e) {}
+  });
   add("Graphics: " + gfx, () => { gfx = GFX[(GFX.indexOf(gfx) + 1) % GFX.length]; applyGfx(); });
   add("View: " + (TOP ? "top-down" : "first person"), () => setTop(!TOP));
   if (TOUCH && !TOP) add("Motion look: " + (gyroOn ? "on" : "off"), () => setGyro(!gyroOn));
@@ -13281,7 +13631,7 @@ function updateAimTop() {
   setText(hud.aim, aimPad ? (isMedia(aid) ? mediaLabel(aid) : isView(aid) ? viewLabel(aid) : r ? r.title || "untitled" : "entry " + aid) : "");
   const plays = aimPad && isMedia(aid) && mediaAsset(aid).el;
   const inLift = !!hereLift(), inHolo = !!holoHere(), tap = TOUCH ? "tap" : "click";
-  const ctx = (aimPad ? "pad " + (plays ? "media " : "") : "") + (holding ? "held " : "") + (inLift ? "lift " : "") + (inHolo ? "holo " : "") + (seated ? "seated" + (seated.desk ? " desk" : "") : "");
+  const ctx = (aimPad ? "pad " + (plays ? "media " : "") : "") + (holding ? "held " : "") + (inLift ? "lift " : "") + (inHolo ? "holo " : "") + (onBridge() ? "bridge " : "") + (seated ? "seated" + (seated.desk ? " desk" : "") : "");
   if (tbtns.dataset.ctx !== ctx) tbtns.dataset.ctx = ctx;
   setText(hud.hint, performance.now() < flashUntil ? flashMsg
     : crewPick ? (TOUCH ? "tap" : "click") + " where " + personaOf(crewPick).name + " should go on the map"
@@ -13795,8 +14145,9 @@ const DVCMDS = [
   { say: "jump", alias: ["hop"], help: "a jump (Space)", fn: () => jump() },
   { say: "sit down", alias: ["take a seat", "sit"], help: "on the chair you look at (F)",
     fn: () => (aimSeat ? sitDown(aimSeat) : flashHint("Look at a chair to sit on it")) },
-  { say: "stand up", alias: ["get up"], help: "and up again",
-    fn: () => (seated ? standUp() : flashHint("Standing already")) },
+  { say: "crouch", alias: ["get down", "duck", "crouch down"], help: "the eye low and a slower step (Z)", fn: () => crouch(true) },
+  { say: "stand up", alias: ["get up"], help: "and up again, from a seat or a crouch",
+    fn: () => (seated ? standUp() : crouched ? crouch(false) : flashHint("Standing already")) },
   { say: "map view", alias: ["top down view", "show the map", "overhead view", "the map"],
     help: "the ship from above (V)", fn: () => setTop(true) },
   { say: "walking view", alias: ["close the map", "back to walking", "first person", "3d view"],
@@ -13863,6 +14214,10 @@ const DVCMDS = [
   { say: "sound on", alias: ["unmute", "announcements on"], help: "the ship's sound and its announcements (M)", fn: () => setSound("on") },
   { say: "sound quiet", alias: ["no announcements", "announcements off"], help: "the sound, without the announcements", fn: () => setSound("quiet") },
   { say: "sound off", alias: ["mute", "silence the ship"], help: "no sound at all", fn: () => setSound("off") },
+  { say: "night watch", alias: ["night shift", "bridge night watch", "dim the lights", "lights down", "lights low", "dim the bridge"],
+    help: "the bridge's lights low, its displays carrying the room (U)", fn: () => nightWatch(true) },
+  { say: "day watch", alias: ["day shift", "bridge day watch", "lights up", "full lights", "lights on", "raise the lights"],
+    help: "and the bridge lit as by day", fn: () => nightWatch(false) },
 ];
 
 // the keyboard list at the top right (H)
@@ -15649,7 +16004,7 @@ function frame() {
     player.rotation.y = yaw;
     camera.rotation.x = pitch;
     if (playing() && !riding) {
-      const sp = (keys.has("ShiftLeft") || keys.has("ShiftRight") ? 9 : 2.6) * dt;
+      const sp = (keys.has("ShiftLeft") || keys.has("ShiftRight") ? 9 : 2.6) * (TOP ? 1 : walkPace()) * dt;
       let f = 0, s = 0;
       if (keys.has("KeyW") || keys.has("ArrowUp")) f += 1;
       if (keys.has("KeyS") || keys.has("ArrowDown")) f -= 1;
@@ -15696,8 +16051,11 @@ function frame() {
   if (zn) setText(hud.room, shown(zn.name));
   tickAmbience(zn && zn.name);
   const fill = (zn && ROOM_FILL[zn.name]) || [0.55, 0.35], ek = Math.min(1, dt * 1.5);
-  hemi.intensity += (fill[0] - hemi.intensity) * ek;
-  scene.environmentIntensity += (fill[1] - scene.environmentIntensity) * ek;
+  // the bridge's fill at night watch a fraction of its own (an architect's
+  // ROOM_FILL for the bridge still counts, and is scaled the same)
+  const nk = NIGHT.on && zn && zn.name === "Main bridge", nh = nk ? NIGHT.fill[0] : 1, ne = nk ? NIGHT.fill[1] : 1;
+  hemi.intensity += (fill[0] * nh - hemi.intensity) * ek;
+  scene.environmentIntensity += (fill[1] * ne - scene.environmentIntensity) * ek;
   tickLights(dt);
   updateAim();
   tickHeld(dt);
@@ -15778,8 +16136,8 @@ function setSync(s) { $("#sync").textContent = s; }
   loadModels().then(patchReplay, patchReplay);
   deckEvStart();
   // a hook for the headless screenshot harness: hand it the handles it needs
-  window.__deck = { patchLive, patchAll, patchObjs, placeByName, archSees, deckApi, DECK_API_DOC, openArchitect, paintArch, patchSkipped,
-                    lightSpots, ROOM_FILL, blocks, zones, pinnable, modelPlaces, NOPATCH, crew: () => crew, aoStats, blinkHold(on) { crewBlinkHold = !!on; }, READ_CLIP, SHIFT_CLIP, msdTex, padFace, padTexture, engOf, engSlug, sitAim: () => aimSeat && (sitDown(aimSeat), true), sitDown, standUp, jump, body: () => ({ seated: !!seated, aimSeat: !!aimSeat, eye: camera.position.y, jumpY }), seats: () => pinnable.filter(m => m.userData.seat), THREE, scene, player, camera, place, rows, carry, pinHere, rebuildPads, updateAim, renderer, composer, gtao, bloom, lights, openConsole, openMenu, holoHere, holoRun, holoGenerate, holoFind, holoJobs, openHolo, get aimHolo() { return aimHolo; }, talk, openTalk, personaOf, talkId, say, sayAloud, sayStop, crewAimed, get aimCrew() { return aimCrew; }, dict, dictFake(w) { dictWin = w; }, dictStart, dictEnd, get seated() { return seated; }, chart, chartLoad, chartAim, get active() { return active; }, get aimStar() { return aimStar; }, mediaLoad, mediaAssets, mediaRows, mediaPlaying, activate, padObjs, get aimPad() { return aimPad; },
+  window.__deck = { takeRows, socialSeen, patchLive, patchAll, patchObjs, placeByName, archSees, deckApi, DECK_API_DOC, openArchitect, paintArch, patchSkipped,
+                    lightSpots, ROOM_FILL, NIGHT, nightWatch, blocks, zones, pinnable, modelPlaces, NOPATCH, crew: () => crew, aoStats, blinkHold(on) { crewBlinkHold = !!on; }, READ_CLIP, SHIFT_CLIP, msdTex, padFace, padTexture, engOf, engSlug, sitAim: () => aimSeat && (sitDown(aimSeat), true), sitDown, standUp, jump, crouch, walkPace, tickBody, EYE, CROUCH_EYE, body: () => ({ seated: !!seated, crouched, aimSeat: !!aimSeat, eye: camera.position.y, jumpY }), seats: () => pinnable.filter(m => m.userData.seat), THREE, scene, player, camera, place, rows, carry, pinHere, rebuildPads, updateAim, renderer, composer, gtao, bloom, lights, openConsole, openMenu, holoHere, holoRun, holoGenerate, holoFind, holoJobs, openHolo, get aimHolo() { return aimHolo; }, talk, openTalk, personaOf, talkId, say, sayAloud, sayStop, crewAimed, get aimCrew() { return aimCrew; }, dict, dictFake(w) { dictWin = w; }, dictStart, dictEnd, get seated() { return seated; }, chart, chartLoad, chartAim, get active() { return active; }, get aimStar() { return aimStar; }, mediaLoad, mediaAssets, mediaRows, mediaPlaying, activate, padObjs, get aimPad() { return aimPad; },
                     setView(x, z, a, p) { player.position.set(x, 0, z); yaw = a; pitch = p || 0; },
                     aimInfo: () => ({ aim: !!aim, pad: aimPad && aimPad.userData.entryId, stack: aimStack && aimStack.userData.entryId }), aimHit: () => aim, deskAt: () => deskAt, pileOf, takePad, PILE_STEP, primary, throwPad, thrown, held, crew, walkable,
                     walkCrew, crewStep, roomSeats, workSpots, ROOM_CREW, DECK_ROOM_CREW, ROOM_CREW_NEAR, roomPid, planDeck, buildRoom, unbuildRoom, homeCrew, crewReady: () => crewReal, modelsIn: () => modelsIn, modelsReady: () => modelsDone && !modelsBusy, placeModels, dressing, tickDressing, DRESSING, DRESS_R, dressGroup, dressOrder, dressCut, hideStandin,
@@ -15787,7 +16145,7 @@ function setSync(s) { $("#sync").textContent = s; }
                     modelSpots: () => modelPlaces.map(p => { p.g.updateWorldMatrix(true, false); const v = new THREE.Vector3().setFromMatrixPosition(p.g.matrixWorld), f = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), p.rot).transformDirection(p.g.matrixWorld); return { room: p.room, prop: p.prop, x: v.x, y: v.y, z: v.z, fx: f.x, fz: f.z }; }), setActive(i) { active = i; renderHand(); },
                     setTop, get top() { return TOP; }, topCam, tapTop, holdTop, findPath, goTo, get walkTo() { return walkTo; }, get topSel() { return topSel; }, mapX, mapY, zoomTop,
                     rideTo, switchDeck, warpTo, applySky, openHelm, SKIES, get warping() { return !!warpS; }, deck: () => curDeck, lifts, genRooms, zoneAt, tickRooms, tickLights, lightSpots, openLift, openTransport, beamTo, place, pinnable, nearPinnable,
-                    get yaw() { return yaw; }, get gfx() { return gfx; }, get sound() { return sound; }, get hint() { return performance.now() < flashUntil ? flashMsg : ""; }, get lastHint() { return flashMsg; }, get wantRead() { return wantRead; }, dv, DVCMDS, get jumping() { return jumpY > 0 || jumpV !== 0; },
+                    get yaw() { return yaw; }, get gfx() { return gfx; }, get glLost() { return glLost; }, get sound() { return sound; }, get hint() { return performance.now() < flashUntil ? flashMsg : ""; }, get lastHint() { return flashMsg; }, get wantRead() { return wantRead; }, dv, DVCMDS, get jumping() { return jumpY > 0 || jumpV !== 0; },
                     summonCrew, dismissCrew, orderCrew, orderPost, orderCome, orderGoRoom, crewDests, crewStatus, crewOrderSaid, pickDest, crewJSON, get crewPick() { return crewPick; } };
 })();
 </script>

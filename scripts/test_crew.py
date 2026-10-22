@@ -170,6 +170,14 @@ class Roles(Base):
                     sched = C.load(n)[0]["schedule"].split()
                     if sched[0] in days and sched[0] != day:
                         continue    # a weekly role on another day ("*-*-01" may be any day)
+                    if sched[-1].startswith("*:"):
+                        # an hourly role (the social watch) cannot keep 20
+                        # minutes from every other: it must be a light script,
+                        # a few requests waiting on the network, that waits on
+                        # the crew lock (lock_wait) for whoever runs then
+                        fm = C.load(n)[0]
+                        self.assertEqual((fm["kind"], fm["heavy"]), ("script", ""), n)
+                        continue
                     hours, mm = sched[-1].split(":")
                     for hh in map(int, hours.split(",")):     # "02,08,14,20:10" (shares)
                         self.assertFalse(hh == 3 or (hh == 23 and n != "yeoman-linker"), n)

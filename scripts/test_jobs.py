@@ -622,5 +622,30 @@ class Crew(unittest.TestCase):
                 j.httpd.server_close()
 
 
+class Unit(unittest.TestCase):
+    """The job's systemd unit: its memory bounds, and OOMScoreAdjust=900 so
+    that the kernel, short of memory, takes a job's process before the
+    journal's server (200, the user manager's default for every unit)."""
+
+    def test_the_unit_properties(self):
+        seen = []
+
+        def fake_run(argv, **kw):
+            seen.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        env = {k: v for k, v in os.environ.items() if k != "LCARS_JOB_RUNNER"}
+        job = {"id": "ada-20261022-120000", "wt": HERE, "timeout": 1200}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(E, "run", fake_run):
+            self.assertEqual(E.job_launch(job), "lcars-job-ada-20261022-120000")
+        argv = seen[0]
+        self.assertEqual(argv[:2], ["systemd-run", "--user"])
+        props = [argv[i + 1] for i, a in enumerate(argv) if a == "-p"]
+        for want in ("OOMScoreAdjust=900", "MemoryHigh=3G", "MemoryMax=4G", "RuntimeMaxSec=1500"):
+            self.assertIn(want, props)
+        # the properties come before the command the unit runs
+        self.assertLess(argv.index("OOMScoreAdjust=900"), argv.index("job-run"))
+
+
 if __name__ == "__main__":
     unittest.main()

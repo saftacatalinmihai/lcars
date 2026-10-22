@@ -1,0 +1,16 @@
+{
+ "hits": [
+  {
+   "created_at": "2026-10-18T10:00:00Z",
+   "created_at_i": 1792317600,
+   "objectID": "9001",
+   "author": "captain_hn",
+   "title": "Software for One",
+   "url": "https://blog.example/posts/one/",
+   "points": 12,
+   "num_comments": 4,
+   "story_id": 9001
+  }
+ ],
+ "nbHits": 1
+}

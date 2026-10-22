@@ -188,9 +188,14 @@ static bool LimitedRowKind(int client_fd, int id, char *out, size_t out_size,
 // kinds, as the linker's are), and no `settings` entry: one titled
 // `kinds` says where every feature writes (lcars_kinds.h), and a create,
 // a retitle or a PATCH could each make one, so the whole kind is closed.
+// Nor `social_post`, a post for the ship to send (social-publish.md 3.1):
+// the pages' alone, and a crew note must never write or approve one. The
+// steward has no X-LCARS-Client, so PatchKindAllowed refuses it already;
+// this says so here too, where the steward's kinds are read.
 static bool StewardMayWriteKind(const char *kind) {
   assert(kind != NULL);
-  if (kind[0] == '\0' || strcmp(kind, KINDS_ENTRY_KIND) == 0) {
+  if (kind[0] == '\0' || strcmp(kind, KINDS_ENTRY_KIND) == 0 ||
+      strcmp(kind, "social_post") == 0) {
     return false;
   }
   for (size_t i = 0; i < LIMITED_LOGIN_COUNT; i++) {
@@ -331,9 +336,12 @@ static bool LimitedAllowed(int client_fd, const LimitedLogin *l,
     LimitedLoadRoles();
   }
   // /vault: the wrapped key is an offline guessing target, and writing it
-  // is the owner's alone (lcars_vault.h)
+  // is the owner's alone (lcars_vault.h). /quick: the computer answering
+  // the captain's spoken questions to Number One (lcars_chat.h), a run of
+  // claude on his bill for a page of his - no other login's to start
   if (IsEngineerPath(path) || IsCalDAVRequest(method, path) ||
-      PathIs(path, "/say/token") || PathIs(path, "/vault")) {
+      PathIs(path, "/say/token") || PathIs(path, "/vault") ||
+      PathIs(path, "/quick")) {
     *status = LimitedRefuse(client_fd, l);
     return false;
   }

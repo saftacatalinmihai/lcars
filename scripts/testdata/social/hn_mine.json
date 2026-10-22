@@ -1,0 +1,25 @@
+{
+ "hits": [
+  {
+   "created_at": "2026-10-20T08:00:00Z",
+   "created_at_i": 1792483200,
+   "objectID": "9010",
+   "author": "captain_hn",
+   "comment_text": "Thanks, good point.",
+   "parent_id": 9003,
+   "story_id": 9001,
+   "story_title": "Software for One"
+  },
+  {
+   "created_at": "2026-10-19T12:00:00Z",
+   "created_at_i": 1792411200,
+   "objectID": "9020",
+   "author": "captain_hn",
+   "comment_text": "I wrote mine in C.",
+   "parent_id": 8000,
+   "story_id": 8000,
+   "story_title": "Show HN: A journal in SQLite"
+  }
+ ],
+ "nbHits": 2
+}

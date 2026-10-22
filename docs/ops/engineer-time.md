@@ -366,3 +366,7 @@ Recommendation: a second seat is now feasible, at about a fifth longer
 test runs while both test; it is the captain's decision (TODO.md). If it
 is taken, take it with perf serialised across seats, and keep
 `LCARS_ENG_MIN_FREE_MB` at 2500 as the guard for a third.
+
+(2026-10-22: the hour measured again for an adaptive seat and job line,
+with more engineers and the explainer and deckshots in the line, is in
+docs/design/job-queue.md, "More than one".)

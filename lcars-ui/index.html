@@ -7,7 +7,7 @@
 // both together (minor for a feature, patch for a fix) - test/run.sh fails
 // when they disagree. It stays in the file's first kilobyte: that is all the
 // update check reads of the server's copy (updFetchVersion, a ranged GET).
-const APP_VERSION = "0.287.7";
+const APP_VERSION = "0.298.3";
 </script>
 <script>
 /* ===================== csp =====================
@@ -1195,6 +1195,17 @@ mark{background:var(--amber);color:#000;border-radius:2px;padding:0 1px}
   box-shadow:inset 0 1px 6px rgba(0,0,0,.9);
   font-family:var(--mono);font-size:12.5px;line-height:1.5;white-space:pre;
 }
+/* a table (mdRender's pipe tables): compact, a thin rule between rows, the
+   header in the accent; the box scrolls sideways so a wide one never makes
+   a chat bubble or the reader wider than the screen */
+.md .mdtbl{overflow-x:auto;max-width:100%;margin:8px 0;-webkit-overflow-scrolling:touch}
+.md table{border-collapse:collapse;font-size:13px;line-height:1.4;overflow-wrap:normal}
+.md th,.md td{padding:3px 10px 3px 0;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+.md th{color:var(--amber);font-family:var(--mono);font-size:12px;letter-spacing:.04em;
+  border-bottom:2px solid var(--amber);white-space:nowrap}
+.md tr:last-child td{border-bottom:0}
+.md th:last-child,.md td:last-child{padding-right:0}
+.md .alc{text-align:center} .md .alr{text-align:right}
 .md code{
   background:#000;border:1px solid var(--line);border-radius:4px;padding:0 4px;
   font-family:var(--mono);font-size:12.5px;color:var(--amber);
@@ -1822,6 +1833,32 @@ body[data-focus="on"] #stackpane{display:none}
 .shact .pressing,#sh_add.pressing{filter:brightness(1.35);transform:scale(.97)}
 .shempty{line-height:1.5}
 .sshare{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+/* the Share sheet (openShareSheet): what, where (a chip each), a card per network */
+.dlg.socsh input,.dlg.socsh textarea{font-size:16px}
+.socscroll{gap:8px}
+.socwhat{display:flex;flex-direction:column;gap:6px;margin:4px 0 0}
+.socwhat label{display:flex;flex-direction:column;gap:3px;font:11px var(--mono);color:var(--dim)}
+.socimg{display:flex;gap:8px;align-items:flex-end}
+.socimg img{width:72px;height:72px;object-fit:cover;border-radius:4px;border:1px solid var(--line)}
+.socimg label{flex:1;min-width:0}
+.socchips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.socchip{opacity:.55}
+.socchip.on{opacity:1;color:#000;background:var(--amber);border-color:var(--amber)}
+.soccards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}
+.soccard{display:flex;flex-direction:column;gap:5px}
+.soccard textarea{resize:vertical}
+.socname{font-size:15px!important}
+.soccnt{margin-left:auto;font:11px var(--mono);color:var(--dim)}
+.soccnt.over{color:var(--red,#f66);font-weight:700}
+.soccard.over{border-left-color:var(--red,#f66)}
+.soccard.off{opacity:.8}
+.socopen.dis{opacity:.4;filter:grayscale(1);cursor:not-allowed}
+.socopen.pressing{filter:brightness(1.35);transform:scale(.97)}
+.socst{font:11px var(--mono);color:var(--dim);align-self:center;overflow-wrap:anywhere;min-width:0}
+.socst.bad{color:var(--red,#f66)}
+.socrow{display:flex;gap:6px;align-items:center}
+.socrow input{flex:1;min-width:0}
+.socown{font:11px var(--mono)}
 /* the series explorer (openExplore): a shared time bar, then one panel per query */
 .xbar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;flex:0 0 auto}
 .xbar .seg button{padding:5px 8px;flex:0 0 auto}
@@ -2698,11 +2735,52 @@ button.qitem:hover,button.qitem:focus-visible{background:#0f0f14}
 .chm.me{align-self:flex-end;align-items:flex-end;max-width:85%}
 .chm.them{align-self:stretch}
 .chm.sys{align-self:center}
+/* the ship typing in (chat.md §3.4): a compact notice on the left, not his
+   bubble - the name in its colour (--hue), the tag a chip, folded when long */
+.chm.ship{align-self:stretch;max-width:100%}
+.chship{--hue:var(--dim);border-left:4px solid var(--hue);background:var(--panel);border-radius:0 10px 10px 0;padding:6px 10px 6px 9px;
+  font-size:14px;line-height:1.4;color:var(--dim);min-width:0}
+.chshiph{display:flex;gap:8px;align-items:center;margin-bottom:2px}
+.chshipn{color:var(--hue);font:600 13px/1.2 var(--disp);letter-spacing:.08em;text-transform:uppercase;overflow-wrap:anywhere}
+.chshipt{flex:0 0 auto;border:1px solid var(--hue);color:var(--hue);border-radius:9px;padding:1px 7px;
+  font:600 11px/1.3 var(--disp);letter-spacing:.06em;text-transform:uppercase}
+.chshipx.md{font-size:15px;line-height:1.45;color:#cfccd4}
+.chshipx.md p{margin:0 0 4px}
+.chshipx.md p:last-child{margin-bottom:0}
+.chship.long:not(.open) .chshipx{max-height:5.8em;overflow:hidden;
+  -webkit-mask-image:linear-gradient(#000 60%,transparent);mask-image:linear-gradient(#000 60%,transparent)}
+.chshipm{display:block;min-height:32px;margin:2px 0 -4px;padding:0 4px;border:0;background:none;color:var(--hue);
+  font:600 12px var(--disp);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+.chshipm:active{opacity:.6}
+/* his words the ship carried: what they answer above the bubble, a link */
+.chvia{align-self:flex-end;border:0;background:none;color:var(--amber);font:600 12px/1.2 var(--disp);letter-spacing:.06em;
+  text-transform:uppercase;padding:2px 4px;min-height:24px;cursor:pointer}
+.chvia:disabled{color:var(--dim);cursor:default}
+.chvia.pressing,.chvia:active{opacity:.6}
 .chbub{font-size:16px;line-height:1.4;overflow-wrap:anywhere}
 .me .chbub{background:var(--panel2);border:1px solid var(--line);border-radius:18px 18px 4px 18px;padding:8px 12px;
   white-space:pre-wrap;color:var(--txt)}
 .them .chbub{border-left:4px solid var(--orange);padding:2px 0 2px 10px}
 .them.live .chbub{border-left-color:var(--amber)}
+/* the message being read aloud: its bar lit in the voice's colour (#chsay) */
+.them.saying .chbub{border-left-color:var(--sky)}
+.chm .chquiet{font-style:italic}
+.chpaused{border-color:var(--sky);color:var(--sky)}
+/* the computer's quick answer: a narrow row in its blue, a pill not an avatar,
+   its bar lit while it is said (voice-quick-answer.md 5) */
+.chm.quick{align-self:stretch;align-items:flex-start}
+.chqrow{display:flex;gap:8px;align-items:baseline;border-left:4px solid transparent;padding:2px 0 2px 8px}
+.chm.quick.saying .chqrow{border-left-color:var(--blue)}
+.chqpill{flex:0 0 auto;background:var(--blue);color:#000;font:600 12px/1 var(--disp);letter-spacing:.06em;border-radius:10px;padding:4px 9px}
+.chqtext{color:var(--blue);font-size:16px;line-height:1.4;overflow-wrap:anywhere}
+.chqask{margin-left:12px;border-color:var(--amber);color:var(--amber)}
+/* "checking…": the computer asked, its answer not in yet (quickCheck) */
+.chqchk{animation:savepulse 1.2s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){ .chqchk{animation:none} }
+.chqask.on{background:var(--amber);color:#000}
+/* an engineer in a tool, nothing being said: the status line pulses */
+.chstat.tool{animation:savepulse 1.4s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){ .chstat.tool{animation:none} }
 .chbub .md p:first-child{margin-top:0}
 .chbub .md p:last-child{margin-bottom:0}
 /* quoting (chatQuote): a quote in the captain's bubble, and in an answer's
@@ -2824,6 +2902,7 @@ button.qitem:hover,button.qitem:focus-visible{background:#0f0f14}
 #mlight .mln{position:absolute;bottom:calc(12px + env(safe-area-inset-bottom,0px));left:0;right:0;text-align:center;color:#ccc;
   font:13px var(--mono)}
 .chmark{font-family:var(--mono);font-size:11px;color:var(--dim)}
+.chmic{font-size:.85em;opacity:.7;margin-right:4px}
 .chmark.fail{color:var(--red)}
 .chretry{background:none;border:0;padding:4px 2px;color:var(--red);font:inherit;text-decoration:underline;cursor:pointer}
 .chtools{align-self:flex-start;display:flex;flex-wrap:wrap;gap:4px;max-width:100%;background:none;cursor:pointer;text-align:left;
@@ -3242,6 +3321,16 @@ button.qitem:hover,button.qitem:focus-visible{background:#0f0f14}
 .oqacts{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
 .oqst{flex:1;min-width:0;font-family:var(--mono);font-size:12px;color:var(--orange)}
 .oqst.bad{color:var(--red)}
+/* the social watch's notice (socCardHtml): a row per comment it names */
+.socl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.socc{border-left:3px solid var(--purple);padding:2px 0 2px 10px;display:flex;flex-direction:column;gap:4px}
+.socw{font-family:var(--mono);font-size:12px;color:var(--orange);overflow-wrap:anywhere}
+.socw .socon{color:var(--dim)}
+.socf{font-family:var(--sans);font-size:15px;line-height:1.35;color:var(--txt);overflow-wrap:anywhere}
+.socd{font-family:var(--sans);font-size:14px;line-height:1.35;color:var(--amber);white-space:pre-wrap;overflow-wrap:anywhere}
+.socd b{font-family:var(--mono);font-size:11px;color:var(--purple);margin-right:6px}
+.socc .oqacts{justify-content:flex-start}
+.socc a[href]{text-decoration:none;display:inline-flex;align-items:center}
 /* an ask in the shape: a block per question, choices a thumb wide (44px) */
 .oqb{border-top:1px solid #333;padding-top:8px;display:flex;flex-direction:column;gap:8px}
 .oqbh{display:flex;gap:8px;align-items:baseline;font-size:16px;line-height:1.35}
@@ -3927,6 +4016,7 @@ input[type=range].fine::-moz-range-track{
   #edempty{display:none!important}
   #bBack{display:inline-flex}
   #bFocus{display:none}
+  #bShare{display:none}
   #bClose{display:none}
   #edtitle{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
   #rwmode{width:104px}
@@ -4419,6 +4509,11 @@ input[type=range].fine::-moz-range-track{
       </div>
       <button class="pill" id="bAloud" aria-label="Read this entry aloud" aria-pressed="false"
               style="display:none" title="Read this entry aloud (a)"><span class="lg">&#9654; Aloud</span><span class="sm">&#9654;</span></button>
+      <!-- the Share sheet: each network's composer, filled in (openShareSheet).
+           Up here, not in the bar below: that row is full at a desk's width
+           (Delete went under the chat dock's pill); a phone has it in the
+           ⋯ sheet's tiles (ED_MORE) -->
+      <button class="pill" id="bShare" aria-label="Share this entry" title="Share it: each network's own composer, filled in (F)"><span class="lg">&#8599; Share&hellip;</span><span class="sm">&#8599;</span></button>
       <button class="pill" id="bFocus" aria-label="Focus mode" aria-pressed="false"
               title="Focus mode (f)"><span class="lg">&#10530; Focus</span><span class="sm">&#10530;</span></button>
       <button class="pill" id="bRefresh" aria-label="Re-read this entry from the server" title="Re-read this entry from the server (r)"><span class="lg">↻ Refresh</span><span class="sm">↻</span></button>
@@ -4598,7 +4693,7 @@ input[type=range].fine::-moz-range-track{
       <button class="pill edx" id="bCrewChat" hidden>Chat</button>
       <button class="pill danger edx" id="bDel">Delete</button>
       <button class="pill" id="bEdMore" aria-haspopup="dialog" aria-label="More"
-              title="Duplicate, continue, pin, tidy, revert, delete">&#8943;</button>
+              title="Duplicate, continue, pin, tidy, share, revert, delete">&#8943;</button>
     </div>
     <!-- one span, not bare text: the placeholder is a flex box, and loose text
          nodes become flex items whose separating spaces collapse -->
@@ -5200,6 +5295,8 @@ async function apiNet(path, opts = {}) {
     const ac = new AbortController();
     init.signal = ac.signal;
     timer = setTimeout(() => ac.abort(), opts.timeout || API_TIMEOUT);
+    // the caller's own abort (a quick answer gone stale: quickDrop)
+    if (opts.signal) opts.signal.addEventListener("abort", () => ac.abort());
   }
   let res;
   try {
@@ -7788,6 +7885,31 @@ const taskHint = w => "tap → " + nextTaskWord(w) + " · hold for the rest";
    the quoted lines under it, as the crew's (.crewadd), so it never reads as
    the captain's own words. */
 const CREW_MARK_RE = /^([A-Z][\w' ]{1,30}) (added|created this), (\d{4}-\d{2}-\d{2} \d{2}:\d{2})/;
+/* GFM pipe tables. A row's cells are split on every pipe but an escaped
+   one (\|, a literal pipe in the cell), after one optional pipe at each end.
+   The delimiter row (---, :--, --:, :-:) sets the column count and each
+   column's alignment; a header line must hold a pipe, so "a" over "---"
+   stays a paragraph and a rule, as it always drew. */
+const MD_TDELIM_RE = /^\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?$/;
+function mdCells(line) {
+  let t = line.trim();
+  if (t[0] === "|") t = t.slice(1);
+  if (t.slice(-1) === "|" && t.slice(-2) !== "\\|") t = t.slice(0, -1);
+  return t.replace(/\\\|/g, "\0").split("|").map(c => c.trim().replace(/\0/g, "|"));
+}
+const mdHasPipe = line => /(?:^|[^\\])\|/.test(line);
+// the header at L[i] and its delimiter row: the table's columns, or null
+function mdTableAt(L, i) {
+  if (i + 1 >= L.length || !mdHasPipe(L[i]) || !MD_TDELIM_RE.test(L[i + 1].trim())) return null;
+  const al = mdCells(L[i + 1]).map(c => c[c.length - 1] === ":" ? (c[0] === ":" ? "c" : "r") : "");
+  return mdCells(L[i]).length === al.length ? al : null;
+}
+// a row's cells padded or cut to the header's count (GFM), through mdInline;
+// the alignment is a class: the page's CSP may one day refuse style=""
+function mdRow(tag, line, al) {
+  const c = mdCells(line);
+  return "<tr>" + al.map((a, k) => `<${tag}${a ? ` class="al${a}"` : ""}>${mdInline(c[k] || "")}</${tag}>`).join("") + "</tr>";
+}
 function mdRender(src, opts) {
   // an entry id turns every task marker into a control; without one they stay
   // chips, which is what a board row or a copied block wants
@@ -7816,6 +7938,20 @@ function mdRender(src, opts) {
     const m = /^([\t ]*)([\s\S]*)$/.exec(L[i]);
     const text = m[2];
     if (!text.trim()) { crewq = false; continue; }    // blanks only separate
+
+    // a table runs to a blank line or the first line with no pipe in it, and
+    // sits in a box of its own that scrolls sideways when wider than the
+    // bubble or the reader (.mdtbl), never pushing them wider
+    const al = mdTableAt(L, i);
+    if (al) {
+      setDepth(0); crewq = false;
+      const rows = [];
+      for (i += 2; i < L.length && L[i].trim() && mdHasPipe(L[i]); i++) rows.push(mdRow("td", L[i], al));
+      out.push(`<div class="mdtbl"><table><thead>${mdRow("th", text, al)}</thead>` +
+               (rows.length ? `<tbody>${rows.join("")}</tbody>` : "") + "</table></div>");
+      i--;
+      continue;
+    }
     const lvl = Math.floor(m[1].replace(/\t/g, "  ").length / 2);
 
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(text)) { setDepth(0); out.push("<hr>"); continue; }
@@ -10477,6 +10613,7 @@ const ROUTES = {
   media:     { open: () => openMediaView() },
   reports:   { open: () => openReports() },
   shares:    { open: () => openShares() },
+  share:     { open: a => openShareSheet(a[0] ? +a[0] : st.sel && st.sel.id) },
   graph:     { open: () => openGraph() },
   stars:     { open: () => openStars() },
   // a conversation (one chat): the computer's thread; ask is its old name
@@ -14243,6 +14380,7 @@ function paintMode(on) {
   $("#bDup").style.display = st.isNew ? "none" : "";
   $("#bCont").style.display = st.isNew ? "none" : "";
   $("#bTidy").style.display = st.isNew ? "none" : "";
+  $("#bShare").style.display = st.isNew ? "none" : "";
   pinBtnPaint();
   if (read) wikiClose();     // the form is going away; the popup goes with it
   else if (on) napCheck();   // a nap in a body opened for writing is offered at once
@@ -17882,7 +18020,7 @@ function openStats(whole) {
   // a measurement is in scope when the row holding it is
   const inScope = statScope.on ? new Set(c.rows.map(e => e.id)) : null;
   const series = [...measureSeries().entries()]
-    .filter(([k]) => !isShareReading(k))
+    .filter(([k]) => !isShareReading(k) && !isSocialRow(k))
     .map(([k, pts]) => [k, inScope ? pts.filter(p => inScope.has(p.id)) : pts])
     .filter(([, pts]) => pts.length >= 2)
     // the series most recently written to first: that is the one being kept up
@@ -18549,6 +18687,11 @@ const SHARE_FACTS = [["score", "score"], ["points", "points"], ["likes", "likes"
 // the shares' readings and the run's, out of the Stats view's measurements
 // and the crew's list: the view below is where they are read
 const isShareReading = k => k === SHARES_KIND || SHARE_READ_RE.test(k || "");
+// the social watch's comments and daily readings (crew_social_comment,
+// crew_social_<platform>) likewise: the notice's card is where the comments
+// are read, the Shares view's platform section (to come) the readings. Its
+// run's own report, crew_social, stays a crew report.
+const isSocialRow = k => /^crew_social_./.test(k || "");
 
 function shareUrl(text) {
   const m = SHARE_URL_RE.exec(String(text || ""));
@@ -18759,6 +18902,556 @@ function newShare() {
   $("#content").focus();
   toast("paste the share's link; the title names the place (r/ClaudeAI)");
   return true;
+}
+
+/* ===================== the Share sheet =====================
+   docs/design/social-publish.md 3.2, slice 1: the hand route. From an entry
+   (the editor's Share… and its ⋯ tile, the palette, F, "computer, share
+   this"), what to share (the link, the picture and its alt text, the text),
+   where (a chip per network), and a card per network with its own text and
+   its counter as that network counts. Open on a card is the network's own
+   composer, filled in, in a tab where he is logged in, and copies what the
+   composer cannot be handed (HN's and Reddit's first comment, LinkedIn's
+   text); he presses the network's button himself. Nothing is posted by the
+   ship: there is no credential here at all (the publisher is slice 2).
+   Back from the network, the post's link pasted on its card is a `share`
+   entry, which the shares role reads for numbers. Schedule… on a card is a
+   reminder: a task_crew_social with a due time and an alert (CalDAV, so the
+   phone rings), its card in Open questions the same Open.
+   The sheet's drafts are kept in a `social_post` entry (pages-only, like the
+   patch kinds: PatchKindAllowed), written on the first Open, reminder or
+   saved link, and read back when the sheet is opened on that entry again.
+   The demo shows the sheet and its Opens, and keeps nothing. */
+// A copy of scripts/publish_net/limits.json (the publisher reads that file;
+// the behaviour suite holds the two equal), in its order
+const SOC_ORDER = ["hn", "reddit", "x", "bluesky", "mastodon", "linkedin", "threads"];
+const SOC_NETS = {
+  hn: { name: "Hacker News", limit: 80, counts: "chars", link: null, field: "title" },
+  reddit: { name: "Reddit", limit: 300, counts: "chars", link: null, field: "title" },
+  x: { name: "X", limit: 280, counts: "weighted", link: 23, field: "text" },
+  bluesky: { name: "Bluesky", limit: 300, counts: "graphemes", link: null, field: "text" },
+  mastodon: { name: "Mastodon", limit: 500, counts: "graphemes", link: 23, field: "text" },
+  linkedin: { name: "LinkedIn", limit: 3000, counts: "chars", link: null, field: "text" },
+  threads: { name: "Threads", limit: 500, counts: "graphemes", link: null, field: "text" },
+};
+// what each is called aloud ("computer, share on hacker news")
+const SOC_SAY = {
+  hn: ["hacker news", "hn", "h n", "y combinator"], reddit: ["reddit"], x: ["x", "twitter", "ex"],
+  bluesky: ["bluesky", "blue sky"], mastodon: ["mastodon"], linkedin: ["linkedin", "linked in"], threads: ["threads"],
+};
+const SOC_KIND = "social_post";        // the drafts: pages-only (lcars_http.h)
+// the hand route's schedule: task_crew_social, beside the social watch's
+// notices (the task role's kind under a mapping, as isSocialAsk reads it)
+const socRemindKind = () => kindOf("task") + "_crew_social";
+const SOC_MASTO = "lcars.soc.mastodon";  // the captain's instance, per device: not known to the ship yet
+const SOC_ON = "lcars.soc.nets";         // the chips last chosen, per device
+const SOC_LINK_RE = /https?:\/\/[^\s<>"]+/g;
+
+/* ---- counting, as each network counts ----
+   Graphemes by Intl.Segmenter where the browser has it; else (the suite's
+   QuickJS, an old WebView) code points joined by the rules a post meets:
+   combining marks, variation selectors, skin tones, tags, ZWJ sequences,
+   a flag's two regional indicators, CR LF. */
+function socClusters(s) {
+  s = String(s || "");
+  if (typeof Intl === "object" && Intl && typeof Intl.Segmenter === "function") {
+    const out = [];
+    for (const g of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)) out.push(g.segment);
+    return out;
+  }
+  const out = [];
+  let prev = 0, ri = false;
+  for (const ch of s) {
+    const c = ch.codePointAt(0);
+    const ext = (c >= 0x300 && c <= 0x36f) || (c >= 0x1ab0 && c <= 0x1aff) || (c >= 0x1dc0 && c <= 0x1dff) ||
+      (c >= 0x20d0 && c <= 0x20ff) || (c >= 0xfe00 && c <= 0xfe0f) || (c >= 0xfe20 && c <= 0xfe2f) ||
+      (c >= 0x1f3fb && c <= 0x1f3ff) || (c >= 0xe0020 && c <= 0xe007f) || (c >= 0xe0100 && c <= 0xe01ef) || c === 0x200d;
+    const isRi = c >= 0x1f1e6 && c <= 0x1f1ff;
+    const join = out.length > 0 && (ext || prev === 0x200d || (prev === 13 && c === 10) || (isRi && ri));
+    if (join) out[out.length - 1] += ch; else out.push(ch);
+    ri = isRi && !(join && ri);
+    prev = c;
+  }
+  return out;
+}
+// X's weighting (twitter-text): NFC, an emoji 2, a code point outside the light ranges 2
+const socLight = c => c <= 0x10ff || (c >= 0x2000 && c <= 0x200d) || (c >= 0x2010 && c <= 0x201f) || (c >= 0x2032 && c <= 0x2037);
+const SOC_EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/u;
+function socWeighted(s) {
+  let n = 0;
+  for (const g of socClusters(String(s || "").normalize ? String(s || "").normalize("NFC") : String(s || ""))) {
+    if (SOC_EMOJI.test(g)) { n += 2; continue; }
+    for (const ch of g) n += socLight(ch.codePointAt(0)) ? 1 : 2;
+  }
+  return n;
+}
+// a string's length on network k: every link as `link` where it counts so
+function socCount(k, s) {
+  const n = SOC_NETS[k];
+  let links = 0;
+  s = String(s || "");
+  if (n.link) s = s.replace(SOC_LINK_RE, () => { links++; return ""; });
+  const base = n.counts === "graphemes" ? socClusters(s).length : n.counts === "weighted" ? socWeighted(s) : [...s].length;
+  return base + links * (n.link || 0);
+}
+
+/* ---- a card's words ----
+   shx (the sheet): { id, link, img, alt, text, on: Set, n: { k: card }, post,
+   rec, open: k with its schedule row out, demo }. A card: { text, own (its
+   text its own, no longer the base's), title, sub, comment, url, at, inst,
+   say: { msg, bad, retry } }. */
+let shx = null;
+// the composer's text: the link added where the network takes it in the text
+function socBody(k, c) {
+  const t = String(c.text || "").trim(), l = shx ? shx.link.trim() : "";
+  if (k === "linkedin" || !l || t.includes(l)) return t;
+  return k === "x" ? t : (t ? t + "\n\n" : "") + l;
+}
+// what the limit is on, and its count (X's url parameter is a link more)
+function socMeasured(k, c) {
+  if (SOC_NETS[k].field === "title") return socCount(k, c.title);
+  const l = shx ? shx.link.trim() : "", t = String(c.text || "").trim();
+  return socCount(k, socBody(k, c)) + (k === "x" && l && !t.includes(l) ? 1 + 23 : 0);
+}
+const socMasto = () => String(lsGet(SOC_MASTO, "") || "").replace(/^https?:\/\//i, "").replace(/\/.*$/, "").trim();
+// the network's composer, filled in (design 1.11); "" when it cannot be yet
+function socHandUrl(k, c) {
+  const e = encodeURIComponent, l = shx ? shx.link.trim() : "", t = socBody(k, c);
+  switch (k) {
+    case "hn": return `https://news.ycombinator.com/submitlink?u=${e(l)}&t=${e(c.title || "")}`;
+    case "reddit": {
+      const sub = String(c.sub || "").trim().replace(/^\/?r\//i, "").replace(/\/.*$/, "");
+      const at = sub ? `https://www.reddit.com/r/${e(sub)}/submit` : "https://www.reddit.com/submit";
+      return l ? `${at}?url=${e(l)}&title=${e(c.title || "")}`
+               : `${at}?type=TEXT&title=${e(c.title || "")}&text=${e(c.comment || "")}`;
+    }
+    case "x": {
+      const own = String(c.text || "").trim();
+      return `https://x.com/intent/post?text=${e(own)}` + (l && !own.includes(l) ? `&url=${e(l)}` : "");
+    }
+    case "linkedin": return l ? `https://www.linkedin.com/sharing/share-offsite/?url=${e(l)}` : "https://www.linkedin.com/feed/?shareActive=true";
+    case "bluesky": return `https://bsky.app/intent/compose?text=${e(t)}`;
+    case "mastodon": { const i = socMasto(); return i ? `https://${i}/share?text=${e(t)}` : ""; }
+    case "threads": return `https://www.threads.net/intent/post?text=${e(t)}`;
+  }
+  return "";
+}
+// what Open copies: what the composer cannot be handed in its url
+const socCopyOf = (k, c) => k === "hn" || k === "reddit" ? String(c.comment || "").trim()
+  : k === "linkedin" ? String(c.text || "").trim() : "";
+// why Open is off for a card, or ""
+function socBlocked(k, c) {
+  const n = SOC_NETS[k];
+  if (k === "mastodon" && !socMasto()) return "your Mastodon instance is not set";
+  if (n.field === "title" && !String(c.title || "").trim()) return "it needs a title";
+  if (k === "hn" && !(shx && shx.link.trim())) return "Hacker News takes a link";
+  if (n.field === "text" && !socBody(k, c).trim()) return "nothing to post";
+  const m = socMeasured(k, c);
+  if (m > n.limit) return `${m - n.limit} over ${n.name}'s ${statNum(n.limit)}`;
+  return "";
+}
+
+// The sheet's first state, from the entry: its first link, its first
+// picture (the alt text its caption), and its title and first paragraph
+function socFromEntry(e) {
+  const c = String(e.content || "").replace(/\r/g, "");
+  const img = /!\[([^\]]*)\]\(([^)\s]+)/.exec(c);
+  const paras = c.split(/\n[ \t]*\n/).map(p => p.trim())
+    .filter(p => p && !/^!\[/.test(p) && !/^https?:\/\/\S+$/.test(p) && !/^[-*]\s+(TODO|DONE)\b/.test(p));
+  const title = String(e.title || "").trim();
+  const first = paras.length ? paras[0].replace(/^#+\s*/, "") : "";
+  const text = [title, first].filter(Boolean).join("\n\n");
+  let on = lsGet(SOC_ON, null);
+  on = new Set(Array.isArray(on) ? on.filter(k => SOC_NETS[k]) : SOC_ORDER);
+  const n = {};
+  for (const k of SOC_ORDER) n[k] = { text, own: false, title: title.slice(0, 300), sub: "", comment: first, url: "", at: "", inst: "", say: null };
+  return { id: e.id, link: shareUrl(c), img: img ? img[2] : "", alt: img ? img[1] : "", text, on, n, post: null, rec: {}, open: "", demo: !!DEMO };
+}
+// a social_post's drafts laid over the sheet: what was edited, opened and saved
+function socMerge(row) {
+  let j;
+  try { j = JSON.parse(row.content || ""); } catch (err) { return; }
+  if (!j || typeof j !== "object") return;
+  shx.post = row.id;
+  for (const f of ["link", "img", "alt", "text"]) if (typeof j[f] === "string") shx[f] = j[f];
+  if (Array.isArray(j.on)) shx.on = new Set(j.on.filter(k => SOC_NETS[k]));
+  shx.rec = j.rec && typeof j.rec === "object" ? j.rec : {};
+  for (const k of SOC_ORDER) {
+    const d = j.nets && j.nets[k], c = shx.n[k];
+    if (!d) continue;
+    for (const f of ["text", "title", "sub", "comment"]) if (typeof d[f] === "string") c[f] = d[f];
+    c.own = !!d.own;
+    if (!c.own) c.text = shx.text;
+  }
+}
+function socJson() {
+  const nets = {};
+  for (const k of SOC_ORDER) {
+    const c = shx.n[k];
+    nets[k] = { own: c.own, text: c.text, title: c.title, sub: c.sub, comment: c.comment, url: socHandUrl(k, c) };
+  }
+  return JSON.stringify({ v: 1, from: shx.id, link: shx.link, img: shx.img, alt: shx.alt, text: shx.text,
+                          on: SOC_ORDER.filter(k => shx.on.has(k)), nets, rec: shx.rec });
+}
+// The drafts kept: one social_post per entry shared, created at the first
+// thing worth keeping and rewritten after. A failure only says so: the
+// network's own tab is what mattered.
+let socSaving = Promise.resolve();
+function socSave() {
+  if (!shx || shx.demo) return socSaving;
+  const s = shx, body = socJson();
+  socSaving = socSaving.then(async () => {
+    try {
+      if (s.post) await api("/entries/" + s.post, { method: "PUT", body: { content: body } });
+      else {
+        const src = st.byId.get(s.id);
+        const r = await api("/entries", { method: "POST", body: { kind: SOC_KIND, content: body,
+          title: "Share · " + ((src && src.title) || "#" + s.id) } });
+        s.post = r.id;
+        // into the list now, so a sheet opened again finds it before a sync does
+        api("/entries/" + r.id).then(row => { if (row && !st.byId.has(row.id)) insertRow(row); }, () => {});
+      }
+    } catch (err) { toast("the share's drafts were not kept: " + err.message, true); }
+  });
+  return socSaving;
+}
+
+/* ---- the sheet ---- */
+function shareThis() {
+  const e = st.sel;
+  if (!e || st.isNew) { sfx("deny"); toast(st.isNew ? "save the entry first, then share it" : "no entry open to share", true); return false; }
+  openShareSheet(e.id);
+  return true;
+}
+$("#bShare").onclick = () => shareThis();
+function openShareSheet(id) {
+  const e = st.byId.get(Number(id));
+  if (!e) { toast("no entry #" + id + " to share", true); return; }
+  if (!shx || shx.id !== e.id) shx = socFromEntry(e);
+  const dlg = openDialog(`
+    <h2 id="dlgh">Share #${e.id}</h2>
+    <p class="hint">Each network's own composer opens, filled in, where you are logged in: you press its button. Nothing is posted by the ship.</p>
+    ${shx.demo ? `<p class="hint" id="soc_demo">The demo: Open fills each composer; no reminder or link is kept.</p>` : ""}
+    <div class="sscroll socscroll">
+    <div class="socwhat">
+      <label>Link<input type="text" id="soc_link" inputmode="url" autocomplete="off" placeholder="none: a text post"></label>
+      ${shx.img ? `<div class="socimg"><img src="${attr(/^(https?:|data:)/.test(shx.img) ? shx.img : mediaUrl(shx.img.replace(/^\//, "")))}" alt="${attr(shx.alt)}">` +
+        `<label>Alt text<input type="text" id="soc_alt" placeholder="what the picture shows"></label></div>` : ""}
+      <label>Text<textarea id="soc_text" rows="4" placeholder="what the post says"></textarea></label>
+    </div>
+    <div class="socchips" id="soc_chips" role="group" aria-label="Where"></div>
+    <div class="soccards" id="soc_cards"></div>
+    </div>
+    <div class="row" style="justify-content:flex-end"><button class="pill go" id="soc_close">Close</button></div>`,
+    { wide: true, cls: "socsh" });
+  $("#soc_link").value = shx.link;
+  $("#soc_text").value = shx.text;
+  if ($("#soc_alt")) $("#soc_alt").value = shx.alt;
+  socPaint();
+  dlg.oninput = socInput;
+  dlg.onclick = socTap;
+  $("#soc_close").onclick = shutOv;
+  routeAs("share", e.id);
+  openOv();
+  // drafts kept from an earlier sheet on this entry, if its bodies must load first
+  if (!shx.post && !shx.demo) {
+    const rows = st.all.filter(r => r.kind === SOC_KIND && !r.deleted);
+    const s = shx;
+    (rows.some(needsBody) ? ensureBodies(rows.filter(needsBody)) : Promise.resolve()).then(() => {
+      const mine = rows.filter(r => !needsBody(r) && (r.content || "").includes(`"from":${s.id},`)).sort((a, b) => b.id - a.id)[0];
+      // the row as the server has it now: the list's copy may be a save behind
+      return mine ? api("/entries/" + mine.id) : null;
+    }).then(row => {
+      // a word typed meanwhile wins: the drafts are not laid over it
+      if (!row || shx !== s || s.post || s.touched) return;
+      socMerge(row);
+      if (!$("#soc_cards")) return;
+      $("#soc_link").value = s.link;
+      $("#soc_text").value = s.text;
+      if ($("#soc_alt")) $("#soc_alt").value = s.alt;
+      // a field tapped while they loaded keeps the focus (and a phone its keyboard)
+      const f = document.activeElement, key = f && f.dataset && f.dataset.f && f.dataset.net;
+      socPaint();
+      const back = key && $("#soc_cards").querySelector(`[data-f="${f.dataset.f}"][data-net="${f.dataset.net}"]`);
+      if (back) back.focus();
+    }, () => {});
+  }
+}
+function socChipsHtml() {
+  return SOC_ORDER.map(k => `<button type="button" class="pill socchip${shx.on.has(k) ? " on" : ""}" data-chip="${k}" ` +
+    `aria-pressed="${shx.on.has(k)}">${esc(SOC_NETS[k].name)}</button>`).join("");
+}
+function socShCardHtml(k) {
+  const n = SOC_NETS[k], c = shx.n[k], f = (name, ph, extra) =>
+    `<input type="text" data-f="${name}" data-net="${k}" placeholder="${attr(ph)}" value="${attr(c[name] || "")}"${extra || ""}>`;
+  const masto = k === "mastodon" && !socMasto();
+  const rec = shx.rec[k] || {};
+  return `<article class="mcard soccard" data-card="${k}">` +
+    `<div class="mhd"><b class="socname">${esc(n.name)}</b><span class="soccnt" id="socn_${k}"></span></div>` +
+    (masto ? `<div class="featoff" role="note"><b>not set</b>Your Mastodon instance is not known yet: say which, once, on this device.` +
+        `<div class="socrow">${f("inst", "mastodon.social", ' inputmode="url" autocomplete="off"')}` +
+        `<button type="button" class="pill" data-inst="1">Save</button></div></div>` : "") +
+    (k === "reddit" ? f("sub", "subreddit (threejs)", ' autocomplete="off"') : "") +
+    (n.field === "title" ? f("title", k === "hn" ? "title (Show HN: …)" : "title", "") : "") +
+    (n.field === "text" ? `<textarea data-f="text" data-net="${k}" rows="3"></textarea>` +
+        `<div class="socown hint" id="socown_${k}"${c.own ? "" : " hidden"}>its own text &middot; ` +
+        `<button type="button" class="mini" data-reset="${k}">Back to the shared text</button></div>` : "") +
+    (n.field === "title" ? `<textarea data-f="comment" data-net="${k}" rows="3" placeholder="the opening comment, copied by Open"></textarea>` : "") +
+    (k === "linkedin" ? `<p class="hint">Open copies the text: paste it into LinkedIn's box.</p>` : "") +
+    (shx.img && n.field === "text" ? `<p class="hint">The picture: attach it in the composer${shx.alt ? `, alt text: ${esc(shx.alt)}` : ""}.</p>` : "") +
+    `<div class="shact"><a class="pill go socopen" data-open="${k}" target="_blank" rel="noopener">Open</a>` +
+    (shx.demo ? "" : `<button type="button" class="pill" data-sched="${k}" aria-expanded="${shx.open === k}">Schedule&hellip;</button>`) +
+    `<span class="socst" id="socst_${k}" role="status"></span></div>` +
+    (shx.open === k && !shx.demo ? `<div class="socrow socsched"><input type="datetime-local" data-f="at" data-net="${k}" value="${attr(c.at)}">` +
+        `<button type="button" class="pill go" data-remind="${k}">Set reminder</button></div>` : "") +
+    (shx.demo ? "" : `<div class="socrow">${f("url", rec.url ? "" : "the post's link, once it is up", ' inputmode="url" autocomplete="off"')}` +
+        `<button type="button" class="pill" data-saveurl="${k}">Save link</button></div>`) +
+    `</article>`;
+}
+function socPaint() {
+  if (!$("#soc_cards")) return;
+  $("#soc_chips").innerHTML = socChipsHtml();
+  const on = SOC_ORDER.filter(k => shx.on.has(k));
+  $("#soc_cards").innerHTML = on.length ? on.map(socShCardHtml).join("")
+    : `<p class="pkempty">No network chosen: tap one above.</p>`;
+  for (const k of on) {
+    const ta = $("#soc_cards").querySelector(`textarea[data-f="text"][data-net="${k}"]`);
+    if (ta) ta.value = shx.n[k].text;
+    const cm = $("#soc_cards").querySelector(`textarea[data-f="comment"][data-net="${k}"]`);
+    if (cm) cm.value = shx.n[k].comment;
+    socSync(k);
+  }
+}
+// one card's counter, Open and status, in place (typing never redraws a card)
+function socSync(k) {
+  const card = $("#soc_cards") && $("#soc_cards").querySelector(`[data-card="${k}"]`);
+  if (!card) return;
+  const n = SOC_NETS[k], c = shx.n[k], m = socMeasured(k, c), why = socBlocked(k, c);
+  const cnt = card.querySelector(".soccnt");
+  cnt.textContent = `${statNum(m)} / ${statNum(n.limit)}` + (n.field === "title" ? " title" : "");
+  cnt.classList.toggle("over", m > n.limit);
+  card.classList.toggle("over", m > n.limit);
+  card.classList.toggle("off", k === "mastodon" && !socMasto());
+  const a = card.querySelector(".socopen"), u = why ? "" : socHandUrl(k, c);
+  if (u) a.setAttribute("href", u); else a.removeAttribute("href");
+  a.setAttribute("aria-disabled", why ? "true" : "false");
+  a.classList.toggle("dis", !!why);
+  a.title = why || "Open " + n.name + "'s composer, filled in" + (socCopyOf(k, c) ? "; copies " + (k === "linkedin" ? "the text" : "the first comment") : "");
+  const own = card.querySelector(".socown");
+  if (own) own.hidden = !c.own;
+  const s = card.querySelector(".socst"), say = c.say || (why ? { msg: why, bad: true } : null);
+  s.textContent = say ? say.msg : "";
+  s.classList.toggle("bad", !!(say && say.bad));
+}
+function socSay(k, msg, bad) {
+  shx.n[k].say = msg ? { msg, bad: !!bad } : null;
+  socSync(k);
+}
+function socInput(ev) {
+  const t = ev.target;
+  if (!shx) return;
+  shx.touched = true;
+  if (t.id === "soc_text") {
+    shx.text = t.value;
+    for (const k of SOC_ORDER) {
+      const c = shx.n[k];
+      if (c.own) continue;
+      c.text = t.value;
+      const ta = $("#soc_cards").querySelector(`textarea[data-f="text"][data-net="${k}"]`);
+      if (ta) ta.value = t.value;
+    }
+    SOC_ORDER.forEach(socSync);
+  } else if (t.id === "soc_link") {
+    shx.link = t.value;
+    SOC_ORDER.forEach(socSync);
+  } else if (t.id === "soc_alt") {
+    shx.alt = t.value;
+  } else if (t.dataset.f && t.dataset.net) {
+    const k = t.dataset.net, c = shx.n[k];
+    c[t.dataset.f] = t.value;
+    if (t.dataset.f === "text") c.own = t.value !== shx.text;
+    if (t.dataset.f !== "url" && t.dataset.f !== "at" && t.dataset.f !== "inst") c.say = null;
+    socSync(k);
+  }
+}
+function socTap(ev) {
+  const t = ev.target.closest && ev.target.closest("a[data-open],button");
+  if (!t || !shx) return;
+  const d = t.dataset;
+  if (d.open) { socOpen(d.open, t, ev); return; }
+  if (d.chip) {
+    const k = d.chip, on = !shx.on.has(k);
+    // the chip answers in this frame; the cards follow
+    t.classList.toggle("on", on);
+    t.setAttribute("aria-pressed", String(on));
+    socNet(k, on);
+    sfx("toggle");
+  } else if (d.reset) {
+    const c = shx.n[d.reset];
+    c.text = shx.text; c.own = false; c.say = null;
+    const ta = $("#soc_cards").querySelector(`textarea[data-f="text"][data-net="${d.reset}"]`);
+    if (ta) ta.value = c.text;
+    socSync(d.reset);
+    sfx("toggle");
+  } else if (d.inst) {
+    socInst(shx.n.mastodon.inst);
+  } else if (d.sched) {
+    socSchedOpen(d.sched);
+  } else if (d.remind) socRemind(d.remind, t);
+  else if (d.saveurl) socSaveUrl(d.saveurl, t);
+}
+// a chip, by tap or by voice: the network's card in or out
+function socNet(k, on) {
+  if (on) shx.on.add(k); else shx.on.delete(k);
+  lsSet(SOC_ON, SOC_ORDER.filter(x => shx.on.has(x)));
+  socPaint();
+}
+function socInst(v) {
+  const i = String(v || "").replace(/^https?:\/\//i, "").replace(/\/.*$/, "").trim();
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(i)) { sfx("deny"); socSay("mastodon", "an instance is a host name: mastodon.social", true); return false; }
+  lsSet(SOC_MASTO, i);
+  shx.n.mastodon.say = { msg: "instance " + i + " kept on this device" };
+  socPaint();
+  sfx("save");
+  return true;
+}
+function socSchedOpen(k) {
+  const c = shx.n[k];
+  shx.open = shx.open === k ? "" : k;
+  if (shx.open && !c.at) c.at = localInput(new Date(Math.ceil(Date.now() / 3600000) * 3600000));
+  socPaint();
+  const at = shx.open && $("#soc_cards").querySelector(`input[data-f="at"][data-net="${k}"]`);
+  if (at) at.focus();
+}
+// Open: the composer's tab is the link's own (a tap must open it, for a
+// phone to allow it); the copy rides the same tap, which is what lets the
+// clipboard be written at all
+function socOpen(k, a, ev) {
+  const c = shx.n[k], why = socBlocked(k, c);
+  if (why) {
+    if (ev) ev.preventDefault();
+    sfx("deny");
+    socSay(k, why, true);
+    return false;
+  }
+  a.classList.add("pressing");
+  setTimeout(() => a.classList.remove("pressing"), 1500);
+  const copy = socCopyOf(k, c), what = k === "linkedin" ? "the text" : "the first comment";
+  socSay(k, copy ? "opening · copying " + what + "…" : "opening " + SOC_NETS[k].name + "…");
+  const p = copy ? copyText(copy) : Promise.resolve(true);
+  p.then(okd => {
+    socSay(k, copy ? (okd ? "opened · " + what + " copied: paste it there" : "opened · could not copy " + what) : "opened in a new tab", copy && !okd);
+  });
+  if (!shx.demo) {
+    shx.rec[k] = Object.assign({}, shx.rec[k], { opened: utcNow() });
+    socSave();
+  }
+  return true;
+}
+// a share entry for the post's link (what the shares role reads)
+async function socSaveUrl(k, b) {
+  const c = shx.n[k], url = String(c.url || "").trim(), s = shx;
+  if (!/^https?:\/\/\S+$/.test(url)) { sfx("deny"); socSay(k, "paste the post's link, https://…", true); return false; }
+  if (b) b.disabled = true;
+  socSay(k, "saving the link…");
+  try {
+    const r = await api("/entries", { method: "POST", body: { kind: kindOf("share"),
+      title: sharePlace(url) || SOC_NETS[k].name,
+      content: url + "\n\nShared by hand on " + SOC_NETS[k].name + ", from #" + s.id + "." } });
+    s.rec[k] = Object.assign({}, s.rec[k], { url, share: r.id });
+    c.url = "";
+    if (shx === s) { socPaint(); socSay(k, "saved as #" + r.id + ": the shares role reads its numbers"); }
+    sfx("save");
+    socSave();
+    return true;
+  } catch (err) {
+    if (shx === s) socSay(k, "not saved: " + err.message + " · tap Save link again", true);
+    return false;
+  } finally { if (b) b.disabled = false; }
+}
+// The reminder's text, which its card in Open questions reads back
+// (socShareParse): the network, the entry, Open's url and what it copies
+function socRemindText(k, c, at) {
+  const copy = socCopyOf(k, c);
+  return `Share by hand on ${SOC_NETS[k].name}, from #${shx.id}, at ${localInput(at).replace("T", " ")}.\n\n` +
+    `Open: ${socHandUrl(k, c)}` + (copy ? `\n\nCopy (${k === "linkedin" ? "the post's text" : "the first comment"}):\n${copy}` : "");
+}
+async function socRemind(k, b) {
+  const c = shx.n[k], s = shx, at = c.at ? new Date(c.at) : null, why = socBlocked(k, c);
+  if (why) { sfx("deny"); socSay(k, why, true); return false; }
+  if (!at || isNaN(at.getTime())) { sfx("deny"); socSay(k, "pick a day and a time first", true); return false; }
+  if (b) b.disabled = true;
+  socSay(k, "scheduling…");
+  const src = st.byId.get(s.id);
+  let id = 0;
+  try {
+    const r = await api("/entries", { method: "POST", body: { kind: socRemindKind(),
+      title: `Share on ${SOC_NETS[k].name}: ${c.title || (src && src.title) || "#" + s.id}`, content: socRemindText(k, c, at) } });
+    id = r.id;
+    // the due time and an alert at it: CalDAV publishes the task, the phone rings
+    const v = cdavDateVal(at, false).value;
+    const uid = String(Date.now()) + "-" + k;
+    await api("/entries/" + id + "/caldav", { method: "PUT", body: { etag: "", extra_ical: ["DUE:" + v,
+      "BEGIN:VALARM", "UID:" + uid, "ACTION:DISPLAY", "DESCRIPTION:Reminder", "TRIGGER;VALUE=DATE-TIME:" + v, "END:VALARM"].join("\n") } });
+    s.rec[k] = Object.assign({}, s.rec[k], { reminder: id, at: fmtUtc(at) });
+    if (shx === s) { s.open = ""; socPaint(); socSay(k, `reminder #${id} at ${localInput(at).replace("T", " ")}`); }
+    sfx("save");
+    socSave();
+    if (!st.byId.has(id)) api("/entries/" + id).then(row => { if (!st.byId.has(row.id)) insertRow(row); }, () => {});
+    return true;
+  } catch (err) {
+    if (shx === s) socSay(k, id ? `reminder #${id} made, but with no due time: ${err.message}` : "not scheduled: " + err.message + " · tap Set reminder again", true);
+    return false;
+  } finally { if (b) b.disabled = false; }
+}
+// a network said aloud, its key or ""
+function socNetOf(text) {
+  const w = vWords(text).map(x => vNorm(x)).join(" ").replace(/^(the|my) /, "");
+  return SOC_ORDER.find(k => SOC_SAY[k].includes(w) || SOC_NETS[k].name.toLowerCase() === w) || "";
+}
+// "share on bluesky", "don't share on x": the sheet up, that chip set
+function socNetSaid(text, on) {
+  const k = socNetOf(text);
+  if (!k) { vRefuse(`no network called "${text}" · ${SOC_ORDER.map(x => SOC_NETS[x].name).join(", ")}`); return; }
+  if (!$("#soc_cards") && !shareThis()) return;
+  socNet(k, on);
+  vNote((on ? "sharing on " : "not sharing on ") + SOC_NETS[k].name);
+  const card = on && $("#soc_cards").querySelector(`[data-card="${k}"]`);
+  if (card && card.scrollIntoView) card.scrollIntoView({ block: "nearest" });
+}
+// "schedule the share on hacker news": its card's schedule row, the time focused
+function socSchedSaid(text) {
+  const k = socNetOf(text);
+  if (!k) { vRefuse(`no network called "${text}"`); return; }
+  if (!$("#soc_cards") && !shareThis()) return;
+  if (shx.demo) { vRefuse("the demo keeps no reminders"); return; }
+  if (!shx.on.has(k)) socNet(k, true);
+  if (shx.open !== k) socSchedOpen(k);
+  vNote("say the time, then tap Set reminder");
+}
+
+/* The reminder's card in Open questions (socCardHtml, the social watch's): "Share by hand on
+   <network>, from #<id>, at <when>." then its Open line and what Open
+   copies; null for any other text. */
+function socShareParse(content) {
+  const t = String(content || "").replace(/\r/g, "");
+  const h = /^Share by hand on (.+?), from #(\d+)/.exec(t), o = /^Open: (https?:\/\/\S+)$/m.exec(t);
+  if (!h || !o) return null;
+  const c = /\n\nCopy \(([^)]*)\):\n([\s\S]*)$/.exec(t);
+  return { net: h[1], from: Number(h[2]), open: o[1], what: c ? c[1] : "", copy: c ? c[2].trim() : "" };
+}
+function socShareCardBody(e, p) {
+  return `<div class="oqctx">A reminder to share #${p.from} on <b>${esc(p.net)}</b> by hand: Open is its composer, filled in` +
+    (p.copy ? `, and copies ${esc(p.what)}:</div><div class="socd">${esc(p.copy)}</div>` : `.</div>`) +
+    `<div class="oqacts"><a class="mini go" href="${attr(p.open)}" target="_blank" rel="noopener" data-socshare="${e.id}">Open ${esc(p.net)}</a></div>`;
+}
+// its Open: the tab is the link's; the copy rides the tap
+function socShareOpen(a) {
+  const e = st.byId.get(Number(a.dataset.socshare)), p = e && socShareParse(e.content);
+  a.classList.add("pressing");
+  setTimeout(() => a.classList.remove("pressing"), 1500);
+  if (!p || !p.copy) { sfx("toggle"); return; }
+  copyText(p.copy).then(ok => toast(ok ? p.what + " copied: paste it on " + p.net : "could not copy " + p.what, !ok));
 }
 
 /* ===================== the reports =====================
@@ -22860,6 +23553,17 @@ function openCfg() {
     <div class="field"><label>volume</label>
       <input type="range" id="c_vol" min="0" max="100" step="5"
              value="${Math.round(snd.vol * 100)}" aria-label="sound volume"></div>
+    <div class="field"><label>chat voice says</label>
+      <select id="c_narr">
+        <option value="all"${chatNarrate.v === "all" ? " selected" : ""}>everything &mdash; the narration through lookups too</option>
+        <option value="answers"${chatNarrate.v === "answers" ? " selected" : ""}>answers only</option>
+      </select></div>
+    <div class="field"><label>quick answers <span class="hint">the computer answers small questions to Number One</span></label>
+      <select id="c_quick">
+        <option value="conv"${chatQuick.v === "conv" ? " selected" : ""}>in a conversation &mdash; at once, from what the page knows</option>
+        <option value="always"${chatQuick.v === "always" ? " selected" : ""}>always &mdash; Hold to talk and dictation too</option>
+        <option value="off"${chatQuick.v === "off" ? " selected" : ""}>off &mdash; every question goes to Number One</option>
+      </select></div>
     <div class="field"><label>ambient mode after <span class="hint">minutes idle</span></label>
       <input type="number" id="c_amb" min="0" max="240" step="1"
              value="${Number(cfg.amb) || 0}"></div>
@@ -22894,6 +23598,9 @@ function openCfg() {
     sfx("tap");
   };
   $("#c_snd").onchange = () => sndSet($("#c_snd").checked);
+  // as it changes, like the sound: a voice setting judged by ear
+  $("#c_narr").onchange = () => chatNarrateSet($("#c_narr").value);
+  $("#c_quick").onchange = () => chatQuickSet($("#c_quick").value);
   $("#c_upd").onclick = updRowClick;
   $("#c_srvr").onclick = () => {
     const b = $("#c_srvr");
@@ -28508,6 +29215,8 @@ function paletteRows() {
   add("state · show the crew's entries", "H", toggleCrew, crewShown());
   add("crew notes · every thread", "", openNotes);
   add("open questions · what the crew asks of you", "!", openQuestions);
+  add("social · the new comments on your posts", "", socShowSaid);
+  add("social · dismiss the newest reminder", "", socDismissSaid);
   add("deck · the architect: change what you see", inDeck() ? "" : "in the deck", openArchitect);
   add("count … · a diaper, a feed, a fall", "", openCounter);
   add("map · today's places", "", () => dayMapSaid("today"));
@@ -28567,6 +29276,13 @@ function paletteRows() {
   add("new chat with the computer", "", () => chatNewSaid());
   add("chat · voice, replies spoken", "", () => chatTalkSaid(chatVoice.on ? "off" : "on"), chatVoice.on);
   if (chatShown()) add(conv.cur ? "chat · end the conversation" : "chat · start a conversation", "", () => chatTalkSaid(conv.cur ? "end" : "start"));
+  add(chatNarrate.v === "all" ? "chat voice: answers only" : "chat voice: say everything", "", () => chatNarrateSet(chatNarrate.v === "all" ? "answers" : "all", true));
+  if (chatShown() && chatShown().eng) add("chat · go on, their voice back", "", () => chatGoOnSaid());
+  // the two values it is not set to (voice-quick-answer.md 8)
+  if (chatQuick.v !== "conv") add("chat: quick answers on", "", () => chatQuickSet("conv", true));
+  if (chatQuick.v !== "always") add("chat: quick answers always", "", () => chatQuickSet("always", true));
+  if (chatQuick.v !== "off") add("chat: quick answers off", "", () => chatQuickSet("off", true));
+  if (chatShown() && chatShown().eng && chatShown().eng.quick) add("chat: quick answers · ask Number One anyway", "", () => quickAskSaid());
   if (convOutApplies()) add(conv.out === "speaker" ? "chat · voice through the earpiece" : "chat · voice through the speaker", "", () => chatOutSaid(conv.out === "speaker" ? "earpiece" : "speaker"));
   add("view · plot a course, trips on a map", "O", () => openCourse());
   add("course · a new one", "", () => courseNew());
@@ -28604,6 +29320,7 @@ function paletteRows() {
     add("entry · duplicate", "y", duplicate);
     add("entry · continue this one (a thread)", "w", () => continueEntry());
     add("entry · tidy the dictation (a diff to accept)", "", () => tidyDictation());
+    add("entry · share this entry (each network's composer, filled in)", "F", () => shareThis());
     if (threadRows(st.sel, finish(threadIndexJob(never))).length > 1)
       add("entry · read its whole thread", "", () => openThread(st.sel));
     add("entry · pin this one to the stack", "", () => stackOpen(st.sel.id));
@@ -28934,6 +29651,17 @@ const VCMDS = [
   { say: "tidy the dictation", alias: ["clean up the dictation", "fix the dictation", "tidy dictation"],
     help: "the open entry's misheard words, spelling and punctuation fixed by the computer, shown as a diff to accept",
     fn: () => tidyDictation() },
+  { say: "share this", alias: ["share this entry", "share the entry", "share it", "open the share sheet"],
+    help: "the Share sheet: each network's composer filled in from the open entry, its text and counter per network",
+    fn: () => shareThis() },
+  { say: "share on {*}", alias: ["share to {*}", "also share on {*}"],
+    help: "in the Share sheet: that network's card in (hacker news, reddit, x, bluesky, mastodon, linkedin, threads)",
+    fn: a => socNetSaid(a.text, true) },
+  { say: "do not share on {*}", alias: ["don't share on {*}", "dont share on {*}", "stop sharing on {*}"],
+    help: "in the Share sheet: that network's card out", fn: a => socNetSaid(a.text, false) },
+  { say: "schedule the share on {*}", alias: ["schedule sharing on {*}", "remind me to share on {*}"],
+    help: "in the Share sheet: that card's reminder, a day and a time (a task with an alert)",
+    fn: a => socSchedSaid(a.text) },
   { say: "entry options", alias: ["more entry options", "entry menu"],
     help: "the open entry's other buttons, as a sheet (the phone's ⋯)", fn: () => openEdMore() },
   { say: "delete entry", alias: ["delete this entry", "delete the entry"],
@@ -29220,6 +29948,20 @@ const VCMDS = [
     help: "on a phone: replies out loud on the speaker - the microphone is let go while they speak, so no talking over them", fn: () => chatOutSaid("speaker") },
   { say: "voice through the earpiece", alias: ["use the earpiece", "voice on the earpiece", "speak through the earpiece"],
     help: "on a phone: replies in the earpiece - the microphone stays open in a conversation, the reply private", fn: () => chatOutSaid("earpiece") },
+  { say: "answers only", alias: ["chat voice answers only", "say only the answers", "just the answers", "no narration"],
+    help: "the chats' voice says only the answers: not the narration on the way to a lookup, and of an engineer only the report", fn: () => chatNarrateSet("answers", true) },
+  { say: "say everything", alias: ["chat voice say everything", "say it all", "narrate", "narrate the lookups", "read everything"],
+    help: "the chats' voice says everything they write to you as it comes, the narration through lookups too (the default)", fn: () => chatNarrateSet("all", true) },
+  { say: "quick answers on", alias: ["turn quick answers on", "computer answers on", "quick answers back on"],
+    help: "in a conversation with Number One, the computer answers small questions about the ship at once (who is in the seat, how long, the deploy, the time, today)", fn: () => chatQuickSet("conv", true) },
+  { say: "quick answers off", alias: ["turn quick answers off", "computer answers off", "no quick answers"],
+    help: "every question to Number One goes to him: the computer does not answer first", fn: () => chatQuickSet("off", true) },
+  { say: "quick answers always", alias: ["turn quick answers always", "always quick answers", "computer answers always", "quick answers everywhere"],
+    help: "the computer answers small questions to Number One said any way: in a conversation, with Hold to talk, or dictated into his chat", fn: () => chatQuickSet("always", true) },
+  { say: "ask number one anyway", alias: ["ask number one", "send it to number one", "send that to number one", "ask the first officer anyway"],
+    help: "after the computer's quick answer: the question sent on to Number One as you said it", fn: () => quickAskSaid() },
+  { say: "go on", alias: ["keep talking", "go on talking", "keep going"],
+    help: "in an engineer's chat: their voice back after a stop - the next line is said, not the backlog", fn: () => chatGoOnSaid() },
   { say: "switch model to {*}", alias: ["use model {*}", "change the model to {*}", "switch the model to {*}", "answer with {*}"],
     help: "which Claude answers the chat on screen: Sonnet, Haiku, Opus or Fable (an engineer's, from when their turn ends)", fn: a => chatModelSet(a.text) },
   { say: "which model", alias: ["what model", "which model answers", "what model is it"],
@@ -29320,6 +30062,14 @@ const VCMDS = [
   { say: "send the answers", alias: ["send my answers", "send answers", "send the questions", "send my questions"],
     help: "in the open questions: the first ask with every question answered sent and closed, as its Send does",
     fn: () => oqSendSaid() },
+  { say: "show the social comments", alias: ["new comments", "the social comments", "show the new comments", "social comments",
+      "any new comments", "show the comments on my posts", "comments on my posts", "the social watch"],
+    help: "the open questions at the social watch's card: the new comments on your posts, each with Open and Copy reply",
+    fn: () => socShowSaid() },
+  { say: "dismiss the social reminder", alias: ["dismiss the social comments", "dismiss the comments", "dismiss the new comments",
+      "dismiss the social notice", "done with the comments"],
+    help: "the newest social watch reminder ticked off, as its Dismiss does (the comments stay)",
+    fn: () => socDismissSaid() },
   { say: "crew notes", alias: ["show the crew notes", "the crew notes", "my notes to the crew", "open the crew notes", "notes to the crew"],
     help: "every crew note's thread, the open ones first", fn: () => openNotes() },
   { say: "show the queue", alias: ["the queue", "queue", "what is in the queue", "what's in the queue", "whats in the queue",
@@ -29871,6 +30621,7 @@ function voiceType(s) {
   vSnap(el);
   el.setRangeText(text, a, b, "end");
   el.selectionStart = el.selectionEnd = a + text.length;
+  chatVoiced.add(el);     // a chat's box: its message goes marked spoken (chatSend)
   if (vx.tape && el.id === "content") vx.tape.pos = a + text.length;   // where its link goes
   voiceAfter(el);
   vNote(text.trim() || "⏎");
@@ -31701,7 +32452,25 @@ function chatMsgHtml(m, i) {
   if (m.earlier) return `<button type="button" class="mini" data-earlier>${esc(m.text)}</button>`;
   if (m.repMore) return `<button type="button" class="mini" data-repmore>${esc(m.text)}</button>`;
   if (m.report) return crewLogHtml(m);
+  if (m.paused) return `<button type="button" class="mini chpaused" data-unhush>${esc(m.text)}</button>`;
   if (m.role === "sys") return `<div class="chsys ${m.cls || ""}">${esc(m.text)}${m.live ? `<span class="cwait"></span>` : ""}</div>`;
+  // the computer's quick answer (voice-quick-answer.md 5): never a bubble of Number One's
+  if (m.role === "quick") {
+    return `<div class="chqrow${m.state === "checking" ? " chqchk" : ""}"><span class="chqpill">COMPUTER</span><span class="chqtext">${esc(m.text)}</span></div>` +
+      (m.tier === 2 ? (m.why ? `<span class="chmark">${/told$|words$/.test(m.why) ? "&#10003; " : ""}${esc(m.why)}</span>` : "")
+      : m.state === "sent" ? `<span class="chmark">&#10003; sent to Number One</span>`
+                          : `<button type="button" class="mini chqask" data-quickask>Ask Number One</button>`);
+  }
+  // the ship typing in (docs/design/chat.md §3.4): a notice on the left, the
+  // engineer it is about as its label in their colour, its tag a chip, a
+  // long one folded to a few lines (more / less: SHIP_OPEN, chatLogTap)
+  if (m.role === "ship") {
+    const name = m.from === "no1" ? "Number One" : m.who || "Ship", long = shipLong(m.text), open = long && SHIP_OPEN.has(m.sk);
+    return `<div class="chship${long ? " long" : ""}${open ? " open" : ""}" style="--hue:var(${shipHue(m.who, m.from)})">` +
+      `<div class="chshiph"><span class="chshipn">${esc(name)}</span><span class="chshipt">${esc(SHIP_CHIP[m.tag] || m.tag)}</span></div>` +
+      `<div class="chshipx md">${chatMd(m.text)}</div>` +
+      (long ? `<button type="button" class="chshipm" data-shipx="${i}" aria-expanded="${open}">${open ? "less &#9652;" : "more &#9662;"}</button>` : "") + `</div>`;
+  }
   if (m.role === "user") {
     const mark = m.state === "sending" ? `<span class="chmark">sending&hellip;${chatFilesMark(m)}</span>`
       : m.state === "failed" ? `<span class="chmark fail">&#10005; not sent${m.why ? ": " + esc(m.why) : ""} &middot; ` +
@@ -31710,7 +32479,11 @@ function chatMsgHtml(m, i) {
       : m.state === "delivered" ? `<span class="chmark">&#10003; delivered</span>`
       : "";
     // its files above its words; a message of files alone has no bubble of words
-    return chatFilesHtml(m, i) + (m.text || !(m.files && m.files.length) ? `<div class="chbub">${chatUserHtml(m.text)}</div>` : "") + mark;
+    // his words the ship carried: what they answer, a link to it, above them
+    const v = m.via, via = v ? `<button type="button" class="chvia"${v.id ? ` data-via="${v.ref}:${v.id}"` : " disabled"}>` +
+      `${v.tag === "question" ? "&#10003; question #" + v.id : v.tag === "note" ? "&#9998; journal note #" + v.id : "your answer, carried"}` +
+      `${v.id ? " &rsaquo;" : ""}</button>` : "";
+    return via + chatFilesHtml(m, i) + (m.text || !(m.files && m.files.length) ? `<div class="chbub">${m.spoken ? CHAT_MIC : ""}${chatUserHtml(m.text)}</div>` : "") + mark;
   }
   const parts = m.parts || [], out = [];
   const tools = parts.filter(p => p.t === "tool");
@@ -31722,6 +32495,8 @@ function chatMsgHtml(m, i) {
       : `<button type="button" class="chtools${cls}" data-tools="${i}" aria-expanded="false" title="what it did on the way">` +
         `&#9881; ${tools.length} step${tools.length > 1 ? "s" : ""}</button>`);
   }
+  // a page back from sleep: these lines were shown, not said (chatEngSpeak)
+  if (m.quiet) out.push(`<div class="cmeta chquiet">not read aloud (earlier)</div>`);
   // the narration on the way to a tool and the answer after it are one text
   // once the tools are folded away
   const text = parts.filter(p => p.t === "text" && p.s).map(p => p.s).join("\n\n");
@@ -31743,7 +32518,8 @@ function chatMsgKey(m) {
   if (m.report) return ["rep", m.report, (m.e.content || "").length, m.e.last_modified_at_utc || "", m.e.created_at_utc || "", yeoSig(m.report)].join("|");
   let n = 0;
   for (const p of m.parts || []) n += (p.s ? p.s.length : 0) + (p.state ? p.state.length : 0) + 1;
-  return [m.role, m.state || "", m.why || "", m.toolsOpen ? 1 : 0, m.err || "", m.meta || "", m.cls || "", n, m.patch ? archPatchSig(m.patch) : "",
+  return [m.role, m.spoken ? 1 : 0, m.quiet ? 1 : 0, m.role === "ship" ? (SHIP_OPEN.has(m.sk) ? "o" : "c") + m.tag + m.who : "",
+          m.via ? m.via.tag + m.via.id : "", m.state || "", m.why || "", m.toolsOpen ? 1 : 0, m.err || "", m.meta || "", m.cls || "", n, m.patch ? archPatchSig(m.patch) : "",
           m.role === "sys" ? m.text : (m.text || "").length, m.files ? chatFilesSig(m) : ""].join("|");
 }
 
@@ -31773,7 +32549,8 @@ function chatLogPaint(log, msgs, empty) {
     else if (k !== null && el._m === m && el._k === k) continue;
     else if (k === null && log._inc && el._m === m && dockLiveGrow(el, m)) continue;
     el._m = m; el._k = k;
-    el.className = "chm " + (m.role === "user" ? "me" : m.role === "sys" ? "sys" : "them") + (m.live ? " live" : "");
+    el.className = "chm " + (m.role === "user" ? "me" : m.role === "sys" ? "sys" : m.role === "quick" ? "quick" : m.role === "ship" ? "ship" : "them") + (m.live ? " live" : "") +
+      (m === chatSaying.m ? " saying" : "");
     // a finished message's own row: Quote · Reply (shown on hover, a tap,
     // or while words in it are selected)
     // a message linking a report: a card for each under it (reportCards)
@@ -31794,6 +32571,18 @@ const CHAT_ACTS = `<div class="chact"><button type="button" data-quote title="Qu
 // A tap in a log: a tool chip opens or folds; Retry is the caller's (the
 // index of the message, or -1)
 function chatLogTap(ev, msgs, paint) {
+  // a ship line's more / less: the class at once, the key (SHIP_OPEN) so the
+  // repaint, and every one after it, draws it the same
+  const sx = ev.target.closest && ev.target.closest("[data-shipx]");
+  if (sx) {
+    const m = msgs[Number(sx.dataset.shipx)], box = sx.closest(".chship");
+    if (m && m.sk) {
+      if (SHIP_OPEN.has(m.sk)) SHIP_OPEN.delete(m.sk); else SHIP_OPEN.add(m.sk);
+      if (box) box.classList.toggle("open", SHIP_OPEN.has(m.sk));
+      paint();
+    }
+    return -1;
+  }
   const t = ev.target.closest && ev.target.closest("[data-tools]");
   if (t) {
     const m = msgs[Number(t.dataset.tools)];
@@ -31823,7 +32612,7 @@ const CHAT_QUOTE_MAX = 300;
 function chatMsgText(m) {
   if (!m || m.live || m.role === "sys" || m.earlier || m.repMore) return "";
   if (m.report) return (m.e && m.e.content) || "";
-  if (m.role === "user") return m.text || "";
+  if (m.role === "user" || m.role === "ship") return m.text || "";
   return (m.parts || []).filter(p => p.t === "text" && p.s).map(p => p.s).join("\n\n");
 }
 // text and "> " quote lines, as runs: [{q, s}], a quote's marks taken off
@@ -31948,7 +32737,7 @@ function chatQuoteSaid() {
   if (!(chatUp() || dockFm()) || !chatShown()) { toast("open a chat to quote in it", true); return; }
   if (chatQuoteFrom(null)) return;
   const log = chatEl("log"), kids = log ? Array.from(log.children) : [];
-  const el = kids.reverse().find(k => k._m && k._m.role !== "user" && chatMsgEl(k));
+  const el = kids.reverse().find(k => k._m && k._m.role !== "user" && k._m.role !== "ship" && chatMsgEl(k));
   if (!el) { toast("no answer to quote yet", true); return; }
   chatReply(el);
 }
@@ -32574,6 +33363,23 @@ function chatMountDraw(m) {
   if (t.role) crewJumpDo(t, log);
   chatChrome(m);
 }
+// The status line under the thread. An engineer at work in a tool, with no
+// line of theirs playing, says the tool in plain words with the working
+// pulse (engToolNow); their next line, or its being said, replaces it.
+// Written only when it changes: the voice's states call it too.
+function chatStatPaint(m, t) {
+  const s = m.stat, tool = t.eng ? engToolNow(t) : "";
+  const txt = t.eng ? engStatusLine(t, tool)
+    : t.busy ? (t.stopping ? "stopping…" : "working…")
+    : t.nav ? "each order starts afresh from the plan"
+    : t.person ? (t.person.title || "aboard") + ", through the computer"
+    : t.arch ? "changes the ship while you watch" + (t.sid ? " · thread " + t.sid.slice(0, 8) : " · new thread")
+    : (t.role ? "as the " + t.role.title + ", through the computer" : "reads the journal") +
+      (t.sid ? " · thread " + t.sid.slice(0, 8) : " · new thread");
+  if (s.textContent !== txt) s.textContent = txt;
+  const cls = "chstat " + (t.eng ? ((t.eng.st || {}).status || "") + (tool ? " tool" : "") : t.busy ? "working" : "");
+  if (s.className !== cls) s.className = cls;
+}
 // Send, the status line, the model chip and the context card. While an
 // answer streams, Send is Stop, until something is typed: then it is Send
 // again, and sends that in the answer's place.
@@ -32600,15 +33406,7 @@ function chatChrome(m = chatFm()) {
   m.plus.hidden = !chatTakesFiles(t) || ro;
   if (!m.plus.hidden) m.plus.title = "Add files (or paste, or drop them here): " + chatFilesCan(t);
   chatFilesPaint(m);
-  const s = m.stat;
-  s.textContent = t.eng ? engStatusLine(t)
-    : t.busy ? (t.stopping ? "stopping…" : "working…")
-    : t.nav ? "each order starts afresh from the plan"
-    : t.person ? (t.person.title || "aboard") + ", through the computer"
-    : t.arch ? "changes the ship while you watch" + (t.sid ? " · thread " + t.sid.slice(0, 8) : " · new thread")
-    : (t.role ? "as the " + t.role.title + ", through the computer" : "reads the journal") +
-      (t.sid ? " · thread " + t.sid.slice(0, 8) : " · new thread");
-  s.className = "chstat " + (t.eng ? (t.eng.st || {}).status || "" : t.busy ? "working" : "");
+  chatStatPaint(m, t);
   // the model that answers next; an engineer's is their session's, "⋯" until
   // it has taken (their turn's end), and not for a login the server refuses
   const mc = m.model, em = t.eng && engModel(t);
@@ -32944,12 +33742,29 @@ function chatAnswered(m) {
    bubble, with Retry, and its words go back in the box. A question sent
    while an answer streams stops that answer first. The thread is held from
    the start: the captain may have gone to another by the time it answers. */
+/* A message the captain said rather than typed - hold to talk, a
+   conversation, the deck's talk sheet, a "computer, ask" order, dictation
+   into the box - reaches the session (an engineer's, Number One's, the
+   computer's or a crew member's /chat) with SPOKEN before its words, and its
+   bubble carries a mic mark. Their briefs (engineer.py's SPOKEN_RULE, the
+   chat's prompt in lcars_chat.h) answer such a message first in a sentence
+   or two, before any tool runs, since a silence while they read sounds like
+   nothing heard. chatVoiced holds the boxes dictation has put words into
+   since they were last empty: typing a correction into one keeps the mark,
+   emptying it drops it. */
+const SPOKEN = "[spoken] ";
+const chatSpokenMark = (q, spoken) => spoken ? SPOKEN + q : q;
+const chatVoiced = new WeakSet();
+const CHAT_MIC = `<span class="chmic" title="spoken" aria-label="spoken">&#127897;&#65038;</span>`;
 async function chatSend(text, opts) {
   const th = chat, mt = chatMountFor(th), box = mt ? mt.box : null;
   const q = String(text == null ? (box ? box.value : "") : text).trim();
   // the files above the box go with it (or a retry's own)
   let files = opts && opts.files ? opts.files : chatTakesFiles(th) && th.att.length ? th.att : null;
   if (!q && !files) return;
+  // said, not typed: told by whoever sent it, or the box's words dictated
+  const spoken = !!(opts && (opts.spoken || opts.voice)) || !!(text == null && box && chatVoiced.has(box));
+  if (text == null && box) chatVoiced.delete(box);
   // the architect: what the deck shows, frozen now ("this" is what was under
   // the crosshair when he spoke), and a picture of it, uploading from here
   // as one of the message's files
@@ -32969,7 +33784,20 @@ async function chatSend(text, opts) {
     th.fileSeen = true;
   }
   // an engineer's turn is not stopped by a message: it waits its turn
-  if (th.eng) { if (box) { box.value = ""; chatGrow(box); } if (sayOn()) chatSayUnlock(); return engSend(th, q, opts && opts.note, files); }
+  if (th.eng) {
+    // dictated into Number One's box, quick answers "always": the page or
+    // the computer may answer first (voice-quick-answer.md 7); Hold to talk
+    // and a conversation were asked already (talkHost.send: opts.quick)
+    let hold = opts && opts.hold;
+    if (spoken && q && !files && !(opts && opts.quick) && quickWanted(th, false, q, true)) {
+      quickDrop(th);
+      if (quickTry(th, q, false, true)) { if (box) { box.value = ""; chatGrow(box); } return; }
+      hold = quickCheck(th, q);
+    }
+    if (box) { box.value = ""; chatGrow(box); }
+    if (sayOn()) chatSayUnlock();
+    return engSend(th, q, opts && opts.note, files, spoken, hold);
+  }
   // said to someone in the deck: an order ("follow me", "go to the bridge")
   // is the deck's to carry out, not a question for the computer
   if (th.person && chatSolo()) {
@@ -32982,6 +33810,8 @@ async function chatSend(text, opts) {
   // the architect's error turn is the page's words, not the captain's: a
   // system line in the thread
   const u = opts && opts.auto ? { role: "sys", text: q, cls: "auto" } : { role: "user", text: q, state: "sending" };
+  if (spoken && u.role === "user") u.spoken = true;
+  const qs = chatSpokenMark(q, u.spoken);
   // the newest report it was said after: where the log draws the reports (crewLog)
   if (th.role) u.rep = ((crewReports().get(th.role.kind) || [])[0] || { id: 0 }).id;
   // With files, the bubble is there at once with their bars, and the
@@ -33032,15 +33862,15 @@ async function chatSend(text, opts) {
   // brief, the thread so far as a transcript, where and when the captain is,
   // their recording, the plan as the planner has it (saved first, so what it
   // reads is what is on screen) and the order.
-  let body = pre ? pre + "\n\n" + q : q, before = "";
+  let body = pre ? pre + "\n\n" + qs : qs, before = "";
   if (th.nav) {
     if (crs.saveT) { clearTimeout(crs.saveT); crs.saveT = 0; await crsSave(); }
     const e0 = st.byId.get(th.nav);
     before = e0 ? e0.content : "";
-    body = crsNavBrief(th.nav) + crsNavPast(th.msgs.slice(0, -2)) + crsNavWhere() + crsNavTrack() + crsNavState() + q;
+    body = crsNavBrief(th.nav) + crsNavPast(th.msgs.slice(0, -2)) + crsNavWhere() + crsNavTrack() + crsNavState() + qs;
     th.sid = null;
   }
-  if (th.arch) body = (pre ? pre + "\n\n" : "") + archBody(th, ax) + q;
+  if (th.arch) body = (pre ? pre + "\n\n" : "") + archBody(th, ax) + qs;
 
   // said as it is written, with Voice on (chatSayFeed)
   // the architect's patch goes to the deck the moment its fence closes,
@@ -33103,7 +33933,7 @@ function chatRetry(i) {
     if (!files.length) files = null;
   }
   if (!u.text && !files) return;
-  chatSend(u.text, files ? { files } : undefined);
+  chatSend(u.text, files || u.spoken ? Object.assign(files ? { files } : {}, u.spoken ? { spoken: true } : {}) : undefined);
 }
 // the box grows with what is typed, up to its max-height, and back
 function chatGrow(b) {
@@ -33680,9 +34510,24 @@ function chatPaneWire(m) {
       return;
     }
     if (ev.target.closest && ev.target.closest("[data-repmore]")) { crewLogMore(chat, log); return; }
+    if (ev.target.closest && ev.target.closest("[data-quickask]")) {
+      const tt = m.id ? chatFind(m.id) : chat, b = ev.target.closest("[data-quickask]"), row = b.closest(".chm");
+      // pressed at once; "sent to Number One" in its place as the row redraws
+      b.classList.add("on");
+      if (tt && row && row._m) quickAsk(tt, row._m);
+      return;
+    }
+    if (ev.target.closest && ev.target.closest("[data-unhush]")) {
+      const tt = m.id ? chatFind(m.id) : chat;
+      // the line goes at once; their next line is said as it comes
+      if (tt && tt.eng) { chatEngUnhush(tt); chatDraw(tt); toast("voice back: their next line is said"); }
+      return;
+    }
     if (yeoTap(ev)) return;
     const op = ev.target.closest && ev.target.closest("[data-entry]");
     if (op) { chatLeaveAt(op); closeOv(); select(Number(op.dataset.entry)); return; }
+    const vb = ev.target.closest && ev.target.closest("[data-via]");
+    if (vb) { vb.classList.add("pressing"); chatLeaveAt(vb); const [ref, id] = vb.dataset.via.split(":"); engRefOpen(ref, Number(id)); return; }
     const me = ev.target.closest && chatMsgEl(ev.target);
     if (me && ev.target.closest("[data-quote]")) { chatQuoteFrom(me); return; }
     if (me && ev.target.closest("[data-reply]")) { chatReply(me); return; }
@@ -33700,7 +34545,7 @@ function chatPaneWire(m) {
   m.qcard.onclick = ev => { const b = ev.target.closest && ev.target.closest("button[data-k]"); if (b) engAnswer(b.dataset.k); };
   m.inbox.onclick = ev => engInboxTap(ev, m);
   engThreadsWire(m);
-  box.oninput = () => { chatGrow(box); chatChrome(m); };
+  box.oninput = () => { if (!box.value.trim()) chatVoiced.delete(box); chatGrow(box); chatChrome(m); };
   // a touch screen's Enter is a new line (its keyboard has no Shift+Enter);
   // Send sends
   box.setAttribute("enterkeyhint", chatTouch() ? "enter" : "send");
@@ -34168,12 +35013,13 @@ const DOCK_MEDIA_LINE = /!\[[^\]]*\]\(|\]\([^)\s]+\.(?:jpe?g|png|gif|webp|avif|h
 // The settled part's end: the last blank line outside a code fence, or a
 // finished line holding a picture after it - left in the tail, the picture
 // would be made again (and decoded, and laid out) every frame of the stream.
-// mdRender draws every line on its own, so a cut at any line break draws the
-// same as the whole.
+// mdRender draws every line on its own but a table's, so a cut at any other
+// line break draws the same as the whole.
 function dockLiveCut(text) {
   let at = text.lastIndexOf("\n\n");
   for (let j = text.lastIndexOf("\n"); j > at + 1; j = text.lastIndexOf("\n", j - 1)) {
     const line = text.slice(text.lastIndexOf("\n", j - 1) + 1, j);
+    if (mdHasPipe(line)) continue;    // a table's row: cut there, its rows would lose their header
     if (DOCK_MEDIA_LINE.test(line) || (/media\//.test(line) && chatBareMedia(line))) { at = j; break; }
   }
   if (at < 0) return 0;
@@ -34881,12 +35727,14 @@ function chatSolo() { return !!$("#dlg") && $("#dlg").classList.contains("solo")
 function chatDeckSound() { try { return !!window.parent.lcarsDeckSound?.(); } catch (e) { return false; } }
 // The speaking mark in the talk row: "voice…" while the first line is
 // being made, then "speaking", gone at the end. It is a button: a tap stops.
+// A run lingering between an engineer's lines (sayEnd) keeps it lit: the
+// mark does not flicker at every tool gap.
 function sayShow(v) {
   const el = $("#chsay");
   if (!el) return;
   el.hidden = !v;
   el.textContent = v === "pending" ? "voice…" : "speaking";
-  el.classList.toggle("on", v === "playing");
+  el.classList.toggle("on", v === "playing" || v === "linger");
 }
 /* ===================== speech queue ===================== */
 /* The crew's voices: POST /say on the server relays a text-to-speech
@@ -35005,13 +35853,30 @@ function sayCut(text, from) {
 // run goes on in it; without one the run ends and `done` resolves false, for
 // the caller to fall back itself. `done` resolves true once it has been said,
 // or stopped.
-function sayRun(who, female, vol, onState, utter) {
-  sayStop();
+// `opts.after`: the run speaking now is not stopped but followed - this one
+// fetches its first line at once and plays it the instant that one's last
+// has ended (the computer's quick answer, then Number One: voice-quick-
+// answer.md 5). Both are one generation (say.n), so a stop ends both; one
+// already over, or not the one speaking, is no reason to wait: a plain run.
+function sayRun(who, female, vol, onState, utter, opts) {
+  const after = opts && opts.after && sayLive(opts.after) && say.run === opts.after && !opts.after.over ? opts.after : null;
+  if (!after) sayStop();
   const run = { n: say.n, who, female, vol, onState, utter, items: [], i: 0, h: 0, open: true, busy: false,
-                srcs: new Set(), acs: new Set(), synth: 0, endAt: 0, failed: false, ok: true, shown: "" };
+                srcs: new Set(), acs: new Set(), synth: 0, endAt: 0, failed: false, ok: true, shown: "", after };
   run.done = new Promise(r => { run.resolve = r; });
+  if (after) after.next = run;
   say.run = run;
   return run;
+}
+// whether a chained run may play yet: once everything of the run before it
+// is scheduled (it ends at its endAt) or over; until then its lines wait,
+// fetched, in their buffers
+function sayAfterReady(run) {
+  const a = run.after;
+  if (!a || a.over) return true;
+  if (a.open || a.busy || a.h < a.items.length || a.synth) return false;
+  run.endAt = Math.max(run.endAt, a.endAt);
+  return true;
 }
 function sayLive(run) { return !!run && run.n === say.n; }
 function sayState(run, v) {
@@ -35019,31 +35884,58 @@ function sayState(run, v) {
   run.shown = v;
   if (run.onState) run.onState(v);
 }
-function sayAdd(run, text) {
+// `tag`, if given, is handed to run.onLine as the line begins to play (the
+// chats light the bubble it came from: chatSayingSet)
+function sayAdd(run, text, tag) {
   text = text ? sayTrim(text) : "";
   if (!sayLive(run) || !run.open || !text || !sayOn()) return;
-  run.items.push({ text, bufs: [], done: false, failed: false, played: false, began: null });
-  if (!run.shown) sayState(run, "pending");
+  run.items.push({ text, tag, bufs: [], done: false, failed: false, played: false, began: null });
+  if (!run.shown && !(run.after && !run.after.over)) sayState(run, "pending");
   sayPump(run);
 }
-function sayEnd(run) {
+// `linger` (ms): once the last line has ended the run stays for that long,
+// still reopenable, before it is over (voice-live-narration.md 3.3). An
+// engineer at work speaks in short lines with tool gaps between; ended at
+// each, the run would flap a phone's audio session (the capture given back
+// and taken again, convSay) and the speaking mark. Meanwhile its state is
+// "linger": the mark and the capture's hold stay, the lips and a mute
+// conversation's "playing" do not. Ended again without it: over at once.
+function sayEnd(run, linger = 0) {
   if (!run) return;
   run.open = false;
+  run.linger = linger;
   sayDone(run);
 }
-// An ended run still speaking takes more lines (an engineer's next message,
-// come with a poll while the last one is still being said), so they follow
-// it rather than cut it off; false once it has finished or been stopped.
+// An ended run still speaking (or lingering) takes more lines (an
+// engineer's next message, come with a poll while the last one is still
+// being said), so they follow it rather than cut it off; false once it has
+// finished or been stopped.
 function sayReopen(run) {
   if (!sayLive(run) || say.run !== run) return false;
+  clearTimeout(run.lingerT); run.lingerT = 0;
   run.open = true;
   return true;
 }
-// over when nothing more can come and the last line has ended
+// over when nothing more can come and the last line has ended (and, for a
+// chained run, the one before it is over too: a stop must still reach it)
 function sayDone(run) {
-  if (run.open || run.busy || run.h < run.items.length || run.srcs.size || run.synth) return;
-  if (sayLive(run)) { sayState(run, ""); say.run = null; }
+  if (run.next && !run.open && sayLive(run.next)) sayFlush(run.next);
+  if (run.open || run.busy || run.h < run.items.length || run.srcs.size || run.synth || (run.after && !run.after.over)) return;
+  if (run.linger && sayLive(run) && say.run === run) {
+    if (!run.lingerT) {
+      sayState(run, "linger");
+      run.lingerT = setTimeout(() => { run.lingerT = 0; run.linger = 0; sayDone(run); }, run.linger);
+    }
+    return;
+  }
+  clearTimeout(run.lingerT); run.lingerT = 0;
+  if (run.over) return;
+  run.over = true;
+  // followed by a chained run, the mark and the capture stay for it: no flap
+  // between two speakers
+  if (sayLive(run)) { if (!(run.next && sayLive(run.next))) sayState(run, ""); else run.shown = ""; if (say.run === run) say.run = null; }
   run.resolve(run.ok);
+  if (run.next && sayLive(run.next)) sayFlush(run.next);
 }
 // Asks for the lines in order: each once the one before has begun playing
 // (or failed), so at most one request is ahead of the voice.
@@ -35069,7 +35961,7 @@ async function sayPump(run) {
 // (or all of it), so a provider barely ahead of the voice does not stutter.
 const SAY_LEAD = 0.25;
 function sayFlush(run) {
-  if (!sayLive(run)) return;
+  if (!sayLive(run) || !sayAfterReady(run)) return;
   for (let it; (it = run.items[run.h]); ) {
     if (it.failed && !it.played) {
       // nothing of it was heard: the browser says it, or the run ends
@@ -35090,7 +35982,8 @@ function sayFlush(run) {
         if (!it.played) {
           it.played = true;
           // the next line is asked for once this one has begun
-          setTimeout(() => { it.begin(); sayState(run, "playing"); }, Math.max(0, (at - actx.currentTime) * 1000));
+          setTimeout(() => { it.begin(); sayState(run, "playing"); if (run.onLine && sayLive(run)) run.onLine(it.tag); },
+                     Math.max(0, (at - actx.currentTime) * 1000));
         }
       }
       it.bufs = [];
@@ -35166,7 +36059,8 @@ function saySynth(run, text) {
   const u = run.utter && "speechSynthesis" in window ? run.utter(text) : null;
   if (!u) { run.ok = false; run.open = false; run.failed = true; return; }
   run.synth++;
-  u.onstart = () => sayState(run, "playing");
+  const tag = (run.items[run.h] || {}).tag;
+  u.onstart = () => { sayState(run, "playing"); if (run.onLine && sayLive(run)) run.onLine(tag); };
   u.onend = u.onerror = () => { run.synth--; sayDone(run); };
   const wait = Math.max(actx ? (run.endAt - actx.currentTime) * 1000 : 0, sayQuietS() * 1000);
   setTimeout(() => { if (sayLive(run)) speechSynthesis.speak(u); }, Math.max(0, wait));
@@ -35182,9 +36076,13 @@ function sayAloud(text, who, vol, onState, female) {
 }
 function sayStop() {
   say.n++;
-  const run = say.run;
+  // the run speaking, and the ones it was chained after (sayRun's `after`)
+  const runs = [];
+  for (let r = say.run; r && !r.over; r = r.after) runs.unshift(r);
   say.run = null;
-  if (run) {
+  for (const run of runs) {
+    run.over = true;
+    clearTimeout(run.lingerT); run.lingerT = 0;
     for (const ac of run.acs) { try { ac.abort(); } catch (e) {} }
     for (const s of run.srcs) { try { s.onended = null; s.stop(); } catch (e) {} }
     run.srcs.clear();
@@ -35212,9 +36110,14 @@ const talkHost = {
     if (on) chatSayUnlock();
     // talking to someone is listening to them
     if (on && why === "conv" && !sayOn()) chatVoiceSet(true);
+    // the conversation over (ended, the thread left): a question the
+    // computer is still checking is stale
+    if (!on && why === "conv" && chat && chat.eng) quickDrop(chat);
     chatMicHold(on, why);
   },
   toast: (t, ms) => toast(t, !ms),
+  // a press of Hold to talk that stopped the voice and sent nothing
+  fumble: () => { if (chat && chat.eng) chatEngUnhush(chat); },
   // Send stops an answer still being written itself, then sends
   clear: async () => {},
   // an engineer's or Number One's conversation goes with the answer-first note
@@ -35222,7 +36125,19 @@ const talkHost = {
     // "end conversation", said into the conversation: the console's own
     // recogniser is let go of meanwhile, so this is where the order is heard
     if (conv && CHAT_CONV_END.test(talkHost.get().trim())) { talkHost.put(""); convEnd(); toast("conversation ended"); return; }
-    chatSend(undefined, conv && chat.eng ? { note: CONV_NOTE } : undefined);
+    // the quick answers' bare orders, and a small question the page answers
+    // itself (voice-quick-answer.md): nothing is sent for either
+    const said = talkHost.get().trim(), qs = QUICK_SET_SAID.exec(said);
+    // spoken again: what the computer is still checking is stale
+    if (said && chat && chat.eng) quickDrop(chat);
+    if (conv && qs) { talkHost.put(""); chatQuickSet({ off: "off", always: "always" }[qs[2].toLowerCase()] || "conv", true); return; }
+    if (conv && chat && chat.eng && chat.eng.quick && QUICK_ASK_SAID.test(said)) { talkHost.put(""); quickAsk(chat, chat.eng.quick); return; }
+    // Hold to talk is spoken too: the page answers it with "always" (7)
+    if (said && quickTry(chat, said, conv, true)) { talkHost.put(""); return; }
+    // tier 2: asked of the computer as it goes to Number One (held for the
+    // answer while he works: quickCheck)
+    const hold = said && quickWanted(chat, conv, said, true) ? quickCheck(chat, said) : null;
+    chatSend(undefined, Object.assign(conv && chat.eng ? { note: CONV_NOTE, spoken: true } : { spoken: true }, hold ? { hold } : {}, { quick: true }));
   },
 };
 /* ===================== hold to talk =====================
@@ -35311,8 +36226,10 @@ function pttShow(p) {
 async function pttDown() {
   if ((ptt.cur && ptt.cur.down) || conv.cur) return;
   if (ptt.cur) pttFinish(ptt.cur);          // the last one's words go first
+  // (a press that stops a voice and sends nothing was a fumble: pttDrop)
+  const stopped = !!say.run;
   sayStop();
-  const p = { down: true, open: false, ws: null, queue: [], final: [], interim: "", 
+  const p = { stopped, sent: false, down: true, open: false, ws: null, queue: [], final: [], interim: "", 
               before: talkHost.get().trim(), stream: null, ctx: null, node: null, src: null, sink: null, timer: null };
   ptt.cur = p;
   talkHost.hold(true, "ptt");
@@ -35323,7 +36240,7 @@ async function pttDown() {
   tok.catch(() => {});   // said below, or moot if the press ends first
   let opened = false;
   try {
-    p.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    p.stream = await talkMic();
     opened = true;
     // let go while the browser asked: a tap is not a hold
     if (ptt.cur !== p || !p.down) { pttRelease(p); if (ptt.cur === p) pttDrop(p); return; }
@@ -35454,6 +36371,7 @@ function pttRelease(p) {
   for (const k of ["src", "sink"]) if (p[k]) { try { p[k].disconnect(); } catch (e) {} p[k] = null; }
   if (p.stream) { for (const t of p.stream.getTracks()) t.stop(); p.stream = null; sayQuiet(V_HOLD_SETTLE); }
   if (p.ctx) { const c = p.ctx; p.ctx = null; try { c.close(); } catch (e) {} }
+  convRoute();
 }
 function pttUp() {
   const p = ptt.cur;
@@ -35477,13 +36395,19 @@ function pttDrop(p) {
   p.down = false;
   pttRelease(p);
   if (p.ws) { const ws = p.ws; p.ws = null; ws.onopen = ws.onmessage = ws.onclose = null; try { ws.close(); } catch (e) {} }
-  if (ptt.cur === p) { ptt.cur = null; talkHost.put(p.before); talkHost.hold(false, "ptt"); pttPaint(); }
+  if (ptt.cur === p) {
+    ptt.cur = null; talkHost.put(p.before); talkHost.hold(false, "ptt"); pttPaint();
+    // it stopped a voice and sent nothing (a tap, nothing heard, a refusal):
+    // a fumble, not "be quiet" - the voice's hush is lifted again
+    if (p.stopped && !p.sent) talkHost.fumble();
+  }
 }
 // ends a press and sends what was heard, as if typed
 // (`quiet`: a failure has been said already, so not "nothing heard" too)
 async function pttFinish(p, quiet) {
   if (ptt.cur !== p) return;
   const said = p.final.concat(p.interim ? [p.interim] : []).join(" ").trim();
+  p.sent = !!said;
   pttDrop(p);
   if (!said) { if (!quiet) talkHost.toast("Nothing heard", 1800); return; }
   talkHost.put([p.before, said].filter(Boolean).join(" "));
@@ -35622,12 +36546,14 @@ function convSetOutput(o) {
   const c = conv.cur;
   if (c && c.held && !convDrops()) { c.held = false; convTake(c); }
   else if (c && !c.held && convDrops() && convSpeaking()) { c.held = true; convDrop(c); }
+  convRoute();
   convPaint();
 }
 // A reply being said (`on`) or over, from the chats' runs (chatSayRun):
 // with the speaker chosen on a phone, the capture is let go for it
 function convSay(on) {
   const c = conv.cur;
+  convRoute();
   if (!c) return;
   if (on) {
     clearTimeout(c.takeT); c.takeT = 0;
@@ -35648,15 +36574,16 @@ function convDrop(c) {
   if (c.src) { try { c.src.disconnect(); } catch (e) {} c.src = null; }
   if (c.stream) { for (const t of c.stream.getTracks()) t.stop(); c.stream = null; }
   sayQuiet(V_HOLD_SETTLE);
+  convRoute();
 }
 // the capture again, into the graph it had
 async function convTake(c) {
   if (conv.cur !== c || c.held || c.stream || !c.node || !c.ctx) return;
   let s;
-  try { s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+  try { s = await talkMic(); }
   catch (e) { if (conv.cur === c && !c.held) convFail(c, pttMicError(e)); return; }
   // ended, held again or taken meanwhile: this one goes
-  if (conv.cur !== c || c.held || c.stream || !c.ctx || !c.node) { for (const t of s.getTracks()) t.stop(); return; }
+  if (conv.cur !== c || c.held || c.stream || !c.ctx || !c.node) { for (const t of s.getTracks()) t.stop(); convRoute(); return; }
   c.stream = s;
   c.src = c.ctx.createMediaStreamSource(s);
   c.src.connect(c.node);
@@ -35667,6 +36594,46 @@ async function convTake(c) {
 function convSpeaking(playing) {
   const ss = window.speechSynthesis;   // through window: a page (or a test) may have none
   return !!(say.run && (playing ? say.run.shown === "playing" : say.run.shown)) || !!(ss && ss.speaking);
+}
+/* The phone's audio session, said outright (Safari 16.4+:
+   navigator.audioSession.type). Stopping the tracks was meant to take iOS
+   out of play-and-record (convDrop, pttRelease), and it does not: once a
+   page has captured, its session stays play-and-record - the output on
+   the earpiece - for as long as the page lives, whatever the tracks do
+   (the captain's iPhone, 0.297.2: every reply in the earpiece, the pill
+   changing nothing). So the page names it: play-and-record while a
+   microphone is open or being asked for (convSess.ask: before getUserMedia,
+   which a "playback" session refuses), "playback" while a reply is said
+   with the speaker chosen - the loudspeaker, louder, and past the silent
+   switch - and the earpiece's play-and-record with it chosen; "auto"
+   otherwise, so the page's other captures (a tape, the voice orders' own
+   recogniser) find the session as the browser keeps it. Hold to talk goes
+   through it too (convSay is called for every run, conv.cur or not):
+   there the microphone is off before the reply anyway, so the pill is
+   where the reply is heard, nothing else. Both the frame's navigator and,
+   in the deck, the top page's: the session is the tab's, and which
+   document's setting iOS heeds is not written down. Nothing without
+   the API, nor off a phone. */
+const convSess = { ask: 0, type: "" };
+function convRoute() {
+  if (!convHoldForTts) return;
+  const vxLive = typeof vx !== "undefined" && vx.on && !vx.held && !vx.tape;
+  const mic = convSess.ask > 0 || !!(ptt.cur && ptt.cur.stream) || !!(conv.cur && conv.cur.stream) || vxLive;
+  const t = mic ? "play-and-record" : convSpeaking() ? (conv.out === "speaker" ? "playback" : "play-and-record") : "auto";
+  if (t === convSess.type) return;
+  // to the loudspeaker: the first words wait for the switch (sayQuiet)
+  if (t === "playback") sayQuiet(V_HOLD_SETTLE);
+  convSess.type = t;
+  const navs = [navigator];
+  try { if (window.top !== window && window.top.navigator !== navigator) navs.push(window.top.navigator); } catch (e) {}
+  for (const n of navs) { try { if (n.audioSession && n.audioSession.type !== t) n.audioSession.type = t; } catch (e) {} }
+}
+// getUserMedia for the talk, the session made play-and-record first
+async function talkMic() {
+  convSess.ask++;
+  convRoute();
+  try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+  finally { convSess.ask--; }
 }
 // muted only while their voice is in the room, not while it is being made
 function convMuted() { return conv.mode === "mute" && convSpeaking(true); }
@@ -35705,7 +36672,7 @@ async function convStart() {
   const tok = pttToken();
   tok.catch(() => {});
   try {
-    c.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    c.stream = await talkMic();
     if (conv.cur !== c) { pttRelease(c); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     c.ctx = new AC();
@@ -35908,43 +36875,106 @@ function chatUtter(text, w) {
   u.volume = 0.9;
   return u;
 }
+// The computer's quick answer being said: his run follows it rather than
+// cutting it off (voice-quick-answer.md 5)
 function chatSayRun(t) {
   const w = chatWho(t);
-  return sayRun(w.who, w.female, 0.9, v => { sayShow(v); chatMicHold(!!v, "say"); convSay(!!v); chatDeckLips(t, v === "playing"); }, text => chatUtter(text, w));
+  const run = sayRun(w.who, w.female, 0.9, v => {
+    sayShow(v); chatMicHold(!!v, "say"); convSay(!!v); chatDeckLips(t, v === "playing");
+    chatVoiceAt = Date.now();
+    if (!v) {
+      chatSayingSet(null);
+      // stopped, not finished (sayStop moved say.n on first): the rest of an
+      // engineer's turn is hushed, and the thread says so, with a tap back
+      if (t.eng && !sayLive(run)) { t.eng.hush = true; t.eng.hushQ = ""; if (t.eng.run === run) t.eng.run = null; chatDraw(t); return; }
+    }
+    if (t.eng) for (const m of chatLive()) if (m.id === t.id) chatStatPaint(m, t);
+  }, text => chatUtter(text, w), { after: say.run && say.run.quick ? say.run : null });
+  run.onLine = m => chatSayingSet(m || null);
+  return run;
+}
+/* The message being read aloud: its bubble's left bar lit (.saying), moved
+   as the next line's bubble begins, gone at the run's end (voice-live-
+   narration.md 4). Set once a line, never per frame; chatLogPaint keeps it
+   on a message it redraws. No word-level highlight: /say has no timings. */
+const chatSaying = { m: null };
+let chatVoiceAt = 0;         // when the voice last changed state: the earcon's quiet
+function chatSayingSet(m) {
+  if (chatSaying.m === m) return;
+  chatSaying.m = m;
+  for (const mt of chatLive()) for (const el of mt.log.children) el.classList.toggle("saying", !!m && el._m === m);
 }
 // what of an answer is said: no code, no tables, a link by its words
 const chatSayText = s => String(s).replace(/```[\s\S]*?(```|$)/g, " ").replace(/^\s*\|.*$/gm, "")
   .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\(\((\d+)\)\)/g, "entry $1");
+/* How much of a turn the chats say (voice-live-narration.md 6), per
+   device (lcars.chat.narrate): "all", everything written to the captain as
+   it comes - the narration on the way to a tool too; "answers", only the
+   text after the last tool on the streamed path, and of an engineer's only
+   the report, once the turn is over. A phone on a walk wants all; a desk
+   read along wants answers. Config, the deck's Settings, "answers only". */
+const CHAT_NARRATE = { all: "say everything", answers: "answers only" };
+const chatNarrate = { v: lsGet("lcars.chat.narrate", "") === "answers" ? "answers" : "all" };
+function chatNarrateSet(v, said) {
+  chatNarrate.v = v === "answers" ? "answers" : "all";
+  lsSet("lcars.chat.narrate", chatNarrate.v);
+  const sel = $("#c_narr");
+  if (sel) sel.value = chatNarrate.v;
+  if (said) toast("chat voice: " + (chatNarrate.v === "all" ? "everything they say, the lookups' narration too" : "answers only, no narration"));
+}
 /* A streamed answer (the computer's, a crew role's, a navigator's), said a
-   sentence at a time as it is written (sayCut). Only the text after the
-   last tool call is the answer: narration on the way to a tool ("let me
-   look") is never cut off to be said, since nothing follows it before the
-   tool, and a tool call stops whatever of it was queued and starts a fresh
-   run. Called with each batch the stream brings, and `final` once it ends.
-   Spoken only while Voice is on and the thread is on screen; a run stopped
-   (the mark, Esc, Stop, the talk) stays stopped for the rest of the answer. */
-const chatSays = new WeakMap();      // an answer -> {run, tools, said}: never saved
+   sentence at a time as it is written (sayCut). With narration on ("all"),
+   every text part is said: at a tool part, the sentence sayCut holds back
+   (waiting for words after it - there are none before the tool) is
+   flushed into the run, and the run goes on - the line playing finishes
+   and the answer after the tool follows it. `v.said` is an offset into the
+   whole spoken text (each stretch between tools through chatSayText,
+   joined), so a new tool does not reset it. With "answers", only the text
+   after the last tool is the answer: a tool call stops whatever of it was
+   queued and starts a fresh run, as before. Called with each batch the
+   stream brings, and `final` once it ends. Spoken only while Voice is on
+   and the thread is on screen; a run stopped (the mark, Esc, Stop, the
+   talk) stays stopped for the rest of the answer. */
+const chatSays = new WeakMap();      // an answer -> {run, tools, said, all}: never saved
 function chatSayFeed(th, m, final) {
   let v = chatSays.get(m);
   if (!v) {
     if (!sayOn() || chatShown() !== th || !$("#ov").classList.contains("on")) return;
-    v = { run: chatSayRun(th), tools: 0, said: 0 };
+    // the setting as the answer began: changed mid-answer, from the next one
+    v = { run: chatSayRun(th), tools: 0, said: 0, all: chatNarrate.v === "all" };
     chatSays.set(m, v);
   }
   const parts = m.parts || [];
   let last = -1, tools = 0;
   parts.forEach((p, i) => { if (p.t === "tool") { last = i; tools++; } });
-  if (tools !== v.tools) {
+  if (!v.all && tools !== v.tools) {
     v.tools = tools; v.said = 0;
     if (sayLive(v.run)) v.run = chatSayRun(th);
   }
   if (!sayLive(v.run)) return;
-  const text = chatSayText(parts.slice(last + 1).filter(p => p.t === "text").map(p => p.s || "").join("\n"));
+  let text;
+  if (v.all) {
+    // the stretches of text between tools; all but the last are closed
+    const segs = [[]];
+    for (const p of parts) { if (p.t === "tool") segs.push([]); else if (p.t === "text") segs[segs.length - 1].push(p.s || ""); }
+    const said = segs.map(g => chatSayText(g.join("\n")));
+    const open = said.pop();
+    const closed = said.filter(x => x.trim()).map(x => x + "\n").join("");
+    if (v.said < closed.length) {
+      const r = sayCut(closed, v.said);
+      for (const x of r.parts) sayAdd(v.run, x, m);
+      // the tool came: the held sentence is all there will be
+      sayAdd(v.run, closed.slice(r.next), m);
+      v.said = closed.length;
+    }
+    v.tools = tools;
+    text = closed + open;
+  } else text = chatSayText(parts.slice(last + 1).filter(p => p.t === "text").map(p => p.s || "").join("\n"));
   const r = sayCut(text, v.said);
-  for (const s of r.parts) sayAdd(v.run, s);
+  for (const s of r.parts) sayAdd(v.run, s, m);
   v.said = r.next;
   if (final) {
-    if (!m.err) sayAdd(v.run, text.slice(v.said));
+    if (!m.err) sayAdd(v.run, text.slice(v.said), m);
     v.said = text.length;
     sayEnd(v.run);
   }
@@ -35957,21 +36987,84 @@ const chatSaid = m => chatSays.has(m);
    captain stops it with the mark, Esc, Stop or "stop", and only SAY_MAX_BYTES
    cuts a single line. Stopped by the captain (or talked over in a
    conversation, convBarge: only by words, which are then sent), the rest of
-   that turn is not said: their next words lift it. */
-function chatEngSpeak(t, evs) {
+   that turn is not said: their next words lift it.
+   Nothing twice, nothing stale (docs/design/voice-live-narration.md 2.1,
+   2.2): a line's key (`k`, the server's: session, byte offset, index) is
+   said once however it comes back (a session switch caught mid-poll, two
+   mounts of the thread), and a line older than SAY_STALE_S by the server's
+   clock (`now`; the phone's may be out) - a page that slept through the
+   turn - is shown, not said. Of those skipped, the turn's last line, once
+   the turn is over, is said after "Earlier:": the report is what the
+   captain came back for. A line from before the captain's latest message
+   is never said: the turn it belonged to was answered over. */
+const SAY_STALE_S = 20, ENG_SAID_MAX = 200, SAY_LINGER_MS = 4000;
+function chatEngSpeak(t, evs, now, status) {
   const e = t.eng;
-  for (const ev of evs) {
-    if (ev.r === "me") { e.hush = false; continue; }
-    if (ev.r !== "them" || !ev.t || e.hush || !sayOn() || chatShown() !== t || !$("#ov").classList.contains("on")) continue;
+  if (!e.said) e.said = new Set();
+  let lastMe = -1, stale = null, noted = false;
+  // the computer's note (quickNote) is not the captain speaking: it lifts no
+  // hush, and his lines before it are still said
+  const toldOnly = ev => { const p = engPlain(ev.t || ""), x = QUICK_TOLD.exec(p); return !!x && !p.slice(0, x.index).trim(); };
+  evs.forEach((ev, i) => { if (ev.r === "me" && !toldOnly(ev)) lastMe = i; });
+  const speak = (ev, lead) => {
+    if (ev.k) {
+      e.said.add(ev.k);
+      if (e.said.size > ENG_SAID_MAX) e.said.delete(e.said.values().next().value);
+    }
+    if (e.hush || !sayOn() || chatShown() !== t || !$("#ov").classList.contains("on")) return;
     // stopped while it spoke (a finished run has let go of its mark)
-    if (e.run && !sayLive(e.run)) { e.hush = !!e.run.shown; e.run = null; if (e.hush) continue; }
+    if (e.run && !sayLive(e.run)) { e.hush = !!e.run.shown; e.run = null; if (e.hush) return; }
     const s = chatSayText(ev.t).trim(), cut = sayCut(s, 0);
     const parts = cut.parts.concat(s.slice(cut.next).trim() ? [s.slice(cut.next)] : []);
-    if (!parts.length) continue;
+    if (!parts.length) return;
+    if (lead) parts[0] = lead + parts[0];
     if (!e.run || !sayReopen(e.run)) e.run = chatSayRun(t);
-    for (const x of parts) sayAdd(e.run, x);
-    sayEnd(e.run);
-  }
+    for (const x of parts) sayAdd(e.run, x, ev._m);
+    // at work, the run waits for the next line; the report ends it
+    sayEnd(e.run, status === "working" ? SAY_LINGER_MS : 0);
+  };
+  // "answers only": while they work, their last line is held, and said
+  // once the turn is over (the report) - the poll that brings it may still
+  // say "working", so it waits for the one that does not
+  const answers = chatNarrate.v === "answers";
+  evs.forEach((ev, i) => {
+    if (ev.r === "me") {
+      if (toldOnly(ev)) return;
+      // the words whose answer the captain stopped: no lift, they came first
+      if (!(e.hushQ && engPlain(ev.t || "").startsWith(e.hushQ))) { e.hush = false; e.hushQ = ""; }
+      stale = null; e.held = null; return;
+    }
+    if (ev.r !== "them" || !ev.t || i < lastMe || (ev.k && e.said.has(ev.k))) return;
+    if (now && ev.at && now - ev.at > SAY_STALE_S) {
+      // the first of them says why it was not heard (only where it could have been)
+      if (!noted && ev._m && sayOn() && chatShown() === t) { ev._m.quiet = true; noted = true; }
+      stale = ev; e.held = null; return;
+    }
+    stale = null;
+    if (answers && status === "working") { e.held = ev; return; }
+    e.held = null;
+    speak(ev);
+  });
+  // the turn's last words were among the stale, and it is over: the report
+  if (stale && status !== "working") speak(stale, "Earlier: ");
+  else if (e.held && status !== "working") { const h = e.held; e.held = null; if (!(h.k && e.said.has(h.k))) speak(h); }
+}
+// "go on", "keep talking": the hush lifted for the thread on screen
+function chatGoOnSaid() {
+  const t = chatShown();
+  if (!t || !t.eng || !$("#ov").classList.contains("on")) { toast("go on: that lifts an engineer's paused voice - open their chat", true); return; }
+  if (!sayOn()) chatVoiceSet(true);
+  const was = t.eng.hush || (t.eng.run && !sayLive(t.eng.run));
+  chatEngUnhush(t);
+  toast(was ? "voice back: their next line is said" : "their voice is on: the next line is said as it comes");
+}
+// The hush lifted (Hold to talk's fumble; slice 5's "tap to hear"): the
+// next line that comes is said, not the one stopped nor any backlog.
+function chatEngUnhush(t) {
+  const e = t.eng;
+  if (!e) return;
+  e.hush = false; e.hushQ = "";
+  if (e.run && !sayLive(e.run)) e.run = null;
 }
 // the speaking mark tapped, Esc, Stop: the voice stops, the thread goes on
 function chatSayStop() {
@@ -36018,6 +37111,358 @@ function chatTalkSaid(what) {
   // the console's own recogniser heard the order and is let go of first
   convStart();
 }
+/* ---------- quick answers: the page (docs/design/voice-quick-answer.md) ----------
+   A small question about the ship said to Number One in a conversation
+   ("who's in the seat?", "how long?") is answered by the page at once, in
+   the computer's voice, from what it already holds: Number One's poll, the
+   crew list, the seat, the deploy, the clock, today's calendar. It is not
+   sent: the captain asked the ship. The answer is a COMPUTER row under the
+   captain's words ({role: "quick"} in the thread's state, never the
+   transcript), with an Ask Number One chip that sends the words on. A
+   question no row of QUICK_PAGE matches, or one it cannot answer from what
+   is here (an empty answer), goes to Number One as before, and - a small
+   question (quickQuestion) - to the computer at the same time (tier 2,
+   below quickAskSaid).
+   lcars.chat.quick, per device: "conv" (the default), "always" (Hold to
+   talk and words dictated into his box too: spoken, never typed) or
+   "off"; Config, the deck's Settings, the orders. */
+const QUICK_MODES = { conv: "in a conversation", always: "always", off: "off" };
+const quickMode = v => v === "off" || v === "always" ? v : "conv";
+const chatQuick = { v: quickMode(lsGet("lcars.chat.quick", "")) };
+function chatQuickSet(v, said) {
+  chatQuick.v = quickMode(v);
+  lsSet("lcars.chat.quick", chatQuick.v);
+  const sel = $("#c_quick");
+  if (sel) sel.value = chatQuick.v;
+  if (said) toast("quick answers " + (chatQuick.v === "off" ? "off: every question goes to Number One"
+    : chatQuick.v === "always" ? "always: the computer answers small questions to Number One however you say them - a conversation, Hold to talk, dictation"
+    : "on: the computer answers small questions about the ship at once, in a conversation"));
+}
+// minutes as said, not as the bars abbreviate them
+const quickMin = s => String(s).replace(/\bmin\b/g, "minutes");
+// "4 minutes ago", as said (chatAgo's "4m" is for a list)
+const quickAgo = ms => {
+  const m = Math.max(0, Math.round((Date.now() - ms) / 60000)), h = Math.round(m / 60), d = Math.round(m / 1440);
+  return m < 1 ? "just now" : m < 60 ? m + (m === 1 ? " minute" : " minutes") + " ago" : m < 1440 ? h + (h === 1 ? " hour" : " hours") + " ago" : d + (d === 1 ? " day" : " days") + " ago";
+};
+const quickCut = (s, n = 90) => { s = String(s || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n).replace(/\s+\S*$/, "") + "…" : s; };
+// how an engineer (or Number One, from his poll) stands, in a sentence
+function quickWho(x, name) {
+  if (!x) return "";
+  const st = ENG_STATUS[x.status] || x.status || "";
+  if (!st) return "";
+  let s = name + " is " + st;
+  if (x.task && x.status !== "off") s += ", on " + quickCut(x.task);
+  if (x.status === "working" && +x.eta_min) s += ": " + quickMin(etaState(x).label);
+  return s + ".";
+}
+function quickDeploy(t) {
+  const d = ((t.eng.st || {}).deploy && (t.eng.st || {}).deploy.state ? t.eng.st.deploy : eng.deploy) || {};
+  if (!d.state) return "No deploy is on record.";
+  const what = (d.verb === "rollback" ? "rollback" : "deploy") + (d.name && d.verb !== "rollback" ? " of " + engSeatName(d.name) : "");
+  const msg = d.msg ? ": " + quickCut(d.msg, 120) : "";
+  const ago = d.started ? ", started " + quickAgo(d.started * 1000) : "";
+  if (d.state === "queued") return "The " + what + " is waiting to start" + ago + ".";
+  if (d.state === "running") return "The " + what + " is running" + ago + msg + ".";
+  if (d.state === "failed") return "The last " + what + " failed" + ago + msg + ".";
+  if (d.state === "done") return "The last " + what + " finished" + ago + msg + ".";
+  return "The " + what + " is " + d.state + msg + ".";
+}
+function quickSeat() {
+  const s = eng.seat;
+  if (!s || s.error) return "";
+  const q = (s.queue || []).map(n => engSeatName(typeof n === "string" ? n : n.name));
+  return (s.holder ? engSeatName(s.holder) + " has the seat" : "The seat is free") +
+    (q.length ? "; " + (q.length === 1 ? q[0] + " waits" : q.length + " wait: " + q.join(", ")) : "; nobody waits") + ".";
+}
+function quickToday(next) {
+  const day = calToday(), now = localInput(new Date()).replace("T", " ");
+  let rows = (calSchedIndex().get(day) || []).filter(e => !next || !e.start_date || localOf(e.start_date) >= now || e.end_date && localOf(e.end_date) >= now);
+  if (!rows.length) return next ? "Nothing more is on the calendar today." : "Nothing is on the calendar today.";
+  const n = rows.length;
+  rows = rows.slice(0, 5).map(e => { const at = localOf(e.start_date); return (at.slice(0, 10) === day ? at.slice(11, 16) + " " : "") + quickCut(calName(e), 60); });
+  return (next ? "Next today: " : "Today: ") + rows.join("; ") + (n > 5 ? "; and " + (n - 5) + " more" : "") + ".";
+}
+// "where is <name>": an engineer by the list's names; it, you, the deploy too
+function quickNamed(t, w) {
+  const s = vNorm(w);
+  if (/^(the)?deploy(ment)?$/.test(s)) return quickDeploy(t);
+  if (/^(you|it|that|numberone|thefirstofficer|firstofficer)$/.test(s)) return quickWho(t.eng.st, NO1_TITLE);
+  const x = engFind((eng.list || []).filter(y => y.name !== NO1), w);
+  return x ? quickWho(x, x.title || x.name) : "";
+}
+const QUICK_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const QUICK_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+// the browser's zone: the captain's phone is where he is (chatLocalTime)
+const quickDate = d => QUICK_DAYS[d.getDay()] + ", " + d.getDate() + " " + QUICK_MONTHS[d.getMonth()] + " " + d.getFullYear();
+// VCMDS-shaped, the words as vNorm leaves them ("what's" is "whats"); a row
+// answers only the whole question, and "" from its fn means not from here
+const QUICK_PAGE = [
+  { say: "what are you doing", alias: ["what are you working on", "whatre you doing", "what are you up to", "what are you on", "what is your task", "whats your task"],
+    fn: t => { const r = t.eng.st || {}, tool = engToolNow(t); return quickWho(r, NO1_TITLE).replace(/\.$/, "") + (tool ? "; now " + tool.replace(/…$/, "") : "") + (r.status ? "." : ""); } },
+  { say: "how long", alias: ["how long left", "how much longer", "how long now", "when will you be done", "when will it be done", "how long will it take", "how long until youre done", "whens it done"],
+    fn: t => { const r = t.eng.st || {};
+      if (!r.status) return "";
+      if (r.status !== "working") return NO1_TITLE + " is " + (ENG_STATUS[r.status] || r.status) + ", with nothing under way.";
+      return +r.eta_min ? NO1_TITLE + ": " + quickMin(etaState(r).label) + "." : NO1_TITLE + " is working and has given no estimate yet."; } },
+  { say: "how long on {*}", alias: ["where is {*}", "wheres {*}", "how is {*} doing", "hows {*} doing", "what is {*} doing", "whats {*} doing", "how is {*} getting on"],
+    fn: (t, a) => quickNamed(t, a.text) },
+  { say: "whos in the seat", alias: ["who is in the seat", "who has the seat", "whos got the seat", "whos working", "who is working", "whos in line", "who is waiting", "whos waiting"],
+    fn: () => quickSeat() },
+  { say: "is the deploy done", alias: ["hows the deploy", "how is the deploy", "hows the deploy going", "how is the deploy going", "did the deploy finish", "is it deployed",
+                                       "whats the deploy doing", "is the deploy finished", "did it deploy"],
+    fn: t => quickDeploy(t) },
+  { say: "what time is it", alias: ["whats the time", "what is the time"],
+    fn: () => { const d = new Date(); return "It is " + pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ", " + quickDate(d) + "."; } },
+  { say: "whats the date", alias: ["what is the date", "what day is it", "whats todays date", "what is todays date"],
+    fn: () => "Today is " + quickDate(new Date()) + "." },
+  { say: "whats on today", alias: ["what is on today", "whats on my calendar", "whats on my calendar today", "what do i have today", "whats today"],
+    fn: () => quickToday(false) },
+  { say: "whats next on my calendar", alias: ["what is next on my calendar", "whats next today", "whats my next appointment"],
+    fn: () => quickToday(true) },
+];
+const QUICK_PHRASES = vPhrases(QUICK_PAGE);
+// said around a question and meaning nothing to it
+const QUICK_HEAD = /^(hey|so|and|ok|okay|um|uh|computer|number one|well)[\s,]+/i, QUICK_TAIL = /[\s,]+(captain|number one|then|now|please|again)$/i;
+// the page's answer to q, or "" (no row, or no answer from here)
+function quickPage(t, q) {
+  let s = String(q).trim().replace(/[?!.]+$/, "");
+  for (let was = ""; was !== s; ) { was = s; s = s.replace(QUICK_HEAD, "").replace(QUICK_TAIL, ""); }
+  const words = vWords(s).map(vNorm).filter(Boolean);
+  if (!words.length || words.length > 12) return "";
+  for (const p of QUICK_PHRASES) {
+    const got = vTry(p.w, words, 0);
+    if (got && got.end === words.length) return p.cmd.fn(t, got.arg) || "";
+  }
+  return "";
+}
+// whether the page answers this send at all (voice-quick-answer.md 3, 7):
+// Number One's thread, said in a conversation (or, with "always", said any
+// way: Hold to talk, dictation - `spoken`; typed text never), no files with
+// it, and a small question (quickQuestion)
+function quickWanted(t, conv, q, spoken) {
+  return (conv ? chatQuick.v !== "off" : !!spoken && chatQuick.v === "always") && !!t && !!t.eng && t.eng.name === NO1 && !t.eng.view && !(t.att && t.att.length) &&
+         quickQuestion(q);
+}
+const QUICK_MAX_WORDS = 20;
+// a question by its first word ("so", "computer," and the like cut off first)
+const QUICK_ASKS = /^(what|whats|what's|who|whos|who's|whom|whose|when|whens|when's|where|wheres|where's|why|which|how|hows|how's|is|isn't|isnt|are|aren't|arent|am|was|were|did|didn't|didnt|do|does|doesn't|has|hasn't|have|haven't|had|can|could|will|won't|would|should|shall|may|might|any|anything|anyone)\b/i;
+// an order dressed as a question: "can you deploy it?", "please fix the tests"
+const QUICK_ORDER = /\b(?:(?:can|could|would|will) you|please)\s+(?:(?:please|just|now|also)\s+)?(?:build|fix|deploy|ship|write|change|add|send|tell|ask|start|stop|run|make|remove|delete|open|close|merge|commit|update|move|switch|retry|roll)\b/i;
+// a thread switch said with it ("in the deck thread", "switch to main"): the
+// say would go to another of his threads, which the gate leaves to him
+const QUICK_THREAD = /\bthreads?\b|\bswitch to\b/i;
+function quickQuestion(q) {
+  let s = String(q || "").trim();
+  if (!s || QUICK_ORDER.test(s) || QUICK_THREAD.test(s)) return false;
+  if (s.split(/\s+/).length > QUICK_MAX_WORDS) return false;
+  if (/\?["'”’)]*$/.test(s)) return true;
+  for (let was = ""; was !== s; ) { was = s; s = s.replace(QUICK_HEAD, ""); }
+  return QUICK_ASKS.test(s);
+}
+// The answer shown and said in the same frame as the captain's words: his
+// bubble (not sent: no mark), the COMPUTER row under it, the chirp. True
+// when the page answered; false, and nothing done, otherwise.
+function quickTry(t, q, conv, spoken) {
+  if (!quickWanted(t, conv, q, spoken)) return false;
+  const text = quickPage(t, q);
+  if (!text) return false;
+  const e = t.eng, th = e.thread && e.thread !== "main" ? e.thread : "main";
+  const u = { role: "user", text: q, spoken: true, th }, m = { role: "quick", text, tier: 1, q, u, th, state: "" };
+  e.done.push(u, m);
+  e.quick = m;
+  t.at = Date.now();
+  sfx("vok");
+  chatDraw(t);
+  quickSay(t, m);
+  return true;
+}
+// Its own run in the computer's voice: no lips in the deck. A line of his
+// still being said (from before the question: his work's narration) is not
+// cut off but followed (sayRun's `after`). A stop of it (the mark, Esc,
+// "stop", a barge) hushes Number One's turn too (9): the captain stopped the
+// conversation, not one speaker. Another quick answer taking its place is
+// no stop.
+function quickSay(t, m) {
+  if (!sayOn() || chatShown() !== t) return null;
+  chatSayUnlock();
+  const e = t.eng, w = { who: "computer", female: true };
+  if (say.run && say.run.quick) say.run.replaced = true;
+  const run = sayRun(w.who, w.female, 0.9, v => {
+    sayShow(v); chatMicHold(!!v, "say"); convSay(!!v);
+    chatVoiceAt = Date.now();
+    if (v) return;
+    chatSayingSet(null);
+    if (!sayLive(run) && !run.replaced && e) { e.hush = true; e.hushQ = m.q || ""; chatDraw(t); }
+  }, text => chatUtter(text, w), { after: e && e.run && say.run === e.run ? e.run : null });
+  run.quick = true;
+  run.onLine = x => chatSayingSet(x || null);
+  sayAdd(run, m.text, m);
+  sayEnd(run);
+  return run;
+}
+// Ask Number One (the chip, "ask Number One anyway"): the words sent on as
+// they were said; the chip says so at once, and the captain's bubble here
+// gives way to the one engSend draws with its own marks
+function quickAsk(t, m) {
+  const e = t && t.eng;
+  if (!e || !m || m.state === "sent") return false;
+  m.state = "sent";
+  const i = e.done.indexOf(m.u);
+  if (i >= 0) e.done.splice(i, 1);
+  if (e.quick === m) e.quick = null;
+  if (say.run && chatSaying.m === m) chatSayStop();
+  chatDraw(t);
+  if (sayOn()) chatSayUnlock();
+  engSend(t, m.q, conv.cur ? CONV_NOTE : "", null, true);
+  return true;
+}
+// the order: the last question the page answered in the thread on screen;
+// with none, the plain "Number One" (his thread)
+function quickAskSaid() {
+  const t = chatShown();
+  const m = t && t.eng && $("#ov").classList.contains("on") ? t.eng.quick : null;
+  if (!m) { engNo1(); return; }
+  quickAsk(t, m);
+}
+/* Tier 2, the computer (voice-quick-answer.md 2-6, 9): a small question
+   the page cannot answer goes to POST /quick (one haiku run on the lines
+   quickContext gives it, no tools) at the same time as to Number One. A
+   COMPUTER row reading "checking…" pulses under the captain's words at
+   once; the answer replaces it with the chirp and the computer's voice, or
+   the row folds away: a PASS, any error (400, 403, 429, 502, 504, the
+   network), his first line landing first, or the question gone stale (the
+   captain spoke again, the conversation ended, the thread left: the fetch
+   is aborted, and the server kills the run when its connection closes).
+   Number One is told what was said, so he does not say it again: working,
+   the send is held up to QUICK_HOLD_MS for the answer and goes with it on a
+   line of its own; idle, it goes at once and the answer follows as a note
+   of its own (no bubble of the captain's, no hush lifted). The row lives
+   in e.qk until the transcript brings that line back (engFold), and
+   engMsgs draws it under the captain's words. */
+// Number One at work takes a message only at his next tool boundary
+// anyway, but not the full 8 s the server allows: the runs measured live
+// took 4.5 to 11.7 s
+const QUICK_HOLD_MS = 5000, QUICK_FETCH_MS = 10000;
+const quickLine = text => '[computer answered the captain aloud: "' + String(text).replace(/"/g, "'") + '"]';
+// the line in a message of the transcript: its own (the note), or after the words
+const QUICK_TOLD = /(?:^|\n)\[computer answered the captain aloud: "([^\n]*)"\]\s*$/;
+// what the computer is given: what the page holds already, as plain lines,
+// at most the server's 4 KB
+function quickContext(t) {
+  const e = t.eng, r = e.st || {}, d = new Date(), out = [];
+  let zone = "";
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (x) {}
+  out.push("NOW: " + quickDate(d) + ", " + pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + (zone ? " (" + zone + ")" : ""));
+  const one = [ENG_STATUS[r.status] || r.status || "unknown"];
+  if (r.task) one.push("task: " + quickCut(r.task, 200));
+  if (r.status === "working" && +r.eta_min) one.push("estimate: " + quickMin(etaState(r).label));
+  const tool = engToolNow(t);
+  if (tool) one.push("now: " + tool);
+  if (e.thread && e.thread !== "main") one.push("thread: " + e.thread);
+  out.push("NUMBER ONE: " + one.join("; "));
+  out.push("DEPLOY: " + quickDeploy(t));
+  for (const x of (eng.list || []).filter(y => y.name !== NO1).slice(0, 12)) {
+    const w = quickWho(x, x.title || x.name);
+    if (w) out.push("CREW: " + w);
+  }
+  const seat = quickSeat();
+  if (seat) out.push("SEAT: " + seat);
+  const msgs = engMsgs(t).filter(m => ((m.role === "user" || m.role === "ship") && m.text) || (m.role === "asst" && m.parts)).slice(-6);
+  for (const m of msgs) {
+    const txt = m.role === "user" || m.role === "ship" ? m.text : (m.parts || []).filter(p => p.t === "text").map(p => p.s || "").join(" ");
+    if (txt.trim()) out.push("THREAD: " + (m.role === "user" ? "Captain: " : m.role === "ship" ? "Ship [" + m.tag + "]: " : "Number One: ") + quickCut(txt, 200));
+  }
+  out.push("TODAY: " + quickToday(false));
+  const enc = new TextEncoder();
+  let ctx = out.join("\n");
+  while (enc.encode(ctx).length > 4000) ctx = ctx.slice(0, ctx.lastIndexOf("\n") > 0 ? ctx.lastIndexOf("\n") : 3000);
+  return ctx;
+}
+// The question asked of the computer, its row up at once: "checking…",
+// pulsing. Returns the hold for engSend while he works (a promise of the
+// line to add, "" for none), else null.
+function quickCheck(t, q) {
+  const e = t.eng, th = e.thread && e.thread !== "main" ? e.thread : "main";
+  quickDrop(t);
+  const m = { role: "quick", tier: 2, q, th, text: "checking…", state: "checking", why: "" };
+  e.qk = m;
+  m.ac = typeof AbortController === "function" ? new AbortController() : null;
+  t.at = Date.now();
+  let hold = null;
+  if ((e.st || {}).status === "working") {
+    hold = new Promise(res => { m.release = res; });
+    m.holdT = setTimeout(() => quickRelease(m, ""), QUICK_HOLD_MS);
+  }
+  apiNet("/quick", { method: "POST", timeout: QUICK_FETCH_MS, signal: m.ac ? m.ac.signal : undefined,
+                     body: { question: q.slice(0, 300), context: quickContext(t) } })
+    .then(r => r && !r.pass && typeof r.text === "string" ? r.text.trim() : "", () => "")
+    .then(text => quickLand(t, m, text));
+  return hold;
+}
+// the held send let go: with the line, or bare
+function quickRelease(m, line) {
+  clearTimeout(m.holdT);
+  const r = m.release;
+  m.release = null;
+  if (r) r(line);
+  return !!r;
+}
+// The row folds away and the fetch is let go of (a PASS, his line first,
+// stale); nothing is said about it
+function quickFold(t, m) {
+  m.state = "gone";
+  quickRelease(m, "");
+  if (m.ac) { try { m.ac.abort(); } catch (x) {} }
+  if (t.eng.qk === m) t.eng.qk = null;
+  chatDraw(t);
+}
+// a question still being checked, gone stale: the captain spoke again, the
+// conversation ended, the thread was left
+function quickDrop(t) {
+  const m = t && t.eng && t.eng.qk;
+  if (m && m.state === "checking") quickFold(t, m);
+}
+function quickLand(t, m, text) {
+  const e = t.eng;
+  if (e.qk !== m || m.state !== "checking") return;
+  if (!text || m.heard || chatShown() !== t) { quickFold(t, m); return; }
+  m.text = text;
+  m.state = "said";
+  sfx("vok");
+  // held for it: it goes with his message; else told after, on its own
+  if (quickRelease(m, quickLine(text))) m.why = "sent with your words";
+  else quickNote(t, m);
+  chatDraw(t);
+  quickSay(t, m);
+}
+// The follow-up note (Number One idle, or the hold over): its own say, no
+// bubble of the captain's (engSend draws one), the row's mark the feedback
+async function quickNote(t, m) {
+  const e = t.eng, to = m.th !== "main" ? m.th : "";
+  m.why = "telling Number One…";
+  try {
+    await engApi("/" + e.name + "/say", { method: "POST", timeout: 60000, body: Object.assign({ message: quickLine(m.text) }, to ? { thread: to } : {}) });
+    m.why = "Number One told";
+  } catch (err) { m.why = "Number One not told: " + err.message; }
+  chatDraw(t);
+}
+// His first line after the question (the poll's, past the transcript's copy
+// of the captain's words): "checking…" folds at once; an answer being said
+// is followed, not cut (chatSayRun's `after`)
+function quickSee(t, evs) {
+  const m = t.eng.qk;
+  if (!m || m.heard || m.state === "gone") return;
+  for (const ev of evs) {
+    if (ev.r === "me" && engPlain(ev.t || "").startsWith(m.q)) m.echoed = true;
+    else if (ev.r === "them" && ev.t && m.echoed) { m.heard = true; break; }
+  }
+  if (m.heard && m.state === "checking") quickFold(t, m);
+}
+// said into the conversation, where the console's recogniser is not
+// listening (talkHost.send): the bare orders of this block
+const QUICK_ASK_SAID = /^(computer[,.]?\s+)?(ask|send it to|send that to|pass it to) (number one|the first officer)( anyway)?[.!]?$/i;
+const QUICK_SET_SAID = /^(computer[,.]?\s+)?quick answers (on|off|always)[.!]?$/i;
 /* ===================== end voice in the chats ===================== */
 
 /* ===================== plot a course =====================
@@ -39931,7 +41376,7 @@ function crewReports() {
     // a crew note's thread is not a report: it has its own row (notesRowHtml)
     if (e.deleted || !isCrewKind(e.kind) || e.kind === "crew_note" || e.kind === "crew_note_names") continue;
     // the shares' readings are numbers, not reports: the Shares view's
-    if (isShareReading(e.kind)) continue;
+    if (isShareReading(e.kind) || isSocialRow(e.kind)) continue;
     if (!by.has(e.kind)) by.set(e.kind, []);
     by.get(e.kind).push(e);
   }
@@ -40018,14 +41463,15 @@ function crewAuthor(e) {
    button its entry does not have (Duplicate on a new one, Revert in the
    reader, Chat on the captain's own) has no tile either. */
 const ED_MORE = [
-  ["#bDup", "&#10697;"], ["#bCont", "&#8618;"], ["#bPin", "&#9733;"], ["#bTidy", "&#10003;"], ["#bRevert", "&#8630;"],
+  ["#bDup", "&#10697;"], ["#bCont", "&#8618;"], ["#bPin", "&#9733;"], ["#bTidy", "&#10003;"], ["#bShare", "&#8599;"],
+  ["#bRevert", "&#8630;"],
   ["#bCrewChat", "&#9993;"], ["#bDel", "&#10005;"],
 ];
 function openEdMore() {
   if (document.body.dataset.pane !== "edit") { toast("no entry open", true); return; }
   const shown = b => b && !b.hidden && b.style.display !== "none";
   const tiles = ED_MORE.filter(([sel]) => shown($(sel)));
-  const label = b => (b.querySelector(".lg") || b).textContent.replace(/^\u21aa\s*/, "").trim();
+  const label = b => (b.querySelector(".lg") || b).textContent.replace(/^[\u21aa\u2197]\s*/, "").trim();
   const dlg = openDialog(
     `<h2 id="dlgh">Entry</h2><div class="moregrid">` +
     tiles.map(([sel, glyph], i) => {
@@ -41495,7 +42941,7 @@ function oqAnsPut(id, n, k, v) {
   a[n] = q;
   oqAnsSet(id, a);
 }
-const oqShape = e => needsBody(e) ? null : oqParse(e.title, e.content);
+const oqShape = e => needsBody(e) || isSocialAsk(e.kind) ? null : oqParse(e.title, e.content);
 const oqReady = (p, a) => p.qs.filter(q => a[q.n] && a[q.n].c).length;
 // a question's answer as Number One reads it: "Q1: A (Ship it); note: after lunch"
 function oqAnsLine(q, x) {
@@ -41533,6 +42979,7 @@ function oqQHtml(e, q, a, saving) {
 const oqMd = s => mdRender(chatRefs(s));
 const oqLine = s => mdInline(chatRefs(s));
 function oqCardHtml(e) {
+  if (isSocialAsk(e.kind)) return socCardHtml(e);
   const p = oqShape(e);
   return p ? oqMultiHtml(e, p) : oqOneHtml(e);
 }
@@ -41600,7 +43047,8 @@ function openQuestions(top) {
   oqPaint();
   if (typeof top === "number" && top > 0) box.scrollTop = top;
   const want = oqList().filter(needsBody);
-  if (want.length) ensureBodies(want).then(() => { if ($("#oqrows")) oqPaint(); });
+  if (want.length) ensureBodies(want).then(() => { if ($("#oqrows")) { oqPaint(); socBodies(); } });
+  socBodies();
 }
 /* Called from refresh(), so it follows every sync of st.all. The cards are
    rebuilt only when what they show moved (the signature), and then the box
@@ -41613,7 +43061,7 @@ function oqPaint() {
   // the choices are in it (a tap repaints), the notes not: a note's box is its draft
   const am = oqAnsAll(), chose = id => Object.entries(am[id] || {}).map(([n, x]) => n + (x.c || "")).join();
   const sig = JSON.stringify([...oq.open].concat(l.map(e => [e.id, e.last_modified_at_utc, needsBody(e), oq.busy.get(e.id) || "",
-                                                             oq.more.has(e.id), chose(e.id)])));
+                                                             oq.more.has(e.id), chose(e.id), socSig(e)])));
   $("#oqstat").textContent = l.length ? l.length + " waiting on you" : "nothing asked of you";
   if (sig === oq.sig) return;
   oq.sig = sig;
@@ -41633,6 +43081,8 @@ function oqPaint() {
   if (na && !na.disabled) { na.focus({ preventScroll: true }); if (sel) na.setSelectionRange(sel[0], sel[1]); }
 }
 function oqTap(ev) {
+  const sa = ev.target.closest && ev.target.closest("a[data-socshare]");
+  if (sa) { socShareOpen(sa); return; }
   const b = ev.target.closest && ev.target.closest("button");
   if (!b) return;
   if (b.dataset.oqmore) {
@@ -41645,6 +43095,9 @@ function oqTap(ev) {
   } else if (b.dataset.oqopen) {
     oq.open.add(b.dataset.oqopen);
     oqPaint();
+  } else if (b.dataset.soccopy) {
+    const [id, i] = b.dataset.soccopy.split(":");
+    socCopy(Number(id), Number(i), b);
   } else if (b.dataset.oqdone) oqAnswer(Number(b.dataset.oqdone));
   else if (b.dataset.oqlater) oqLater(Number(b.dataset.oqlater));
 }
@@ -41712,7 +43165,7 @@ async function oqAnswer(id) {
     if (p) { oqAnsSet(id, null); for (const q of p.qs) oq.open.delete(id + ":" + q.n); }
     else oqDraftSet(id, "");
     refresh();
-    toast((p ? "sent: " : text ? "answered: " : "ticked off: ") + u.title, false, { label: "Undo", fn: () => oqUndo(u) });
+    toast((p ? "sent: " : text ? "answered: " : isSocialAsk(e.kind) ? "dismissed: " : "ticked off: ") + u.title, false, { label: "Undo", fn: () => oqUndo(u) });
   } catch (err) {
     oq.busy.set(id, "not saved: " + err.message);
     if (err.message === "already ticked off elsewhere") { oq.busy.delete(id); refetchInto(e).then(refresh, () => {}); }
@@ -41777,6 +43230,100 @@ function oqSendSaid() {
   if (!e) { vRefuse("no ask has every question answered · say \"answer question 1 yes\""); return; }
   oqAnswer(e.id);
 }
+/* The social watch's notice (task_crew_social: scripts/social.py's
+   notice_body, docs/design/social-watch.md 2.3): one reminder per run that
+   found comments, a block per comment - "HN · pg on <post> (<url>)", its
+   first line, its link, "#<id>" of its crew_social_comment entry. The card
+   lists them, each with Open (the link, a tab) and Copy reply: the drafted
+   reply under the comment entry's "Suggested reply (draft, not posted):"
+   line (the watch's slice 3 writes it), and until there is one the
+   comment's own text, which the card says. Dismiss ticks the reminder off
+   (oqAnswer with no text, its Undo included); the comments stay, each
+   entry's status the watch's to keep (replied when his answer is seen). */
+const isSocialAsk = k => askOf(k, "crew_social");
+const SOC_HEAD = /^(.+?) · (\S+) on (.*)$/;
+const SOC_DRAFT = "Suggested reply (draft, not posted):";
+function socParse(content) {
+  return String(content || "").replace(/\r/g, "").split(/\n[ \t]*\n/).map(b => {
+    const ls = b.split("\n").map(x => x.trim()).filter(Boolean), h = SOC_HEAD.exec(ls[0] || "");
+    if (!h) return null;
+    const link = ls.slice(1).find(x => /^https?:\/\/\S+$/.test(x)) || "", ref = ls.find(x => /^#\d+$/.test(x)) || "";
+    return { plat: h[1], author: h[2], on: h[3].replace(/\s*\(https?:\/\/[^)]*\)\s*$/, ""), link, id: ref ? Number(ref.slice(1)) : 0,
+             first: ls.slice(1).filter(x => x !== link && x !== ref).join(" ") };
+  }).filter(Boolean);
+}
+// a comment entry's text and its draft; null while its body is not loaded
+function socComment(id) {
+  const r = id ? st.byId.get(id) : null;
+  if (!r || r.deleted || needsBody(r)) return null;
+  const c = String(r.content || "").replace(/\r/g, ""), at = c.indexOf(SOC_DRAFT), head = c.indexOf("\n\n");
+  let draft = at < 0 ? "" : c.slice(at + SOC_DRAFT.length).trim(), none = "";
+  // the drafter's "No reply suggested: <why>" is a note, nothing to paste
+  if (/^No reply suggested\b/i.test(draft)) { none = draft; draft = ""; }
+  return { text: head < 0 ? "" : c.slice(head + 2, at < 0 ? undefined : at).trim(), draft, none };
+}
+const socRefs = e => needsBody(e) || !isSocialAsk(e.kind) ? [] : socParse(e.content).map(c => st.byId.get(c.id)).filter(Boolean);
+// what the card shows of the comments: their bodies landing, a draft written
+const socSig = e => socRefs(e).map(r => r.id + "@" + r.last_modified_at_utc + (needsBody(r) ? "?" : "")).join();
+function socBodies() {
+  const want = oqList().flatMap(socRefs).filter(needsBody);
+  if (want.length) ensureBodies(want).then(() => { if ($("#oqrows")) oqPaint(); }, () => {});
+}
+function socCardHtml(e) {
+  const busy = oq.busy.get(e.id), saving = busy === "saving", cs = needsBody(e) ? null : socParse(e.content);
+  const ms = (cs || []).map(c => socComment(c.id)), drafts = ms.some(m => m && m.draft);
+  const dis = saving ? " disabled" : "";
+  const row = (c, i) => {
+    const m = ms[i];
+    return `<li class="socc"><div class="socw"><b>${esc(c.plat)}</b> &middot; ${esc(c.author)}` +
+      `${c.on ? ` <span class="socon">on ${esc(c.on)}</span>` : ""}</div>` +
+      `<div class="socf">${esc(c.first || "(no text)")}</div>` +
+      (m && m.draft ? `<div class="socd"><b>DRAFT</b>${esc(m.draft)}</div>` : m && m.none ? `<p class="hint">${esc(m.none)}</p>` : "") +
+      `<div class="oqacts">` +
+      (c.link ? `<a class="mini" href="${attr(c.link)}" target="_blank" rel="noopener" aria-label="open ${attr(c.plat + " · " + c.author)}'s comment">Open</a>` : "") +
+      `<button type="button" class="mini" data-soccopy="${e.id}:${i}"${dis}>Copy reply</button></div></li>`;
+  };
+  return `<article class="oqcard oqsoc${saving ? " saving" : ""}" data-oqid="${e.id}">` +
+    `<h3 class="oqq">${esc(e.title || "New comments")}</h3>` +
+    `<div class="oqmeta">The social watch &middot; ${esc(relStamp(e.created_at_utc))} &middot; #${e.id}</div>` +
+    (cs == null ? `<p class="hint">loading the comments&hellip;</p>`
+      : !cs.length && socShareParse(e.content) ? socShareCardBody(e, socShareParse(e.content))
+      : cs.length ? `<ul class="socl">${cs.map(row).join("")}</ul>` +
+                    (drafts ? "" : `<p class="hint">No drafted replies yet: until the watch writes them, Copy reply copies the comment's own text.</p>`)
+      : `<div class="oqctx md">${oqMd(e.content || "")}</div>`) +
+    `<div class="oqacts"><span class="oqst${busy && !saving ? " bad" : ""}">${saving ? "dismissing&hellip;" : busy ? esc(busy) : ""}</span>` +
+    `<button type="button" class="mini go" data-oqdone="${e.id}"${dis}>${busy && !saving ? "Retry" : "Dismiss"}</button></div>` +
+    `</article>`;
+}
+// Copy reply: the button says it is copying in the same frame, then what came of it
+async function socCopy(id, i, b) {
+  const e = st.byId.get(id), c = e && !needsBody(e) ? socParse(e.content)[i] : null;
+  if (!c) { toast("that comment is gone from the notice", true); return; }
+  const m = socComment(c.id), t = m ? m.draft || m.text || c.first : c.first;
+  if (b) { b.classList.add("pressing"); b.textContent = "copying…"; }
+  const ok = await copyText(t);
+  if (b) { b.classList.remove("pressing"); b.textContent = ok ? "copied" : "not copied"; }
+  toast(ok ? (m && m.draft ? "the drafted reply copied: paste it on " + c.plat
+                            : "the comment's text copied (no drafted reply yet)")
+           : "could not copy: this browser refuses the clipboard here", !ok);
+}
+const socFirst = () => oqList().find(x => isSocialAsk(x.kind));
+// "show the social comments": Open questions at the first social card
+function socShowSaid() {
+  const e = socFirst();
+  if (!e) { vRefuse("no new comments waiting · the social watch's notices are all dismissed"); return; }
+  openQuestions();
+  const card = $("#oqrows") && $("#oqrows").querySelector(`[data-oqid="${e.id}"]`);
+  if (card && card.scrollIntoView) card.scrollIntoView({ block: "start" });
+}
+// "dismiss the social reminder": the newest one, as its Dismiss does
+function socDismissSaid() {
+  const e = socFirst();
+  if (!e) { vRefuse("no social reminder open to dismiss"); return; }
+  if (!$("#oqrows")) openQuestions();
+  oqAnswer(e.id);
+}
+
 // the Chats list's row for them, at its top while any is open
 function oqRowHtml() {
   const n = oqCount();
@@ -42477,30 +44024,137 @@ function engThread(name, title) {
   if (title) t.eng.title = title;
   return t;
 }
-// the captain's words without a conversation's note to the session
-const engPlain = t => String(t).replace(/^\[conversation\][^\n]*\n/, "");
+// the captain's words without a conversation's note to the session, and
+// without the spoken mark (chatSpokenMark), which engFold keeps as `spoken`
+const engNoted = t => String(t).replace(/^\[conversation\][^\n]*\n/, "");
+const engPlain = t => engNoted(t).replace(/^\[spoken\] /, "");
+/* Who a line of the captain's side is from (docs/design/chat.md §3.4): the
+   poll's `from` (engineer.py's user_from), else these same rules, read from
+   the leading tag after a "[thread <id>]" line and the inbox's "(held
+   since ...)": "captain" (his words), "via" (his words the ship carries: a
+   ticked question, a journal note), "no1" (Number One's order to an
+   engineer) and "ship" (a notice: crew, deploy, rollback, job, seat,
+   refresh, a hand-on). Keep it alike with user_from. */
+const SHIP_TAGS = ["crew", "deploy finished", "deploy failed", "rollback", "job", "seat", "refresh"];
+const FROM_LEAD = /^(?:\[thread [a-z][a-z0-9-]{0,23}\][ \t]*\n)?(?:\(held since [^)\n]*\) )?\[([^\]\n]{1,60})\]/;
+function engFrom(t) {
+  t = String(t || "");
+  const m = FROM_LEAD.exec(t), tag = m ? m[1] : "", low = tag.toLowerCase(), rest = m ? t.slice(m[0].length) : "";
+  if (SHIP_TAGS.includes(low)) {
+    const w = /^(crew|deploy finished|deploy failed)$/.test(low) && /^ ([a-z][a-z0-9-]{0,23})(?=:| \(| context )/.exec(rest);
+    return w ? { from: "ship", tag: low, who: w[1] } : { from: "ship", tag: low };
+  }
+  if (low.startsWith("from ")) return { from: "ship", tag: "from", who: tag.slice(5).trim().slice(0, 40) };
+  if (tag === "No.1") return { from: "no1", tag: "No.1" };
+  if (low === "captain") {
+    const n = /\(crew note #(\d+)\)/.exec(rest);
+    if (n && /^\s*(?:A note|More in a note)\b/.test(rest)) return { from: "via", tag: "note", ref: "note", id: Number(n[1]) };
+    const q = /^\s*ticked off your question #(\d+)/.exec(rest);
+    if (q) return { from: "via", tag: "question", ref: "ask", id: Number(q[1]) };
+    return { from: "via", tag: "captain" };
+  }
+  return { from: "captain" };
+}
+// what a ship line or a carried word shows: its tag (a chip already says
+// it) and a name the label already gives taken off the front
+function engFromText(t, f) {
+  let s = String(t || "").replace(/^\[thread [a-z][a-z0-9-]{0,23}\][ \t]*\n/, "");
+  const held = /^\(held since [^)\n]*\) /.exec(s);
+  if (held) s = s.slice(held[0].length);
+  s = s.replace(/^\[[^\]\n]{1,60}\][ \t]*/, "");
+  // "okafor-c30: ..." and "okafor-c30 (Lieutenant …) finished": the label's name
+  if (f.who && s.startsWith(f.who + ":")) s = s.slice(f.who.length + 1).trimStart();
+  else if (f.who && s.startsWith(f.who + " (")) s = s.slice(f.who.length).replace(/^ \([^)\n]*\)\s*/, "");
+  // what the via label says already: the question's number, the note's where
+  if (f.ref === "ask") s = s.replace(/^ticked off your question #\d+:\s*/, "");
+  if (f.ref === "note") s = s.replace(/^(?:A note|More in a note) to you[^\n]*?\(crew note #\d+\):\s*/, "");
+  return (held ? held[0] : "") + s;
+}
+// the ship's lines opened past their few lines (by their key: a refold of
+// the transcript, an earlier page loaded, keeps them open)
+const SHIP_OPEN = new Set(), SHIP_FOLD_CHARS = 280, SHIP_FOLD_LINES = 4;
+const shipLong = s => s.length > SHIP_FOLD_CHARS || s.split("\n").length > SHIP_FOLD_LINES;
+// a name's colour, the same every time it is drawn (Number One's purple; the
+// computer's blue, the answers' orange and the chrome's amber are not dealt)
+const SHIP_HUES = ["--salmon", "--gold", "--green", "--sky"];
+function shipHue(who, from) {
+  if (from === "no1" || who === NO1) return "--purple";
+  if (!who) return "--dim";
+  let h = 0;
+  for (const c of who) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return SHIP_HUES[h % SHIP_HUES.length];
+}
+const SHIP_CHIP = { "deploy finished": "deployed", "deploy failed": "deploy failed", from: "hand-on", "No.1": "order" };
+// a carried word's link: the question ticked off (its task_no1 entry), the
+// note's thread (its card open in the captain's entry, else the thread)
+function engRefOpen(ref, id) {
+  if (ref === "note") {
+    const hit = noteThreads().find(([, e]) => e.id === id);
+    if (hit) { notesOpenRow(hit[0], hit[1]); return; }
+  }
+  closeOv();
+  if (!select(id)) toast((ref === "note" ? "crew note #" : "question #") + id + " is not in this journal's list", true);
+}
 const engThreadFor = id => { const m = /^eng-([a-z][a-z0-9-]{0,23})$/.exec(id || ""); return m ? engThread(m[1]) : null; };
 function engFold(e, evs) {
   for (const ev of evs) {
+    const f = ev.r === "me" ? (ev.from ? ev : engFrom(ev.t)) : null;
+    if (f && (f.from === "ship" || f.from === "no1")) {
+      // the ship typing in (or Number One's order): a notice of its own,
+      // never his bubble, and no pending bubble of his is taken for it
+      const k = ev.k || "t:" + (ev.t || "").slice(0, 120);
+      e.done.push(Object.assign({ role: "ship", from: f.from, tag: f.tag, who: f.who || "", sk: k, text: engFromText(ev.t, f) },
+                                ev.th ? { th: ev.th } : {}));
+      continue;
+    }
+    if (f && f.from === "via") {
+      // his words, carried by the ship: his bubble, labelled with what it answers
+      e.done.push(Object.assign({ role: "user", text: engFromText(ev.t, f), via: { tag: f.tag, ref: f.ref || "", id: f.id || 0 } },
+                                ev.th ? { th: ev.th } : {}));
+      continue;
+    }
     if (ev.r === "me") {
       // in the transcript now: its pending bubble goes (by its words, else
       // the oldest still sending - a message typed elsewhere is not ours)
       // its files' lines (engineer.py's attachment_lines) drawn as its files
-      const fx = chatFilesFrom(engPlain(ev.t || "")), said = fx.text;
+      // the computer's quick answer, told him (quickLine): its COMPUTER row,
+      // after the words it came with, or alone (the note: no bubble of the
+      // captain's); the row shown live (e.qk) becomes this one
+      let plain = engPlain(ev.t || "");
+      const told = QUICK_TOLD.exec(plain);
+      let row = null;
+      if (told) {
+        plain = plain.slice(0, told.index);
+        const live = e.qk && e.qk.state === "said" && e.qk.text === told[1] ? e.qk : null;
+        row = live || { role: "quick", tier: 2, text: told[1], state: "said", why: "" };
+        if (live) e.qk = null;
+        if (ev.th) row.th = ev.th;
+        if (!plain.trim()) {
+          // where it was drawn: under the words it answered, not below his lines since
+          let i = live ? e.done.length - 1 : -1;
+          while (i >= 0 && !(e.done[i].role === "user" && String(e.done[i].text || "").trim() === live.q)) i--;
+          e.done.splice(i >= 0 ? i + 1 : e.done.length, 0, row);
+          continue;
+        }
+      }
+      const fx = chatFilesFrom(plain), said = fx.text, sp = engNoted(ev.t || "").startsWith(SPOKEN);
       let i = e.pending.findIndex(m => m.text.trim() === said.trim());
       if (i < 0) i = e.pending.findIndex(m => m.state === "sending" || m.state === "delivered");
       // the files sent from here keep what this page knows of them (a picture's size)
       const mine = i >= 0 && e.pending[i].files;
       if (i >= 0) e.pending.splice(i, 1);
       e.done.push(Object.assign(fx.files.length ? { role: "user", text: said, files: mine && mine.length === fx.files.length ? mine : fx.files }
-                                                : { role: "user", text: said }, ev.th ? { th: ev.th } : {}));
+                                                : { role: "user", text: said }, ev.th ? { th: ev.th } : {}, sp ? { spoken: true } : {}));
+      if (row) e.done.push(row);
       continue;
     }
     // Number One's answer turning to another thread (a "[thread x]" line of
     // his: the poll cut it there) is a message of its own
     let a = e.done[e.done.length - 1];
     if (!a || a.role !== "asst" || (ev.th && a.th !== ev.th)) e.done.push(a = Object.assign({ role: "asst", parts: [] }, ev.th ? { th: ev.th } : {}));
-    a.parts.push(ev.r === "tool" ? { t: "tool", label: ev.t, state: "ok" } : { t: "text", s: ev.t });
+    a.parts.push(ev.r === "tool" ? { t: "tool", label: ev.t, state: "ok", n: ev.n, a: ev.a } : { t: "text", s: ev.t });
+    // the bubble a spoken line lights (chatEngSpeak, chatSayingSet)
+    ev._m = a;
   }
 }
 // the messages the log shows, from the fold, what is pending, and the state
@@ -42518,8 +44172,78 @@ function engMsgs(t) {
   const olds = e.olds.slice().reverse().flatMap(o => o.done.concat([o.div]));
   // a thread of Number One's picked: only its messages (the dividers stay)
   const shows = e.thread ? m => !m.role || m.role === "sys" || engThreadShows(e, m.th) : null;
-  return (up ? [e.more] : []).concat(shows ? olds.filter(shows) : olds, shows ? e.done.filter(shows) : e.done,
-                                    shows ? e.pending.filter(shows) : e.pending, working ? [e.live] : []);
+  const list = (up ? [e.more] : []).concat(shows ? olds.filter(shows) : olds, shows ? e.done.filter(shows) : e.done,
+                                          shows ? e.pending.filter(shows) : e.pending);
+  // the computer's row being checked or said (quickCheck): under the
+  // captain's words it answers, until the transcript brings it (engFold)
+  const qk = e.qk;
+  if (qk && qk.state !== "gone" && (!shows || shows(qk))) {
+    let i = list.length - 1;
+    while (i >= 0 && !(list[i].role === "user" && String(list[i].text || "").trim() === qk.q)) i--;
+    list.splice(i >= 0 ? i + 1 : list.length, 0, qk);
+  }
+  // a hush from a stop of the computer's line shows only while his turn is
+  // under way or still to come: otherwise there is nothing of his to pause
+  const paused = e.hush && sayOn() && (!e.hushQ || working || e.pending.length);
+  return list.concat(paused ? [ENG_PAUSED] : [], working ? [e.live] : []);
+}
+// under the last bubble while their voice is stopped for the turn (3.1): a
+// tap lifts it (chatEngUnhush), and the next line that comes is said
+const ENG_PAUSED = { role: "sys", paused: true, text: "voice paused — tap to hear" };
+/* What a tool call is, for a person: the status line's while an engineer
+   works and no line is playing (voice-live-narration.md 4), from the
+   transcript's tool event (engineer.py's tool_line: `n` its name, `a` what
+   it is about; an older server's has only the chip's "Name: what"). */
+function engToolWords(p) {
+  let n = p.n, a = p.a;
+  if (!n) { const mm = /^([\w-]+)(?::\s*(.*))?$/.exec(p.label || ""); n = mm ? mm[1] : "tool"; a = mm && mm[2] ? mm[2] : ""; }
+  a = String(a || "").trim();
+  const file = a.split("/").pop();
+  if (n === "Read") return "reading " + (file || "a file") + "…";
+  if (n === "Edit" || n === "Write" || n === "MultiEdit" || n === "NotebookEdit") return "editing " + (file || "a file") + "…";
+  if (n === "Grep" || n === "Glob" || /^mcp__fff__/.test(n)) return a ? "searching for " + a + "…" : "searching…";
+  if (n === "Bash") return a && p.n ? a + "…" : "running a command…";
+  if (n === "WebFetch" || n === "WebSearch") return "looking it up on the web…";
+  if (n === "ToolSearch") return "getting a tool ready…";
+  return "working: " + n.replace(/^mcp__[^_]+__/, "") + "…";
+}
+// the tool they are in now: their latest event is one, and their voice is
+// not saying a line meanwhile
+function engToolNow(t) {
+  const e = t.eng, r = (e && e.st) || {};
+  if (!e || e.view || r.status !== "working") return "";
+  const a = e.done[e.done.length - 1], p = a && a.role === "asst" && a.parts[a.parts.length - 1];
+  if (!p || p.t !== "tool") return "";
+  if (say.run && say.run.shown === "playing" && e.run === say.run) return "";
+  return engToolWords(p);
+}
+/* The conversation's earcon (4): a phone in a pocket hears no voice and
+   sees no screen while a lookup runs; one low, soft chirp after
+   ENG_CHIRP_QUIET_MS of silence during a tool says "still working, not
+   lost", at most every ENG_CHIRP_EVERY_MS, and only in a conversation. */
+const ENG_CHIRP_QUIET_MS = 4000, ENG_CHIRP_EVERY_MS = 10000;
+function engChirp(t) {
+  const e = t.eng, now = Date.now();
+  if (!conv.cur || !sayOn() || chatShown() !== t || !engToolNow(t) || (say.run && say.run.shown === "playing")) return false;
+  if (now - Math.max(chatVoiceAt, e.evAt || 0) < ENG_CHIRP_QUIET_MS || now - (e.chirpAt || 0) < ENG_CHIRP_EVERY_MS) return false;
+  e.chirpAt = now;
+  try { sayEarcon(); } catch (err) {}
+  return true;
+}
+function sayEarcon() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  actx = actx || new AC();
+  if (actx.state === "suspended") actx.resume();
+  const o = actx.createOscillator(), g = actx.createGain(), at = actx.currentTime + 0.01;
+  o.type = "sine";
+  o.frequency.setValueAtTime(440, at);
+  o.frequency.exponentialRampToValueAtTime(330, at + 0.15);
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(0.06, at + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.15);
+  o.connect(g).connect(actx.destination);
+  o.start(at); o.stop(at + 0.16);
 }
 /* The context gauge: an engineer's context size (engineer.py's
    context_tokens, `ctx` in their poll and in GET /engineer's rows) as a
@@ -42557,11 +44281,12 @@ function engEtaPaint(t, m = chatMountFor(t)) {
   box.dataset.k = key;
   box.innerHTML = on ? etaBarHtml(r) : "";
 }
-function engStatusLine(t) {
+// (`tool`: engToolNow's words, in the status's place)
+function engStatusLine(t, tool = "") {
   const e = t.eng, r = e.st || {}, g = r.git || {}, d = r.deploy || {}, seat = r.seat || {};
   if (e.starting) return "reporting for duty… (up to a minute)";
   if (e.view) return "an earlier conversation · " + (e.view.name || "untitled") + " · " + engPastWhen(e.view);
-  const line = [(ENG_STATUS[r.status] || r.status || "reporting…")];
+  const line = [tool || (ENG_STATUS[r.status] || r.status || "reporting…")];
   // one of Number One's threads picked: what is shown, and where a send goes
   if (e.thread) line.unshift("thread " + engThreadName(e, e.thread));
   if (seat.position) line.push(seat.position === 1 ? "next for the seat" : "#" + seat.position + " in line for the seat");
@@ -42795,7 +44520,14 @@ async function engPoll(t = chat) {
     e.off = r.next || 0;
     if ((e.st || {}).screen !== r.screen || r.status !== "blocked") e.answered = false;
     e.st = r;
-    if (!first && !view) chatEngSpeak(t, evs.filter(ev => engThreadShows(e, ev.th)));
+    if (!first && !view) {
+      const shown = evs.filter(ev => engThreadShows(e, ev.th));
+      quickSee(t, shown);
+      chatEngSpeak(t, shown, r.now, r.status);
+    }
+    // the turn over while the run lingers: nothing more is coming
+    if (e.run && e.run.linger && r.status !== "working") sayEnd(e.run);
+    if (evs.length) e.evAt = Date.now();
     if (!view && chatSees(t)) engSeen(e.name);
     engDeployFollow(t, r.deploy || {});
   } catch (err) {
@@ -42807,6 +44539,7 @@ async function engPoll(t = chat) {
   if (e.view && e.viewLine) { e.viewLine.live = false; e.viewLine.text = e.err ? "Not opened: " + e.err : engPastLine(e.view); e.viewLine.cls = e.err ? "bad" : ""; }
   chatDraw(t);
   dockPaint();
+  engChirp(t);
   // an earlier conversation does not change: read once, not polled; a dock
   // window without the focus less often (chat-dock.md 1.7)
   const dm = chatMountFor(t), slow = dm && dm.mode === "dock" && chatFm() !== dm;
@@ -43127,14 +44860,18 @@ async function engThreadVoice(verb, name) {
 // queued for the seat (#2 in line, after whom), or not sent with Retry and
 // the words given back. One off duty is started first (up to a minute).
 // `note`: a line for the session before the words (a conversation's
-// CONV_NOTE), not shown in the bubble; the transcript's copy is stripped
-async function engSend(t, q, note, files) {
+// CONV_NOTE), not shown in the bubble; the transcript's copy is stripped.
+// `spoken`: said, not typed - the words go marked (chatSpokenMark)
+// `hold`: a promise of a line to send after the words (the computer's quick
+// answer, quickCheck); the bubble shows "sending…" meanwhile
+async function engSend(t, q, note, files, spoken, hold) {
   if (t.eng.view) engPast("", t);
   // a thread of Number One's picked: the say carries it, typed under its tag
   // line (docs/design/no1-threads.md, section 13); All is main
   const to = t.eng.name === NO1 && t.eng.thread && t.eng.thread !== "main" ? t.eng.thread : "";
   const e = t.eng, u = { role: "user", text: q, state: "sending", th: to || "main" };
   if (files) u.files = files;
+  if (spoken) u.spoken = true;
   e.pending.push(u);
   t.at = Date.now();
   chatDraw();
@@ -43145,13 +44882,14 @@ async function engSend(t, q, note, files) {
     chatDraw();
     return;
   }
+  const add = hold ? await hold : "";
   try {
     if ((e.st || {}).status === "off") {
       e.starting = true; chatDraw();
       await engApi("/" + e.name + "/start", { method: "POST", body: { title: e.title }, timeout: 120000 });
     }
     const said = await engApi("/" + e.name + "/say", { method: "POST", timeout: 60000,
-      body: Object.assign({ message: note ? note + "\n" + q : q }, files ? { attachments: chatAttachments(files) } : {},
+      body: Object.assign({ message: (note ? note + "\n" : "") + chatSpokenMark(q, spoken) + (add ? "\n" + add : "") }, files ? { attachments: chatAttachments(files) } : {},
                           to ? { thread: to } : {}) });
     // Not in the seat: the message waits in their inbox (a crew_inbox entry)
     // and, being the captain's, puts them first in line; the one seated
@@ -43604,6 +45342,8 @@ const KEYS = [
     when: () => st.sel && !st.isNew, fn: () => newAfterSel() },
   { key: "y", help: "duplicate the open entry",
     when: () => st.sel && !st.isNew, fn: () => duplicate() },
+  { key: "F", help: "share the open entry &mdash; each network's own composer, filled in; you press its button",
+    when: () => st.sel && !st.isNew, fn: () => shareThis() },
   { key: "w", help: "continue the open entry &mdash; write on in a new one, linked back, so the two read as a thread",
     when: () => st.sel && !st.isNew, fn: () => continueEntry() },
   { key: "x", help: "pick several entries &mdash; again to leave", fn: () => pickMode(!st.picking) },

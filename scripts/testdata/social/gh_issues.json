@@ -1,0 +1,52 @@
+[
+ {
+  "number": 5,
+  "title": "Crash on start",
+  "html_url": "https://github.com/captain-gh/journal/issues/5",
+  "created_at": "2026-10-19T08:00:00Z",
+  "user": {
+   "login": "carol",
+   "type": "User"
+  },
+  "body": "It crashes when the db is empty."
+ },
+ {
+  "number": 6,
+  "title": "Bump deps",
+  "html_url": "https://github.com/captain-gh/journal/pull/6",
+  "created_at": "2026-10-19T09:00:00Z",
+  "user": {
+   "login": "dependabot[bot]",
+   "type": "Bot"
+  },
+  "body": "Bumps x.",
+  "pull_request": {
+   "url": "x"
+  }
+ },
+ {
+  "number": 7,
+  "title": "Add a dark theme",
+  "html_url": "https://github.com/captain-gh/journal/pull/7",
+  "created_at": "2026-10-20T09:00:00Z",
+  "user": {
+   "login": "captain-gh",
+   "type": "User"
+  },
+  "body": "",
+  "pull_request": {
+   "url": "x"
+  }
+ },
+ {
+  "number": 2,
+  "title": "Old issue",
+  "html_url": "https://github.com/captain-gh/journal/issues/2",
+  "created_at": "2026-09-01T08:00:00Z",
+  "user": {
+   "login": "frank",
+   "type": "User"
+  },
+  "body": "old"
+ }
+]

@@ -261,7 +261,7 @@ def run(shard, nshards):
             # every page
             def a_page(name):
                 home()
-                page.evaluate("n => { try { ROUTES[n].open(n === 'thread' ? [String(st.all[0].id)] : n === 'trend' ? ['ship'] : n === 'day' ? [] : []); } catch (e) {} }", name)
+                page.evaluate("n => { try { ROUTES[n].open(n === 'thread' || n === 'share' ? [String(st.all[0].id)] : n === 'trend' ? ['ship'] : n === 'day' ? [] : []); } catch (e) {} }", name)
                 calm(600)
                 sweep("page " + name)
 
@@ -286,6 +286,17 @@ def run(shard, nshards):
                 if not page.evaluate("!!document.querySelector('#rd_notes .ntq')"):
                     fail(["ntq", "missing"], "a crew note: its card has no reply box")
                 sweep("a crew note")
+
+            # the Share sheet's fields only a tap shows: Mastodon's instance
+            # (none set on this device) and a card's reminder row (Schedule…)
+            def the_share_sheet():
+                home()
+                page.evaluate("() => { localStorage.removeItem('lcars.soc.mastodon'); shx = null; openShareSheet(st.all[0].id); "
+                              "document.querySelector('#soc_cards [data-sched]').click(); }")
+                calm(400)
+                if not page.evaluate("!!document.querySelector('#soc_cards [data-f=at]')"):
+                    fail(["socsched", "missing"], "the Share sheet: Schedule… shows no reminder row")
+                sweep("the Share sheet, a reminder row out")
 
             # an engineer's conversation
             def an_engineer():
@@ -348,7 +359,7 @@ def run(shard, nshards):
                 home()
                 page.evaluate("window.__netDelay = 700")
                 page.evaluate("n => { try { if (n === 'engineer') chatsOpen(engThread('moreau-abc', 'Ilse Moreau').id); else "
-                              "ROUTES[n].open(n === 'thread' ? [String(st.all[0].id)] : n === 'trend' ? ['ship'] : []); } catch (e) {} }", name)
+                              "ROUTES[n].open(n === 'thread' || n === 'share' ? [String(st.all[0].id)] : n === 'trend' ? ['ship'] : []); } catch (e) {} }", name)
                 # tapped as soon as the view is up, well inside the 700ms its
                 # data is held back: after a fixed 60ms a loaded box may not
                 # have drawn the view yet, and the race went unchecked
@@ -398,7 +409,7 @@ def run(shard, nshards):
             labels = page.evaluate("paletteRows().map(r => r.label)")
             jobs = [the_list, the_editor, the_reader]
             jobs += [lambda n=n: a_page(n) for n in routes]
-            jobs += [an_engineer, no1_threads, a_long_thread, the_navigator, a_crew_note]
+            jobs += [an_engineer, no1_threads, a_long_thread, the_navigator, a_crew_note, the_share_sheet]
             jobs += [lambda n=n: the_race(n) for n in routes + ["engineer"]]
             jobs += [lambda l=l: a_row(l) for l in labels if not any(s in l.lower() for s in SKIP_ROWS)]
             for i, job in enumerate(jobs):

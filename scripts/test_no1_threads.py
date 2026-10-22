@@ -119,7 +119,11 @@ class Base(unittest.TestCase):
         self.p = Proc(self.main)
         self.spawned = []
         self.j = Journal()
+        # the paths engineer.py made from STATE when it loaded go with it
         self.ps = [mock.patch.object(E, "STATE", self.state),
+                   mock.patch.object(E, "DEPLOY_JSON", os.path.join(self.state, "deploy.json")),
+                   mock.patch.object(E, "HISTORY", os.path.join(self.state, "deploys.jsonl")),
+                   mock.patch.object(E, "NO1_ANSWERS", os.path.join(self.state, "no1-answers.json")),
                    mock.patch.object(E, "herdr", self.p.herdr),
                    mock.patch.object(E, "agent_info", self.p.info),
                    mock.patch.object(E, "transcript", self.transcript),
@@ -368,6 +372,9 @@ class Poll(Base):
         self.assertEqual(code, 0, r)
         self.assertEqual(r["threads"], [{"id": "main", "name": "Main"}, {"id": "deck", "name": "Deck"}])
         self.assertNotIn("thread", r)
+        # the server's clock, for the page's stale rule (voice-live-narration.md 2.2)
+        self.assertLess(abs(r["now"] - time.time()), 5)
+        self.assertEqual(len({e["k"] for e in r["events"]}), len(r["events"]))
         self.assertEqual([(e["th"], e["t"]) for e in r["events"] if e["r"] != "tool"],
                          [("main", "Status?"), ("main", "Quiet."), ("deck", "The chairs?"), ("deck", "Done."),
                           ("deck", "And pushed."), ("web", "The site too.")])
@@ -413,6 +420,19 @@ class No1Verbs(Base):
         self.assertIn("the thread of the message that started your turn", b)
         for gone in ("switch", "held, while", "resume"):
             self.assertNotIn(gone, b.split("Threads:", 1)[1].split("\n\n", 1)[0])
+
+    def test_the_brief_has_the_computers_rule(self):
+        """voice-quick-answer.md 9: told what the computer said aloud, not
+        repeated; the line it names is index.html's quickLine, word for word."""
+        b = E.brief_no1(E.NO1, self.st())
+        self.assertIn(E.QUICK_RULE, b)
+        self.assertIn('[computer answered the captain aloud: "..."]', b)
+        self.assertIn("Do not repeat it.", b)
+        self.assertIn("Correction:", b)
+        self.assertLess(b.index(E.SPOKEN_RULE), b.index(E.QUICK_RULE))
+        page = open(os.path.join(HERE, "..", "lcars-ui", "index.html"), encoding="utf-8").read()
+        self.assertIn("'[computer answered the captain aloud: \"'", page)
+        self.assertNotIn(E.QUICK_RULE, E.brief("laforge-c34", {"title": "La Forge"}), "an engineer's brief has no such line")
 
 
 if __name__ == "__main__":

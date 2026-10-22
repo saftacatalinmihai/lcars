@@ -5,7 +5,9 @@ scripts/deck-models/build.sh rebuilds them (docs/design/deck-pipeline.md).
 Built in Blender by scripts/deck-models/arboretum.py, part of this repository.
 
 == bridge.glb, bridge_{base,norm,orm}.webp
-Generated with Higgsfield (Tripo H3.1 multiview) on the captain's plan, 2026-10-20, the output the captain's under Higgsfield's terms.
+The captain's chair (captain_chair): generated with Higgsfield (Tripo H3.1 multiview) on the captain's plan, 2026-10-20, the output the captain's under Higgsfield's terms.
+
+The conn's and ops' chairs (conn_chair): generated with Higgsfield (Tripo H3.1 multiview) on the captain's plan, 2026-10-21, the output the captain's under Higgsfield's terms.
 These converted by common.import_pack; the rest:
 Built in Blender by scripts/deck-models/bridge.py, part of this repository.
 

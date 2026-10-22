@@ -76,6 +76,7 @@ owner) lists each one, on or off, and what it lacks.
 | Number One (`number_one`) | `LCARS_NO1_USER`, `LCARS_NO1_PASS` (16+ characters) |
 | The crew's scheduled roles and notes (`crew`) | `LCARS_CREW_USER`/`_PASS`, `LCARS_STEWARD_USER`/`_PASS`; python3, `claude`, systemd user timers (`scripts/crew.py install`) |
 | Hosted reports (`reports`) | a media root, as Media |
+| The crew's social watch (a crew role, `crew/social.md`; not in `/features`) | the accounts in its front matter; GitHub: `gh` logged in or `LCARS_SOCIAL_GITHUB`; Cloudflare Web Analytics: `LCARS_CF_ANALYTICS_TOKEN` and `LCARS_CF_ACCOUNT_ID`; a platform with none is skipped |
 
 `GET /metrics` serves Prometheus text with no setup.
 

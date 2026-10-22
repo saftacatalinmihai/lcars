@@ -92,6 +92,10 @@ out.write("\n\n/* ===== fixture + fake api ===== */\n")
 out.write("var FIX = JSON.parse(" + json.dumps(json.dumps(rows)) + ");\n")
 out.write("var C_KIND_ROLES = " + json.dumps(c_roles) + ";\n")
 out.write("var KINDMAP = " + json.dumps(kmap) + ";\n")
+# the networks' limits (scripts/publish_net/limits.json): the page's SOC_NETS
+# is a copy, and its counters are checked on the file's cases
+out.write("var SOC_LIMITS_FILE = " + open(os.path.join(os.path.dirname(UI), "scripts", "publish_net", "limits.json"),
+                                          encoding="utf-8").read() + ";\n")
 out.write(open(os.path.join(T, "api.js"), encoding="utf-8").read())
 out.write("\n/* ===== page markup ===== */\n")
 out.write("document.body.innerHTML = " + json.dumps(body) + ";\n")

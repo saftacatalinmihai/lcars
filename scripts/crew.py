@@ -22,7 +22,7 @@ A role is a file in crew/ (crew/ops.md, ...): front matter, then the prompt.
     budget: 0.40                     claude --max-budget-usd
     timeout: 600                     seconds before the run is killed
     posts: historian                 the entry kind's suffix (default: the role)
-    kind: script                     no model: a function below (ship, qa, shares)
+    kind: script                     no model: a function below (ship, qa, shares, social)
     pre: ship                        a script run first; its text heads the entry
     brief: own                       the role's prompt stands alone (no crew_tool brief)
     tools: Bash Read                 claude --tools, instead of the ones the verbs imply
@@ -745,7 +745,41 @@ def run_shares(fm, dry):
     return g_title, g_content, None, {"value_int": g_value, "raw": True, "readings": per}
 
 
-SCRIPTS = {"ship": run_ship, "qa": run_qa, "measure": run_measure, "shares": run_shares}
+def run_social(fm, dry):
+    """The social watch (scripts/social.py, docs/design/social-watch.md): a
+    crew_social_comment per new comment, a crew_social_<platform> reading a
+    day, one task_crew_social notice for the comments the captain has not
+    answered, and the run's own entry - posted only when something happened
+    (a quiet hour is the run log's `nothing`, not 24 empty rows a day).
+    Its last line, `failures:`, is what the next run counts on."""
+    import social as SW
+    r = SW.collect(T, fm)
+    lines = list(r["lines"])
+    for t, _, _, c in r["comments"]:
+        lines.append(f"  - {t}" + (" (answered)" if c["replied"] else ""))
+    lines += [f"- {SW.NAMES[p]}: not read, {why}" for p, why in r["skipped"].items()]
+    fails = " ".join(f"{p}={n}" for p, n in r["failures"].items() if n) or "none"
+    if not (r["comments"] or r["readings"] or r["patches"] or r["recovered"] or any(r["failures"].values())):
+        return "Social watch", "Nothing new.", None, {"nothing": f"no new comments ({r['asked']} requests)"}
+    n = len(r["comments"])
+    title = f"Social watch: {n} new comment{'s' if n != 1 else ''}" if n else "Social watch"
+    body = "\n".join(lines) + f"\n\n{r['asked']} requests.\n\nfailures: {fails}"
+    urgent = "; ".join(f"The watch cannot read {SW.NAMES[p]}: {r['failed_why'][p]}" for p in r["raise"]) or None
+    notice = None
+    if r["notice"]:
+        # the notice names each comment's entry, known once finish posted them
+        at = [i for i, (_, _, _, c) in enumerate(r["comments"]) if not c["replied"]]
+        notice = (SW.NOTICE_LIST, SW.notice_title(r["notice"]),
+                  lambda ids: SW.notice_body(r["notice"], [ids[i] if i < len(ids) else 0 for i in at]))
+    if dry:
+        extra = [f"[would post {SW.notice_title(r['notice'])} to the social list]"] if notice else []
+        return title, "\n".join([body] + extra), urgent
+    readings = [(SW.COMMENT, t, None, c, {"done_bool": d}) for t, c, d, _ in r["comments"]] + r["readings"]
+    patches = [(row, {"content": c, "done_bool": 1}) for row, c in r["patches"]]
+    return title, body, urgent, {"readings": readings, "notice": notice, "patches": patches}
+
+
+SCRIPTS = {"ship": run_ship, "qa": run_qa, "measure": run_measure, "shares": run_shares, "social": run_social}
 
 
 def with_pre(pre, title, body, urgent):
@@ -1026,21 +1060,39 @@ def finish(fm, rec, title, body, urgent, meta, no_post, extra=None):
         rec["denied_cmds"] = den[:5]
     if meta.get("failed"):
         rec["why"] = meta["failed"][:200]
+    notice, patches = extra.get("notice"), extra.get("patches") or []
     if no_post:
-        for role, t, v, _ in readings:
+        for role, t, v, *_ in readings:
             print(f"[would post crew_{role}: {t} = {v}]")
+        for row, _ in patches:
+            print(f"[would patch #{row['id']}]")
+        if notice:
+            print(f"[would post the {notice[0]} notice: {notice[1]}]")
         print(f"# {title}\n\n{body}" + (f"\n\n[would also post task_crew: {urgent}]" if urgent else ""))
         log_run(dict(rec, status="no-post"))
         return 0
     try:
         if readings:
-            rec["readings"] = [T.post(role, t, c, value_int=v) for role, t, v, c in readings]
+            # (role, title, value_int, content[, more fields]): the social
+            # watch's comments carry done_bool
+            rec["readings"] = [T.post(r[0], r[1], r[3], value_int=r[2], fields=r[4] if len(r) > 4 else None)
+                               for r in readings]
         rec["entry"] = T.post(fm["posts"], title, body, value_int=extra.get("value_int"))
+        if notice:
+            lst, n_title, n_body = notice
+            rec["notice"] = T.post(fm["posts"], n_title, n_body(rec.get("readings") or [])
+                                   + f"\n\nFrom {fm['title']}'s report #{rec['entry']}.", notice=lst)
         if urgent:
             rec["task"] = T.post(fm["posts"], urgent, f"From {fm['title']}'s report #{rec['entry']}.", urgent=True)
     except RuntimeError as e:
         log_run(dict(rec, status="post-failed", why=str(e)[:200]))
         die(str(e), 1)
+    for row, fields in patches:
+        # a row the crew wrote, changed only as it was read: a 412 means the
+        # captain edited it since, and that edit stands
+        st, text = T.http("PATCH", f"/entries/{row['id']}",
+                          dict(fields, if_modified=row.get("last_modified_at_utc") or ""))
+        rec.setdefault("patched" if 200 <= st < 300 else "patch_skipped", []).append(row["id"])
     rec["status"] = "failed" if meta.get("failed") else "posted"
     log_run(rec)
     print(json.dumps({k: rec.get(k) for k in ("role", "status", "entry", "task", "secs", "cost")}))

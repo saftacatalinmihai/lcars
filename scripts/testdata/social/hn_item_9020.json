@@ -1,0 +1,45 @@
+{
+ "created_at": "2026-10-19T12:00:00Z",
+ "created_at_i": 1792411200,
+ "id": 9020,
+ "type": "comment",
+ "author": "captain_hn",
+ "text": "I wrote mine in C.",
+ "parent_id": 8000,
+ "story_id": 8000,
+ "children": [
+  {
+   "created_at": "2026-10-20T10:00:00Z",
+   "created_at_i": 1792490400,
+   "id": 9021,
+   "type": "comment",
+   "author": "dave",
+   "text": "C? Brave.",
+   "parent_id": 9020,
+   "story_id": 8000,
+   "children": []
+  },
+  {
+   "created_at": "2026-10-20T10:30:00Z",
+   "created_at_i": 1792492200,
+   "id": 9022,
+   "type": "comment",
+   "author": null,
+   "text": null,
+   "parent_id": 9020,
+   "story_id": 8000,
+   "children": []
+  },
+  {
+   "created_at": "2026-10-20T11:00:00Z",
+   "created_at_i": 1792494000,
+   "id": 9023,
+   "type": "comment",
+   "author": "eve",
+   "text": "[flagged]",
+   "parent_id": 9020,
+   "story_id": 8000,
+   "children": []
+  }
+ ]
+}

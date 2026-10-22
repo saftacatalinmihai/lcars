@@ -1,0 +1,3 @@
+.wrangler/
+.wrangler.deploy.toml
+node_modules/

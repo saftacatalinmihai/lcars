@@ -59,3 +59,5 @@ lcars.db_local
 scripts/node_modules
 # A data directory's bin/: the one binary's lcars-cli link, made at start
 /bin/
+# the explainer, staged by deploy.sh from $LCARS_LANDING_EXPLAINER; a local copy for the preview
+site/landing/public/video/explainer.mp4

@@ -13,7 +13,8 @@ question #7" row into the live crew_inbox. So, for the whole run:
 - seat._http raises NoJournal, a BaseException, so no `except Exception`
   in engineer.py swallows it (and then spawns a retry unit): the test fails,
   loudly, where it wrote. A test with a stand-in patches seat._http itself
-  (test_no1_threads.py's Journal), which wins inside its patch.
+  (test_no1_threads.py's Journal), which wins inside its patch;
+- engineer.py's state is a scratch directory (teststate.py).
 """
 
 import os
@@ -21,6 +22,7 @@ import sys
 
 os.environ["LCARS_URL"] = "http://127.0.0.1:9"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import teststate  # noqa: E402,F401 - nor the box's real engineer state
 import seat  # noqa: E402
 
 

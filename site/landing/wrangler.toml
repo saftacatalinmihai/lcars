@@ -1,0 +1,24 @@
+# The landing page: public/ as static assets, src/worker.js for /api/*.
+# Nothing account-specific lives here (the export to the public repo ships
+# this file): the account comes from CLOUDFLARE_ACCOUNT_ID in the
+# environment, the database id and the custom domain from deploy.sh, which
+# writes them into a generated copy from LCARS_LANDING_D1_ID and
+# LCARS_LANDING_HOST. README.md says how.
+name = "lcars-landing"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "404-page"
+# A path that is a file is served by Cloudflare without running the worker;
+# any other (/api/signup) reaches the worker, which hands what is not /api/
+# back to the assets for their 404 page. (Wrangler 3, as the box's Node 20
+# runs: wrangler 4's run_worker_first list is not needed for this.)
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lcars-landing"
+database_id = "LCARS_LANDING_D1_ID"

@@ -21,7 +21,9 @@ with each login and checks every allowed and refused shape:
      PATCH, a restore, append, title, end), or moves a row to one, without
      X-LCARS-Client is refused, the main login's too; a DELETE is let
      through; a scratch lcars-cli's `new --kind deck_patch` and `set` are
-     refused (and its other writes not);
+     refused (and its other writes not). social_post, a post for the ship
+     to send (docs/design/social-publish.md 3.1), is held the same way, and
+     the steward may not write one even with the header (StewardMayWriteKind);
   6. the steward (LCARS_STEWARD_USER/PASS, the crew notes' runner) creates
      the captain's kinds, appends to his entries through POST
      /entries/<id>/append and sets their titles through POST
@@ -583,6 +585,45 @@ def patches(s, binary_dir):
           f"lcars-cli set on a patch is refused: {(r.stdout + r.stderr).strip()[:120]!r}")
     r = run("new", "--kind", "journal", "--title", "from the cli", "--content", "words")
     check(r.returncode == 0, f"lcars-cli's other writes go ({r.returncode}: {(r.stdout + r.stderr).strip()[:80]!r})")
+    social_post(s, run)
+
+
+def social_post(s, run):
+    """social_post (docs/design/social-publish.md 3.1): a pages-only kind like
+    the patches, and never the steward's, with the header or without."""
+    print("\nsocial_post")
+    body = {"kind": "social_post", "title": "Share", "content": "{\"text\":\"hello\"}"}
+    st, _ = s.req(MAIN, "POST", "/entries", body)
+    check(st == 403, f"the main login without X-LCARS-Client creates no social_post ({st})")
+    st, row = s.req(MAIN, "POST", "/entries", body, page=True)
+    check(ok(st), f"the page creates one ({st})")
+    sid = row["id"]
+    before = s.req(MAIN, "GET", f"/entries/{sid}")[1]
+    stamp = before.get("last_modified_at_utc") or ""
+    for method, path, b in (("PUT", f"/entries/{sid}", {"content": "{}"}),
+                            ("PATCH", f"/entries/{sid}", {"content": "x", "if_modified": stamp}),
+                            ("POST", f"/entries/{sid}/append", {"content": "x"}),
+                            ("POST", f"/entries/{sid}/title", {"title": "x"})):
+        st, _ = s.req(MAIN, method, path, b)
+        check(st == 403, f"{method} {path[len('/entries/'):]} on a social_post without the header: 403 ({st})")
+    check(s.req(MAIN, "GET", f"/entries/{sid}")[1] == before, "the row is byte for byte as it was")
+    jid = s.make("journal")
+    st, _ = s.req(MAIN, "PATCH", f"/entries/{jid}", {"kind": "social_post"})
+    check(st == 403 and s.kind_of(jid) == "journal", f"nor is a row moved to social_post ({st})")
+    st, _ = s.req(MAIN, "PUT", f"/entries/{sid}", {"content": "{\"text\":\"edited\"}"}, page=True)
+    check(ok(st), f"the page edits it ({st})")
+    for who, login in (("the steward", STEWARD), ("Number One", NO1), ("the crew", CREW)):
+        for page in (False, True):
+            st, _ = s.req(login, "POST", "/entries", body, page=page)
+            check(st == 403, f"{who} creates none{' even with the header' if page else ''} ({st})")
+    st, _ = s.req(STEWARD, "POST", f"/entries/{sid}/append", {"content": "x", "if_modified": stamp}, page=True)
+    check(st == 403, f"nor does the steward append to one, header or not ({st})")
+    st, _ = s.req(STEWARD, "POST", f"/entries/{sid}/title", {"title": "x"}, page=True)
+    check(st == 403, f"or retitle one ({st})")
+    r = run("new", "--kind", "social_post", "--title", "from a chat", "--content", "{}")
+    check(r.returncode != 0 and ("403" in r.stdout + r.stderr or "pages only" in r.stdout + r.stderr),
+          f"lcars-cli new --kind social_post is refused: {(r.stdout + r.stderr).strip()[:120]!r}")
+    s.req(MAIN, "DELETE", f"/entries/{sid}")
 
 
 def kinds_entry(s):

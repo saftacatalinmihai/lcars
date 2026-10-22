@@ -275,6 +275,61 @@ class TestTmp(unittest.TestCase):
         with mock.patch.object(E, "TEST_TMP_KEEP_H", 2.0):
             self.assertEqual(E.reap_test_tmp()[0], [d])
 
+    def test_remotion_bundles(self):
+        """Remotion's leftovers (a render's webpack bundle, its assets, a
+        render.sh TMPDIR a SIGKILL left) go after REMOTION_KEEP_H, not a day;
+        a younger one, one of a render that may still run, stays."""
+        gone = [self.mk("remotion-webpack-bundle-KU02qq", age=3 * 3600),
+                self.mk("remotion-v4.0.537-assetsv9umqiecmn", age=3 * 3600),
+                self.mk("lcars-render-m321MiL3", age=3 * 3600)]
+        kept = [self.mk("remotion-webpack-bundle-fresh1", age=3600),        # a render under way
+                self.mk("remotion-webpack-bundle-", age=3 * 3600),          # not Remotion's name
+                self.mk("my-remotion-webpack-bundle-abc", age=3 * 3600)]
+        with mock.patch.object(E, "remotion_running", return_value=False), \
+                mock.patch.object(E, "REMOTION_KEEP_H", 2.0):
+            swept, _ = E.reap_test_tmp()
+        self.assertEqual(sorted(swept), sorted(gone))
+        for d in kept:
+            self.assertTrue(os.path.isdir(d), d)
+
+    def test_remotion_in_use(self):
+        """While any Remotion process of ours runs, no Remotion dir goes,
+        however old (a render reads its bundle to the end); the rest of the
+        sweep is not held up by it."""
+        old = [self.mk("remotion-webpack-bundle-Ab12Cd", age=2 * DAY), self.mk("lcars-render-Zz99yy00", age=2 * DAY)]
+        other = self.mk("lcars-logins-abcd1234")
+        with mock.patch.object(E, "remotion_running", return_value=True) as rr:
+            swept, _ = E.reap_test_tmp()
+        self.assertEqual(swept, [other])
+        self.assertEqual(rr.call_count, 1)  # asked once a sweep, not per dir
+        for d in old:
+            self.assertTrue(os.path.isdir(d), d)
+        for d in old:
+            shutil.rmtree(d)
+        with mock.patch.object(E, "remotion_running", side_effect=AssertionError("asked")):
+            self.mk("lcars-api-abcd1234")
+            E.reap_test_tmp()  # no Remotion dir left to judge: no /proc scan
+
+    def test_remotion_running_reads_proc(self):
+        """remotion_running finds a process of ours with a word of its argv
+        naming Remotion, and not a shell whose script only mentions it (a
+        Claude Code's tool call: `zsh -c '... grep remotion ...'`)."""
+        if E.remotion_running():
+            self.skipTest("a Remotion process is running on this box")
+        talk = subprocess.Popen(["sh", "-c", "sleep 30 # grep remotion src"])
+        render = None
+        try:
+            time.sleep(0.2)
+            self.assertFalse(E.remotion_running())
+            render = subprocess.Popen(["sh", "-c", "sleep 30", "node_modules/.bin/remotion"])
+            time.sleep(0.2)
+            self.assertTrue(E.remotion_running())
+        finally:
+            for p in (talk, render):
+                if p:
+                    p.kill()
+                    p.wait()
+
     def server(self, d, name="lcars-test"):
         """A stand-in scratch server: sleep, copied to d/name and started from
         there, so its argv[0] is that path."""

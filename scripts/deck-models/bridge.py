@@ -4,12 +4,13 @@ the conn and ops console, the tactical rail and the standing station; the
 conn's and ops' own chair and the command chairs' armrest consoles
 (0.237.0).
 
-    blender -b --factory-startup -P scripts/deck-models/bridge.py -- OUT_DIR [CHAIR_DIR]
+    blender -b --factory-startup -P scripts/deck-models/bridge.py -- OUT_DIR [CHAIRS_DIR]
 
-The captain's chair is the generated one from CHAIR_DIR when build.sh has it
-(bridge-redesign.md 8c: Tripo's, in the media store), else `captain_chair()`
-below, which stays as the fallback and the measure the generated one was
-fitted to.
+The captain's chair and the conn's and ops' are the generated ones from
+CHAIRS_DIR (a folder each) when build.sh has them (bridge-redesign.md 8c and
+section 9's slice 4: Tripo's, in the media store), else `captain_chair()` and
+`conn_chair()` below, which stay as the fallbacks and the measures the
+generated ones were fitted to.
 
 Coordinates: metres, Blender's +Z up, the chair's front toward -Y (glTF's
 +Z once exported). The chair is built to the code-built one's measures
@@ -220,6 +221,63 @@ def sweep(name, prof, a0, a1, R, steps, material, caps=True):
     return _mesh(name, bm, material)
 
 
+def far_round(w, near, far, r, k=6):
+    """An outline in the X-Y plane, `w` across, from y `near` to `far`, its
+    two far corners rounded at radius `r` in `k` steps and its near ones
+    square: the conn console's top in plan (the concepts' wedge). Returned
+    from the near left corner round to the near right one, open: the slab
+    closes it, the rim runs along it."""
+    pts = [(-w / 2, near)]
+    for cx, a0 in ((-w / 2 + r, 180), (w / 2 - r, 90)):
+        for i in range(k + 1):
+            a = math.radians(a0 - 90 * i / k)
+            pts.append((cx + r * math.cos(a), far - r + r * math.sin(a)))
+    pts.append((w / 2, near))
+    return pts
+
+
+def plate(name, outline, z0, z1, material, bevel=0.0, segments=2):
+    """A closed outline [(x, y), ...] extruded up Z from z0 to z1."""
+    bm = bmesh.new()
+    a = [bm.verts.new((x, y, z0)) for x, y in outline]
+    b = [bm.verts.new((x, y, z1)) for x, y in outline]
+    n = len(outline)
+    for i in range(n):
+        j = (i + 1) % n
+        bm.faces.new((a[i], a[j], b[j], b[i]))
+    bm.faces.new(a)
+    bm.faces.new(b[::-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return _mesh(name, bm, material, bevel, segments)
+
+
+def along(name, prof, path, material):
+    """A closed profile [(s, z), ...] (s outward of the path, in the X-Y
+    plane) swept along an open path [(x, y), ...], capped at both ends: a
+    rim that turns corners. The profile at each point is set square to the
+    mean of its two segments' directions, so a corner sampled in several
+    steps keeps its section."""
+    bm = bmesh.new()
+    rings = []
+    for i, (x, y) in enumerate(path):
+        px, py = path[max(i - 1, 0)]
+        nx, ny = path[min(i + 1, len(path) - 1)]
+        tx, ty = nx - px, ny - py
+        L = math.hypot(tx, ty)
+        # outward: the path runs clockwise seen from above, so its left
+        ox, oy = -ty / L, tx / L
+        rings.append([bm.verts.new((x + ox * s_, y + oy * s_, z)) for s_, z in prof])
+    n = len(prof)
+    for p, q in zip(rings, rings[1:]):
+        for k in range(n):
+            k1 = (k + 1) % n
+            bm.faces.new((p[k], p[k1], q[k1], q[k]))
+    bm.faces.new(rings[0])
+    bm.faces.new(rings[-1][::-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return _mesh(name, bm, material)
+
+
 def placed(objs, M):
     bpy.context.view_layer.update()
     for o in objs:
@@ -269,14 +327,20 @@ def conn_console():
     # console reads as a dark body under a lit, edged top - the concepts' -
     # not a black box with a flat lid. `rail_wood`, the tactical rail's and
     # the stations' caps: a palette entry baked into the atlas, +0 calls.
-    top = [C.box("slab", (1.6, 0.8, 0.03), (0, -0.04, -0.01), "console", bevel=0.012, segments=3),
-           C.box("far", (1.66, 0.07, 0.07), (0, 0.34, 0.0), "rail_wood", bevel=0.024, segments=3),
+    # Slice 5: the far corners rounded (r 0.2, the concepts' wedge in plan),
+    # the rim one bullnose swept from the lip round the far edge and back,
+    # where the far edge and the two ends were three boxes meeting square.
+    # The slab follows the rim's line; the display (1.4 x 0.5) clears the
+    # rim's inner edge at the corners by 1 cm.
+    rim = far_round(1.59, -0.35, 0.34, 0.2)
+    slab = far_round(1.6, -0.44, 0.35, 0.2)
+    q = 0.035
+    bull = [(q * math.cos(math.radians(a)), q * math.sin(math.radians(a))) for a in range(0, 360, 30)]
+    top = [plate("slab", slab, -0.025, 0.005, "console", bevel=0.012, segments=3),
+           along("rim", bull, rim, "rail_wood"),
            C.box("near", (1.56, 0.04, 0.03), (0, -0.29, 0.012), "console", bevel=0.006, segments=2),
            C.pad("lip", (1.56, 0.14, 0.055), (0, -0.37, 0.022), "bridge_leather"),
            C.box("well", (1.44, 0.54, 0.016), (0, 0, 0.0), "black", bevel=0.002, segments=1)]
-    for sx in (-1, 1):
-        # the ends, from the leather lip to the far rim, as deep as it
-        top.append(C.box(f"cheek{sx}", (0.07, 0.7, 0.07), (sx * 0.795, 0.0, 0.0), "rail_wood", bevel=0.024, segments=3))
     placed(top, Matrix.Translation((0, 0, TOP_Y)) @ Matrix.Rotation(th, 4, "X"))
     parts += top
     return C.smooth(C.join("conn_console", parts), 35)
@@ -341,6 +405,7 @@ def armrest_console():
 
 
 TR, ARC = 4.0, math.pi * 0.33   # the page's tactical rail: radius, each arc's sweep
+TILE_A = (0.13, 0.4)            # the tile strips, as angles off the arc's middle (deck.html's)
 
 
 def tactical_rail():
@@ -397,6 +462,15 @@ def tactical_rail():
     for a0 in (mid - w - e, mid + w):
         parts.append(sweep(f"end{a0}", ring(-0.1, 0.1, 1.145, 1.158), a0, a0 + e, TR, 1, "trim"))
     parts.append(sweep("face", ring(-0.075, 0.075, 1.14, 1.15), mid - w, mid + w, TR, 8, "black"))
+    # The LCARS tiles' bed (slice 5): a black strip 6.4 cm wide laid along
+    # the cap's crown either side of the swell, TILE_A from the panel's
+    # middle. The tiles in it are the page's (deck.html, by the tactical
+    # panel), steady lights in the blinking lights' shared material, so they
+    # glow as the panel's lights do at +0 calls; a lit colour baked into the
+    # atlas would be shaded by the room's light like any other paint.
+    for sg in (-1, 1):
+        a0, a1 = sorted((mid + sg * TILE_A[0], mid + sg * TILE_A[1]))
+        parts.append(sweep(f"bed{sg}", ring(-0.032, 0.032, 1.135, 1.1425), a0, a1, TR, 6, "black"))
     return C.smooth(C.join("tactical_rail", parts), 35)
 
 
@@ -418,7 +492,15 @@ def station(name="station", L=1.8):
     def under(z, v=-0.018):
         u = (z - 0.01 - v * math.sin(th)) / math.cos(th)
         return 0.881 + v * math.cos(th) - u * math.sin(th)
-    parts = [prism("body", [(-0.225, 0.13), (0.215, 0.13), (0.215, under(-0.215)), (-0.225, under(0.225))],
+    # The near face below the status lights (y 0.66 on the stand-in) is an
+    # inset raked back 15 degrees to the foot (bridge-redesign.md section 9,
+    # slice 5): the concepts' stations are not flat-fronted boxes, and set in
+    # between the end panels, over the lit slot left standing at the front,
+    # the face reads as a lectern's with room for the feet. Two more points
+    # in the body's profile, ~+50 triangles; the slot and kick stay whole.
+    rake = (0.62 - 0.13) * math.tan(math.radians(15))
+    parts = [prism("body", [(-0.225 + rake, 0.13), (0.215, 0.13), (0.215, under(-0.215)), (-0.225, under(0.225)),
+                            (-0.225, 0.62)],
                    -(h - 0.1), h - 0.1, "console", bevel=0.01),
              C.box("slot", (L - 0.2, 0.4, 0.06), (0, 0.0, 0.105), "black"),
              C.box("kick", (L - 0.18, 0.39, 0.08), (0, 0.01, 0.04), "trim", bevel=0.006, segments=1)]
@@ -590,48 +672,85 @@ def pull_plate(ob, k=0.68):
         wv = np.clip((mx - 0.4) / 0.1, 0, 1)
         ws = np.clip((0.3 - sat) / 0.1, 0, 1)
         wm = (wv * ws)[..., None]
-        rng = np.random.default_rng(7)
-        streak = 1 + 0.06 * np.repeat(rng.standard_normal((h, 1)), w, 1)[..., None]
-        rgb[:] = rgb * (1 - wm) + rgb * k * streak * wm
+        # Slice 5: no streak, and the plate's variation pulled 75% of the
+        # way to its mean. A streak along the texture's u, on Tripo's
+        # fragmented islands, landed on the plate in patches at all angles:
+        # with the texels' own mottle it read blotchy at 1.6 m. Flattened,
+        # an island seam or a texel step there changes nothing visible.
+        mean = (rgb * wm).reshape(-1, 3).sum(0) / max(float(wm.sum()), 1.0)
+        rgb[:] = rgb * (1 - wm) + (mean * 0.75 + rgb * 0.25) * k * wm
         img.pixels.foreach_set(px)
         print(f"[deck-models] bridge/{ob.name}: plate texels {float((wm > 0.5).mean()):.3f} of the texture, x{k}")
         return
 
 
-def generated_chair(src):
-    """The captain's chair made by image-to-3D (bridge-redesign.md 8c), from
-    build.sh's cache: already turned, scaled to the stand-in's seat and arms
-    and its pedestal in `trim` (the pilot's Blender pass, kept with the glb in
-    the media store). Decimated to the hero budget and baked from the original
-    into the bridge's atlas, as a pack's props are. Returns the prop, its
-    {low: original} and the licence files."""
+def satin(ob, k=0.35):
+    """Scale the metalness Tripo's ORM gives `ob` by `k`, before the bake.
+    The conn chair's back plate and headrest stem came out fully metallic,
+    and a mirror on the deck reflects the dark room round it: from behind
+    they read as a smudged, near-black slab (section 9's slice 4), where the
+    concept's plate is satin brushed steel. A Math node between the ORM's
+    blue channel and Metallic, which the bake carries into the atlas."""
+    for slot in ob.material_slots:
+        m = slot.material
+        bsdf = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None) if m and m.use_nodes else None
+        if not bsdf or not bsdf.inputs["Metallic"].is_linked:
+            continue
+        link = bsdf.inputs["Metallic"].links[0]
+        mul = m.node_tree.nodes.new("ShaderNodeMath")
+        mul.operation = "MULTIPLY"
+        mul.inputs[1].default_value = k
+        m.node_tree.links.new(link.from_socket, mul.inputs[0])
+        m.node_tree.links.new(mul.outputs["Value"], bsdf.inputs["Metallic"])
+        print(f"[deck-models] bridge/{ob.name}: metalness x{k}")
+
+
+# The generated chairs' triangles each (section 9's budget move: the
+# captain's three from 6,000 to 5,000 made room for the conn's and ops' two;
+# Tripo's conn chair came at 2,238 for a face_limit of 2,400, so it is not
+# decimated, and the room's models stay under 40 k)
+GEN_BUDGETS = {"captain_chair": 5000, "conn_chair": 2400}
+
+
+def generated_chairs(src):
+    """The chairs made by image-to-3D (bridge-redesign.md 8c, section 9's
+    slice 4), from build.sh's cache, one folder each: the captain's and the
+    conn's, each already turned, scaled to its stand-in's seat and arms and
+    its pedestal in `trim` (the Blender fit kept with the glb in the media
+    store). Decimated to their budgets and baked from the originals into the
+    bridge's atlas, as a pack's props are. Returns {prop: low}, the
+    {low: original} and the licence files; a chair not in the cache is not
+    in the first, and its scripted one is built."""
     lic = C.pack_licences(src)
-    lows, sources = C.import_pack(src, "bridge", budgets={"captain_chair": 6000})
-    lo = lows[0]
-    hi = sources[lo]
-    # import_pack set it on the footprint's middle, which the back makes
-    # deeper behind than in front: the pedestal's axis back on the origin,
-    # where the stand-in's is (the mean of the foot's ring of vertices),
-    # both copies alike so the bake's rays still meet
-    foot = [v.co for v in lo.data.vertices if v.co.z < 0.01]
-    dx, dy = sum(v.x for v in foot) / len(foot), sum(v.y for v in foot) / len(foot)
-    for o in (lo, hi):
-        for v in o.data.vertices:
-            v.co.x -= dx
-            v.co.y -= dy
-    pull_leather(hi)
-    pull_plate(hi)
-    return lo, sources, lic
+    lows, sources = C.import_pack(src, "bridge", budgets=GEN_BUDGETS)
+    for lo in lows:
+        hi = sources[lo]
+        # import_pack set it on the footprint's middle, which the back makes
+        # deeper behind than in front: the pedestal's axis back on the origin,
+        # where the stand-in's is (the mean of the foot's ring of vertices),
+        # both copies alike so the bake's rays still meet
+        foot = [v.co for v in lo.data.vertices if v.co.z < 0.01]
+        dx, dy = sum(v.x for v in foot) / len(foot), sum(v.y for v in foot) / len(foot)
+        for o in (lo, hi):
+            for v in o.data.vertices:
+                v.co.x -= dx
+                v.co.y -= dy
+        # the conn chair's leather came out pinker too, and its back plate is
+        # the same brushed grey that baked white on the captain's
+        pull_leather(hi)
+        pull_plate(hi)
+        if lo.name == "conn_chair":
+            satin(hi)
+    return {lo.name: lo for lo in lows}, sources, lic
 
 
 out, args = C.out_dir()
 C.clean_scene()
-# build.sh passes the generated chair's folder when it has it; without it
-# (the public repo, a box without the NAS) the scripted chair, as before
-if args:
-    chair, sources, lic = generated_chair(args[0])
-else:
-    sources, lic = None, None
+# build.sh passes the generated chairs' folder when it has them; a chair not
+# in it (the public repo, a box without the NAS) is the scripted one, as before
+gen, sources, lic = generated_chairs(args[0]) if args else ({}, None, None)
+chair = gen.get("captain_chair")
+if not chair:
     chair = captain_chair()
     # The origin is already where the stand-in's is (the floor, under the
     # pedestal's axis): floor_origin would centre it on the footprint, which
@@ -639,9 +758,10 @@ else:
     # the stand-in's. Transforms applied all the same.
     C.activate(chair)
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-props = [chair, conn_console(), tactical_rail(), station(), conn_chair(), armrest_console(), screen_fin(),
-         station("station_long", 2.6), display_bezel()]
-for p in props[1:]:
+made = [conn_console(), tactical_rail(), station(), gen.get("conn_chair") or conn_chair(), armrest_console(),
+        screen_fin(), station("station_long", 2.6), display_bezel()]
+props = [chair] + made
+for p in [p for p in made if p not in gen.values()]:
     C.activate(p)
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     # the end caps of prisms, lofts and sweeps are ngons, and the exporter's

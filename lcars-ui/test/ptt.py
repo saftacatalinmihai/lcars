@@ -14,7 +14,9 @@ getUserMedia on Chromium's fake device, the AudioWorklet, WebSocket.
      letting go sends CloseStream and the final words go through talkSend;
   2. Space held in an empty box does the same; with words in the box it is
      a space;
-  3. a reply being spoken is stopped by the press (sayStop);
+  3. a reply being spoken is stopped by the press (sayStop); a press that
+     stopped one and sent nothing (a tap) is a fumble (talkHost.fumble,
+     the hush lifted), one that sends words is not;
   4. a new press while the last is finishing: never two sockets at once;
   4b. let go while an iPhone's slow AudioContext.resume() is still waking:
      no "null is not an object" toast, nothing sent, the pill at rest; and
@@ -105,6 +107,7 @@ const talkHost = {
   box: () => $("#talkq"), get: () => $("#talkq").value, put: v => { $("#talkq").value = v; },
   hint: t => { $("#talkq").placeholder = t || "say something"; },
   up: () => !$("#talk").classList.contains("hidden"), space: true, hold() {}, toast,
+  fumble() { window.fumbles = (window.fumbles || 0) + 1; },
   async clear() {}, send: conv => talkSend(conv && eng.name ? CONV_NOTE : undefined),
 };
 $("#talkform").addEventListener("submit", ev => { ev.preventDefault(); talkSend(); });
@@ -270,6 +273,26 @@ def fake(page, url):
     check(not page.evaluate("$('#talkptt').classList.contains('on')") and
           page.evaluate("$('#pttl').textContent") == "Hold to talk", "the pill is back to rest")
 
+    print("a fumble: the voice stopped, nothing sent")
+    page.evaluate("window.fumbles = 0; say.run = { shown: 'playing' }")
+    pill.click()
+    page.wait_for_function("!ptt.cur", timeout=8000)
+    check(page.evaluate("window.fumbles") == 1 and page.evaluate("window.sent.length") == 1,
+          "a tap stopped the voice and sent nothing: the hush lifted (talkHost.fumble)")
+    page.evaluate("say.run = { shown: 'playing' }")
+    page.mouse.move(box["x"] + 10, box["y"] + 10)
+    page.mouse.down()
+    page.wait_for_function("$('#talkq').value === 'hello'", timeout=8000)
+    page.wait_for_timeout(400)
+    page.mouse.up()
+    page.wait_for_function("window.sent.length === 2", timeout=8000)
+    check(page.evaluate("window.fumbles") == 1, "a press that sent its words: no fumble, the hush stays for them to lift")
+    page.evaluate("window.sent.pop(); window.notes.pop()")
+    page.evaluate("say.run = null")
+    pill.click()
+    page.wait_for_function("!ptt.cur", timeout=8000)
+    check(page.evaluate("window.fumbles") == 1, "a tap with nothing speaking: nothing to lift")
+
     print("Space in the box")
     page.focus("#talkq")
     page.keyboard.down(" ")
@@ -289,7 +312,7 @@ def fake(page, url):
           "a tap of Space in the empty box opens nothing")
     page.keyboard.type("go to")
     page.keyboard.press(" ")
-    check(page.evaluate("$('#talkq').value") == "go to " and sockets(page)["made"] == 2,
+    check(page.evaluate("$('#talkq').value") == "go to " and sockets(page)["made"] == made,
           "with words in the box, Space is a space")
     page.fill("#talkq", "")
 
@@ -546,6 +569,37 @@ def conversation(page, url):
     check(page.evaluate("window.sent[3]") == "Next question.", "and the next utterance is heard")
     page.evaluate("window.sent.pop(); window.notes.pop()")
 
+    print("conversation: the phone, an engineer's lines across a tool gap (the run lingers)")
+    # the run's states as the speech queue gives them to chatSayRun's
+    # onState (convSay(!!v)): pending, playing, linger in the gap, playing, end
+    page.evaluate("window.__gum = 0; window.__drops = 0;"
+                  "{ const d = convDrop; convDrop = c => { window.__drops++; return d(c); }; } 0")
+    page.evaluate("say.run = { shown: 'pending' }; convSay(true); say.run.shown = 'playing'; convSay(true);"
+                  "say.run.shown = 'linger'; convSay(true)")
+    page.wait_for_timeout(2000)
+    check(page.evaluate("conv.cur.held && conv.cur.stream === null && window.__gum === 0"),
+          "2s into the gap the capture is still let go, not taken again")
+    page.evaluate("say.run.shown = 'playing'; convSay(true); say.run.shown = 'linger'; convSay(true)")
+    page.evaluate("say.run = null; convSay(false)")
+    page.wait_for_function("!!conv.cur.stream", timeout=3000)
+    check(page.evaluate("window.__drops === 1 && window.__gum === 1"), "two lines 2s apart: dropped once, taken back once")
+    page.evaluate("say.run = { shown: 'playing' }; convSay(true); say.run.shown = 'linger'; convSay(true)")
+    page.wait_for_timeout(300)
+    page.evaluate("say.run = null; convSay(false)")   # a 6s gap: the linger (4s) ran out
+    page.wait_for_function("!!conv.cur.stream", timeout=3000)
+    check(page.evaluate("$('#convst').textContent") == "listening", "a longer gap ends the run: the microphone back, listening")
+    page.evaluate("say.run = { shown: 'playing' }; convSay(true)")
+    check(page.evaluate("window.__drops === 3 && window.__gum === 2"), "and the next line drops it again")
+    page.evaluate("say.run = null; convSay(false)")
+    page.wait_for_function("!!conv.cur.stream", timeout=3000)
+    print("conversation: mute, a word in a gap")
+    page.evaluate("convHoldForTts = false; convSetMode('mute'); say.run = { shown: 'linger' }")
+    page.wait_for_function(f"{st} === 'listening'", timeout=3000)
+    dg.say(res("Also the deck.", True), {"type": "UtteranceEnd"})
+    page.wait_for_function("window.sent.length === 4", timeout=4000)
+    check(page.evaluate("window.sent[3]") == "Also the deck.", "the run lingering between lines: not muted, a word in the gap is sent")
+    page.evaluate("window.sent.pop(); window.notes.pop(); say.run = null; convSetMode('barge'); convHoldForTts = true")
+
     print("conversation: the phone, the earpiece")
     page.click("#talkout")
     check(page.evaluate("$('#talkout').textContent") == "Earpiece" and page.evaluate("conv.out") == "earpiece"
@@ -558,7 +612,36 @@ def conversation(page, url):
     page.evaluate("convSetOutput('earpiece')")
     page.wait_for_function("!!conv.cur.stream", timeout=3000)
     check(page.evaluate("!conv.cur.held && window.__gum === 1"), "and back to the earpiece: taken again at once")
-    page.evaluate("say.run = null; convSay(false); convHoldForTts = false; convSetOutput('speaker')")
+    page.evaluate("say.run = null; convSay(false)")
+    page.wait_for_function("!!conv.cur.stream", timeout=3000)
+
+    print("conversation: the phone's audio session (navigator.audioSession)")
+    # Safari's API stood in for: each type set is recorded, and the type
+    # getUserMedia was called under
+    page.evaluate("window.__as = []; window.__gumAs = [];"
+                  "navigator.audioSession = { _t: 'auto', get type() { return this._t; },"
+                  "  set type(v) { this._t = v; window.__as.push(v); } };"
+                  "{ const g = navigator.mediaDevices.getUserMedia;"
+                  "  navigator.mediaDevices.getUserMedia = c => { window.__gumAs.push(navigator.audioSession.type); return g(c); }; }"
+                  "convSess.type = ''; convSetOutput('speaker')")
+    check(page.evaluate("navigator.audioSession.type") == "play-and-record", "listening: play-and-record")
+    page.evaluate("say.run = { shown: 'pending' }; convSay(true)")
+    check(page.evaluate("navigator.audioSession.type") == "playback" and page.evaluate("conv.cur.held"),
+          "a reply with the speaker: the capture let go and the session playback (the loudspeaker)")
+    page.click("#talkout")
+    check(page.evaluate("navigator.audioSession.type") == "play-and-record" and page.evaluate("$('#talkout').textContent") == "Earpiece",
+          "tapped to Earpiece mid-reply: play-and-record and the pill's label in the same task")
+    page.wait_for_function("!!conv.cur.stream", timeout=3000)
+    page.click("#talkout")
+    check(page.evaluate("navigator.audioSession.type") == "playback" and page.evaluate("conv.cur.stream === null")
+          and page.evaluate("$('#talkout').textContent") == "Speaker", "and back to Speaker: playback at once")
+    page.evaluate("say.run = null; convSay(false)")
+    check(page.evaluate("navigator.audioSession.type") == "auto", "the reply over: auto until the microphone is asked for")
+    page.wait_for_function("!!conv.cur.stream", timeout=3000)
+    check(page.evaluate("navigator.audioSession.type") == "play-and-record"
+          and page.evaluate("window.__gumAs.every(t => t === 'play-and-record')") and page.evaluate("window.__gumAs.length") >= 2,
+          "every getUserMedia asked under play-and-record, never playback")
+    page.evaluate("convHoldForTts = false; convSetOutput('speaker')")
 
     print("conversation: a dropped socket")
     made, toks = sockets(page)["made"], page.evaluate("window.tokens")
@@ -616,6 +699,26 @@ def conversation(page, url):
     check("No listening" in page.evaluate("$('#toast').textContent") and page.evaluate("conv.cur") is None
           and page.evaluate("$('#convl').textContent") == "Start conversation", "no token: a toast, and it ends")
     State.token_status = 200
+
+    print("hold to talk: the phone's audio session")
+    # the stand-in that answers again (the failures' one closes every socket)
+    page.route_web_socket(re.compile(r"wss://api\.deepgram\.com/.*"), dg)
+    page.evaluate("convHoldForTts = true; convSess.type = ''; window.__gumAs = []; convSetOutput('speaker'); pttDown()")
+    page.wait_for_function("!!(ptt.cur && ptt.cur.stream)", timeout=8000)
+    check(page.evaluate("navigator.audioSession.type") == "play-and-record" and page.evaluate("window.__gumAs") == ["play-and-record"],
+          "held: the microphone asked for under play-and-record")
+    page.evaluate("pttUp()")
+    check(page.evaluate("navigator.audioSession.type") == "auto", "let go: auto")
+    page.evaluate("say.run = { shown: 'pending' }; convSay(true)")
+    check(page.evaluate("navigator.audioSession.type") == "playback", "the reply, with the speaker chosen: playback (no conversation needed)")
+    page.click("#talkout")
+    check(page.evaluate("navigator.audioSession.type") == "play-and-record" and page.evaluate("$('#talkout').textContent") == "Earpiece",
+          "the pill tapped: the earpiece's play-and-record at once")
+    page.click("#talkout")
+    check(page.evaluate("navigator.audioSession.type") == "playback", "and the speaker again")
+    page.evaluate("say.run = null; convSay(false)")
+    check(page.evaluate("navigator.audioSession.type") == "auto", "the reply over: auto")
+    page.evaluate("convHoldForTts = false; delete navigator.audioSession")
     check(not errors, "no script errors in the conversation" + (": " + "; ".join(errors[:3]) if errors else ""))
 
 

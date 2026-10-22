@@ -2431,7 +2431,7 @@ ops brief at 06:30, the historian (daily, and the month on the 1st), the
 science officer's weekly numbers, the yeoman's hygiene list, the security
 audit, the librarian's docs-against-code check, the counselor's Sunday
 reading of the week's personal logs, and three with no model, the
-ship's health, the nightly web suite and the blog post's shares. A role is a file, `crew/<role>.md`:
+ship's health, the nightly web suite, the blog post's shares and the hourly social watch. A role is a file, `crew/<role>.md`:
 front matter (schedule, model, the verbs it may run, WebFetch domains,
 budget, timeout) and the prompt. `crew.py list` shows them.
 
@@ -2605,6 +2605,53 @@ stale or missing as the latest run lists it and its error said in words.
 Blog shares line), "computer, blog shares" and the palette. Stats'
 Measurements, the crew's list and the deck's Crew pad leave the readings'
 kinds out (`isShareReading`); the demo shows the empty state only.
+
+**The social watch (`crew/social.md`, `scripts/social.py`, 0.288.0,
+docs/design/social-watch.md).** Hourly at :20, no model: the new comments
+on the captain's accounts and, once a day, their numbers, read with
+nothing but the box's own credentials. Hacker News through Algolia's public
+API (the comments under the captain's stories of 30 days, the direct
+replies to their comments of 14; Algolia rather than Firebase because its hits carry the
+story's title); GitHub with the box's `gh` login (`LCARS_SOCIAL_GITHUB`, a
+fine-grained token, wins when set): new issues and pull requests by
+others, issue and review comments of 14 days, discussions where a repo has
+them (giscus's per-post thread, a Bot's, skipped; its readers' comments
+kept), bots and the captain's own left out; stars, forks, and the traffic API's views
+and clones; Cloudflare Web Analytics (`LCARS_CF_ANALYTICS_TOKEN`, else the
+box's `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`) for both sites, `bot:
+0`, by site, page and referrer. The names (`hn_user`, `github_user`,
+`github_repos`, `cf_sites: name=<site tag> ...`) are the role's front
+matter, filled in by crew/context.local.md. It writes, with the crew login:
+
+- `crew_social_comment`, one per new comment, line-keyed (`id: hn:<id>` or
+  `github:<owner/repo>/c<id>`..., `platform`, `link`, `on`, `parent`,
+  `author`, `at`, `status: new|replied`, then the text as plain text):
+  `done_bool` 1 when the captain's reply is a child of it - on the first read, or
+  later by a guarded PATCH (`if_modified`; a 412 leaves their edit alone).
+  **Seen lives in the journal**: a comment is new when no
+  `crew_social_comment` since 60 days has its `id:` line;
+- `crew_social_<hn|github|cf>`, one reading per captain's day, by the
+  first run after the captain's midnight, for the day before (`day` in its JSON;
+  skipped when the newest one has it): value_int HN's points, GitHub's
+  stars, Cloudflare's visits, the title that number first. GitHub's
+  traffic keeps only 14 days, so each reading takes the complete UTC days
+  after the last reading's `traffic_through`, each day once;
+- `task_crew_social`, **one** reminder per run that found comments the captain
+  has not answered (`3 new comments: HN 2, GitHub 1`, a block per comment
+  naming its entry): the crew's own list, which Open questions and CalDAV
+  already take (`askOf`);
+- `crew_social`, the run's entry, only when something happened (a quiet
+  hour is the run log's `nothing`). Its last line, `failures: github=2`,
+  is the count of runs in a row each platform failed, read back by the
+  next run: the third raises one `task_crew`, a recovery is a line.
+
+Read only: every request goes through `Net` (`check_read_only`), which
+refuses anything but a GET, save a GraphQL query (never a mutation) POSTed
+to GitHub's or Cloudflare's GraphQL endpoint. A first run on the box took
+~35s and ~75 requests. The hourly role is the one exception to
+test_crew's 20 minutes between roles: a light script waiting on the
+network, it queues on the crew lock. Tests: `scripts/test_social.py`, on
+recordings in `scripts/testdata/social/`.
 
 ### Crew notes (`scripts/crew_notes.py`, docs/design/crew-notes.md)
 

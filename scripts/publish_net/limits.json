@@ -1,0 +1,24 @@
+{
+  "about": "Each network's limit and how it counts, for the Share sheet's counters (lcars-ui/index.html, SOC_NETS: a copy the behaviour suite holds equal to this file) and the publisher's validate (slice 2). docs/design/social-publish.md 3.2 and 3.10. counts: chars = Unicode code points; graphemes = user-perceived characters (Intl.Segmenter); weighted = X's: NFC, an emoji 2, a code point outside X's light ranges 2, else 1. link: a URL counts as that many, whatever its length (null: as written). field: what the limit is on - the post's text, or the title of a link post.",
+  "order": ["hn", "reddit", "x", "bluesky", "mastodon", "linkedin", "threads"],
+  "networks": {
+    "hn": {"name": "Hacker News", "limit": 80, "counts": "chars", "link": null, "field": "title"},
+    "reddit": {"name": "Reddit", "limit": 300, "counts": "chars", "link": null, "field": "title"},
+    "x": {"name": "X", "limit": 280, "counts": "weighted", "link": 23, "field": "text"},
+    "bluesky": {"name": "Bluesky", "limit": 300, "counts": "graphemes", "link": null, "field": "text"},
+    "mastodon": {"name": "Mastodon", "limit": 500, "counts": "graphemes", "link": 23, "field": "text"},
+    "linkedin": {"name": "LinkedIn", "limit": 3000, "counts": "chars", "link": null, "field": "text"},
+    "threads": {"name": "Threads", "limit": 500, "counts": "graphemes", "link": null, "field": "text"}
+  },
+  "cases": [
+    {"text": "hello", "chars": 5, "graphemes": 5, "weighted": 5},
+    {"text": "Ce faci? ștergem", "chars": 16, "graphemes": 16, "weighted": 16},
+    {"text": "șa", "chars": 3, "graphemes": 2, "weighted": 2},
+    {"text": "go 🚀", "chars": 4, "graphemes": 4, "weighted": 5},
+    {"text": "👍🏽", "chars": 2, "graphemes": 1, "weighted": 2},
+    {"text": "🇷🇴", "chars": 2, "graphemes": 1, "weighted": 2},
+    {"text": "👨‍👩‍👧", "chars": 5, "graphemes": 1, "weighted": 2},
+    {"text": "日本", "chars": 2, "graphemes": 2, "weighted": 4},
+    {"text": "read https://example.com/a/very/long/path/that/goes/on/and/on", "chars": 61, "graphemes": 61, "weighted": 61, "link23": 28}
+  ]
+}

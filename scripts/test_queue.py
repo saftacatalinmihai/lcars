@@ -557,6 +557,17 @@ class Calibrated(Fixture, unittest.TestCase):
         self.assertEqual(E.eta_record_line(self.st()),
                          " Your last estimate ran 3.0 times short (the median: they took 3.00 of what you said).")
 
+    def test_the_spoken_rule_in_both_briefs(self):
+        # the page marks a message said aloud "[spoken] " (chatSpokenMark);
+        # an engineer and Number One are each told what it asks, word for word
+        rule = E.SPOKEN_RULE
+        self.assertTrue(rule.startswith("Spoken messages: a message that begins [spoken]"))
+        self.assertIn("one or two short sentences, before any tool call", rule)
+        self.assertIn("short and plain enough to listen to", rule)
+        self.assertIn("\n\n" + rule + "\n\n", E.brief("kim-c32", self.st()))
+        self.assertIn("\n\n" + rule + "\n", E.brief_no1(E.NO1, {}))
+        self.assertEqual(E.brief(E.NO1, {}).count("[spoken]"), 1, "said once, in Number One's")
+
     def test_etas_prints_every_record_and_the_medians(self):
         self.recs("yar-c36", [(90, 18), (150, 13)])
         st = self.st("yar-c36")

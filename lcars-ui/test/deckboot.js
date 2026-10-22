@@ -124,12 +124,99 @@ try {
   if (!problems.length) padFaces();
   if (!problems.length) dressCull();
   if (!problems.length) await architect();
+  if (!problems.length) socialFlash();
+  if (!problems.length) crouching();
+  if (!problems.length) nightWatching();
   if (problems.length) {
     for (const p of problems) console.log("   FAIL " + p);
     process.exit(1);
   }
-  console.log("   ok (top level, demo boot, " + loops.length * 3 + " frames, " + reading + "; " + baked + "; " + walked + "; " + peopled + "; " + spoken + "; " + faced + "; " + culled + "; " + patched + ")");
+  console.log("   ok (top level, demo boot, " + loops.length * 3 + " frames, " + reading + "; " + baked + "; " + walked + "; " + peopled + "; " + spoken + "; " + faced + "; " + culled + "; " + patched + "; " + socialed + "; " + crouchd + "; " + nightd + ")");
 })();
+
+// The crouch (Z, the Crouch pill, "crouch"): the eye eases down to
+// CROUCH_EYE and back to EYE, a step is half a pace, Space while crouched
+// rises and does not jump, a seat ends it and standing from one is standing,
+// and the spoken orders reach it by their words, as the console's vMatch
+// would (each a whole phrase of one order).
+let crouchd = "";
+function crouching() {
+  const D = ctx.window.__deck, fail = m => problems.push("crouch: " + m);
+  try {
+    const settle = () => { for (let i = 0; i < 60; i++) D.tickBody(1 / 30); return D.body().eye; };
+    const near = (a, b) => Math.abs(a - b) < 0.01;
+    // the stand-in renderer is "in a headset" (any stub is truthy): a crouch is nothing there
+    D.crouch();
+    if (D.body().crouched) return fail("a crouch in a headset crouched");
+    D.renderer.xr.isPresenting = false;
+    if (D.body().seated) D.standUp();
+    if (!near(settle(), D.EYE)) return fail("standing, the eye is " + D.body().eye + ", not EYE " + D.EYE);
+    const pace = D.walkPace();
+    D.crouch();
+    if (!D.body().crouched) return fail("the toggle did not crouch");
+    if (!near(settle(), D.CROUCH_EYE)) return fail("crouched, the eye is " + D.body().eye + ", not " + D.CROUCH_EYE);
+    if (!(D.CROUCH_EYE > 0.6 && D.CROUCH_EYE < D.EYE * 0.65)) return fail("CROUCH_EYE " + D.CROUCH_EYE + " does not read as a crouch");
+    if (Math.abs(D.walkPace() / pace - 0.5) > 1e-9) return fail("crouched, the pace is " + D.walkPace() + " of " + pace + ", not half");
+    D.crouch();
+    if (D.body().crouched || !near(settle(), D.EYE) || D.walkPace() !== pace) return fail("the toggle again did not stand up to EYE at the full pace");
+    D.crouch(); D.jump();
+    if (D.body().crouched) return fail("Space while crouched did not stand up");
+    if (typeof D.jumping !== "boolean") return fail("__deck.jumping is gone: the jump cannot be checked");
+    D.tickBody(1 / 30);
+    if (D.jumping || D.body().jumpY > 0) return fail("Space while crouched jumped as well as standing up");
+    // a seat ends it, and standing from the seat is standing
+    D.crouch();
+    // three.js is a stand-in here, so the seat is a plain record far from the crew
+    const M = new D.THREE.Matrix4(), seat = { matrix: M, matrixWorld: M, userData: { seat: { pts: [[0, 0]], h: 0.45, dir: 1 } } };
+    D.sitDown({ object: seat, point: { x: 0, y: 0.45, z: 0 } });
+    if (!D.body().seated) return fail("could not sit to check the seat ends the crouch");
+    if (D.body().crouched) return fail("sitting did not end the crouch");
+    D.standUp();
+    if (D.body().crouched || !near(settle(), D.EYE)) return fail("standing from a seat is not standing (crouched " + D.body().crouched + ", eye " + D.body().eye + ")");
+    // the spoken orders, by their words
+    const order = said => D.DVCMDS.filter(c => c.fn && [c.say, ...(c.alias || [])].includes(said));
+    for (const w of ["crouch", "get down", "duck"]) {
+      const o = order(w);
+      if (o.length !== 1) return fail("\"" + w + "\" is " + o.length + " orders, not one");
+      o[0].fn({});
+      if (!D.body().crouched) return fail("\"" + w + "\" did not crouch");
+      o[0].fn({});
+      if (!D.body().crouched) return fail("\"" + w + "\" said twice stood up: an order says what it wants, it is no toggle");
+      const up = order("stand up");
+      if (up.length !== 1) return fail("\"stand up\" is not one order");
+      up[0].fn({});
+      if (D.body().crouched) return fail("\"stand up\" did not end the crouch");
+    }
+    settle();
+    crouchd = "crouch: the eye to " + D.CROUCH_EYE + " and back, half a pace, Space and a seat stand up, 3 orders and stand up";
+  } catch (e) { fail(e.message + "\n      " + String(e.stack || "").split("\n").slice(1, 3).join("\n      ")); }
+}
+
+// The bridge at night watch (U, the Night pill, "night watch"/"day watch";
+// bridge-redesign.md direction 3): the bridge's two pooled lights cut and
+// given back exactly, the fill scaled on the bridge alone, the state kept in
+// localStorage, and the two orders each saying what they want (no toggle).
+let nightd = "";
+function nightWatching() {
+  const D = ctx.window.__deck, fail = m => problems.push("night watch: " + m);
+  try {
+    if (D.NIGHT.on) return fail("on by default (the demo boot has no saved watch)");
+    const pools = D.NIGHT.pools || [], day = pools.map(s => s.intensity);
+    if (pools.length !== 2 || day[0] !== 9 || day[1] !== 5) return fail("the bridge's two pooled lights are " + day + ", not 9 and 5");
+    const order = said => D.DVCMDS.filter(c => c.fn && [c.say, ...(c.alias || [])].includes(said));
+    for (const [w, on] of [["night watch", true], ["dim the lights", true], ["day watch", false], ["lights up", false]]) {
+      const o = order(w);
+      if (o.length !== 1) return fail("\"" + w + "\" is " + o.length + " orders, not one");
+      o[0].fn({}); o[0].fn({});
+      if (D.NIGHT.on !== on) return fail("\"" + w + "\" twice left the watch " + (D.NIGHT.on ? "night" : "day"));
+      const kept = ctx.localStorage.getItem("lcars.deck.night");
+      if (kept !== String(on)) return fail("\"" + w + "\" kept " + kept + " in localStorage");
+      if (on && !pools.every((s, i) => s.intensity < day[i] * 0.3)) return fail("at night the pools are " + pools.map(s => s.intensity));
+      if (!on && !pools.every((s, i) => s.intensity === day[i])) return fail("by day the pools are " + pools.map(s => s.intensity) + ", not " + day);
+    }
+    nightd = "night watch: the pools " + day + " cut and back, kept, 4 orders";
+  } catch (e) { fail(e.message + "\n      " + String(e.stack || "").split("\n").slice(1, 3).join("\n      ")); }
+}
 
 // Seated PADD readers (readsSeated): on deck 8 as built, someone seated
 // reads, a third of the seated at most, nobody at the bridge's conn or ops,
@@ -612,6 +699,31 @@ function dressCull() {
     D.dressing.delete(m);
     codeDress(D, fail);
     if (!problems.length) culled = "dressing: its own mesh and its patches, hidden on low past " + R + " m; code-built, cut by drawRange; a collapsed merge hidden";
+  } catch (e) { fail(e.message + "\n      " + String(e.stack || "").split("\n").slice(1, 3).join("\n      ")); }
+}
+
+// The social watch's notice (task_crew_social, takeRows): an open one is
+// said on the HUD once, as Number One's are, and kept as said on the device
+// (lcars.deck.socialSeen) so a reload does not say it again; a done one, a
+// deleted one, or the same row taken again (the mirror, then /dump) is not.
+// Runs after architect(), which gave the context a real localStorage.
+let socialed = "";
+function socialFlash() {
+  const D = ctx.window.__deck, fail = m => problems.push("social notice: " + m);
+  try {
+    const row = { id: 990001, kind: "task_crew_social", title: "2 new comments: HN 1, GitHub 1", content: "", done_bool: 0, deleted: 0,
+                  created_at_utc: "2026-10-21 09:00:00", last_modified_at_utc: "2026-10-21 09:00:00" };
+    D.takeRows([row]);
+    if (D.lastHint !== "New comments: 2 new comments: HN 1, GitHub 1") return fail("a new one was not said (" + D.lastHint + ")");
+    const kept = JSON.parse(ctx.localStorage.getItem("lcars.deck.socialSeen") || "[]");
+    if (!kept.includes(990001)) return fail("the one said was not kept for the next boot (" + JSON.stringify(kept) + ")");
+    const said = () => D.lastHint;
+    // flash something else, then the same row again, a done one and a deleted one: none said
+    D.takeRows([{ id: 990002, kind: "task_no1", title: "marker", done_bool: 0, deleted: 0 }]);
+    D.takeRows([Object.assign({}, row, { last_modified_at_utc: "2026-10-21 09:05:00" }), Object.assign({}, row, { id: 990003, done_bool: 1 }), Object.assign({}, row, { id: 990004, deleted: 1 })]);
+    if (said() !== "Number One asks: marker") return fail("said again, or a done or deleted one said (" + said() + ")");
+    for (const id of [990001, 990002, 990003, 990004]) D.rows.delete(id);
+    socialed = "social notice: said once, kept across a boot, not when done or deleted";
   } catch (e) { fail(e.message + "\n      " + String(e.stack || "").split("\n").slice(1, 3).join("\n      ")); }
 }
 

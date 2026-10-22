@@ -27,7 +27,12 @@ can be read back off the buffers), or as a whole WAV like a server without
      a finished or stopped one does not;
   7. sayQuiet (a microphone capture just let go of, on a phone): the
      first sound waits until its moment is over, the rest follows it back
-     to back; and nothing waits once it has passed.
+     to back; and nothing waits once it has passed;
+  8. a lingering run (sayEnd's `linger`, an engineer at work: voice-live-
+     narration.md 3.3): reopened across a 2.5s gap it never ends between
+     (no "" state, the mark never goes), "linger" in the gap; a gap longer
+     than the linger ends it; a stop in the gap ends it at once, and a line
+     added after the stop is neither fetched nor played.
 
     python3 test/speech.py
 """
@@ -381,6 +386,112 @@ def quiet(page):
     page.wait_for_function("window.ended !== null", timeout=10000)
 
 
+def linger(page):
+    print("a lingering run: an engineer's lines across a tool gap")
+    reset(page)
+    State.lines = ["Reading the poll now.", "Found it, editing."]
+    page.evaluate("""() => {
+      window.st = [];
+      window.run = sayRun("ensign", false, 0.9, v => { window.st.push(v); sayShow(v); });
+      sayAdd(run, "Reading the poll now."); sayEnd(run, 4000);
+      window.ended = null; run.done.then(ok => { window.ended = ok; });
+    }""")
+    page.wait_for_function("window.st.includes('linger')", timeout=10000)
+    page.wait_for_timeout(2500)
+    check(page.evaluate("window.ended") is None and page.evaluate("say.run === run"), "2.5s into the gap the run is still open")
+    check(page.evaluate("sayReopen(run)") is True, "and takes the next line")
+    page.evaluate("sayAdd(run, 'Found it, editing.'); sayEnd(run, 600)")
+    page.wait_for_function("window.ended !== null", timeout=10000)
+    st = page.evaluate("window.st")
+    check(st == ["pending", "playing", "linger", "playing", "linger", ""], f"one run, no end between the lines ({st})")
+    marks = page.evaluate("window.marks")
+    while marks and marks[0] == "":
+        marks.pop(0)
+    check(marks == ["voice…", "speaking", ""], f"the mark never went in the gap ({marks})")
+    lines = [p["line"] for p in page.evaluate("window.plays")]
+    check(set(lines) == {1, 2} and lines == sorted(lines), f"both lines, in order ({lines})")
+    check(page.evaluate("sayReopen(run)") is False, "a gap longer than the linger ended it: not reopened")
+
+    reset(page)
+    State.lines = ["Running the tests."]
+    page.evaluate("""() => {
+      window.st = [];
+      window.run = sayRun("ensign", false, 0.9, v => { window.st.push(v); sayShow(v); });
+      sayAdd(run, "Running the tests."); sayEnd(run, 4000);
+      window.ended = null; run.done.then(ok => { window.ended = ok; });
+    }""")
+    page.wait_for_function("window.st.includes('linger')", timeout=10000)
+    page.click("#talksay")
+    page.wait_for_function("window.ended !== null", timeout=2000)
+    check(page.evaluate("window.st[window.st.length - 1]") == "" and page.evaluate("$('#talksay').hidden"),
+          "a stop in the gap ends the run at once, the mark gone")
+    n = len(State.log)
+    page.evaluate("sayReopen(run); sayAdd(run, 'A line after the stop.'); sayEnd(run)")
+    page.wait_for_timeout(800)
+    check(len(State.log) == n and not any(p["line"] == 9 for p in page.evaluate("window.plays")),
+          "a line added after the stop: not fetched, not played")
+
+
+def after(page):
+    print("sayRun after: the computer's quick answer, then Number One")
+    reset(page)
+    State.lines = ["The deploy is four minutes in.", "Number One here, it is nearly done."]
+    page.evaluate("""() => {
+      window.st = []; window.st2 = [];
+      window.a = sayRun("computer", true, 0.9, v => { window.st.push(v); sayShow(v); });
+      sayAdd(a, "The deploy is four minutes in."); sayEnd(a);
+      window.endedA = null; a.done.then(ok => { window.endedA = ok; });
+    }""")
+    page.wait_for_function("window.plays.length >= 1", timeout=10000)
+    page.evaluate("""() => {
+      window.b = sayRun("c34", false, 0.9, v => { window.st2.push(v); sayShow(v); }, null, { after: a });
+      sayAdd(b, "Number One here, it is nearly done."); sayEnd(b);
+      window.endedB = null; b.done.then(ok => { window.endedB = ok; });
+    }""")
+    check(page.evaluate("say.run === b && sayLive(a)"), "the run speaking is not stopped: the new one follows it")
+    page.wait_for_function("window.endedB !== null", timeout=15000)
+    plays = page.evaluate("window.plays")
+    one = [p for p in plays if p["line"] == 1]
+    two = [p for p in plays if p["line"] == 2]
+    check(bool(one) and bool(two) and not any(p["stopped"] for p in plays), "both said whole, nothing cut")
+    if one and two:
+        end1 = max(p["at"] + p["dur"] for p in one)
+        start2 = min(p["at"] for p in two)
+        check(start2 >= end1 - 0.002, f"the second run's first sound after the first run's last ({start2 - end1:+.3f}s)")
+        check(start2 - end1 < 0.05, f"and straight on, no gap ({(start2 - end1) * 1000:.0f}ms)")
+    check(page.evaluate("window.endedA") is True and page.evaluate("say.run") is None, "both over, no run left")
+    check(page.evaluate("window.st2") == ["playing", ""], f"the second shows nothing until it plays ({page.evaluate('window.st2')})")
+    marks = page.evaluate("window.marks")
+    while marks and marks[0] == "":
+        marks.pop(0)
+    check(marks == ["voice…", "speaking", ""], f"the mark stayed across the two speakers ({marks})")
+
+    print("a stop during the first ends both")
+    reset(page)
+    State.lines = ["The computer says this.", "Number One never says this."]
+    page.evaluate("""() => {
+      window.a = sayRun("computer", true, 0.9, v => sayShow(v));
+      sayAdd(a, "The computer says this."); sayEnd(a);
+      window.b = sayRun("c34", false, 0.9, v => sayShow(v), null, { after: a });
+      sayAdd(b, "Number One never says this."); sayEnd(b);
+      window.endedA = window.endedB = null;
+      a.done.then(ok => { window.endedA = ok; }); b.done.then(ok => { window.endedB = ok; });
+    }""")
+    page.wait_for_function("window.plays.length >= 1 && !$('#talksay').hidden", timeout=10000)
+    page.wait_for_timeout(150)
+    page.click("#talksay")
+    page.wait_for_function("window.endedA !== null && window.endedB !== null", timeout=3000)
+    page.wait_for_timeout(1200)
+    plays = page.evaluate("window.plays")
+    at = page.evaluate("window.stoppedAt")
+    check(all(p["stopped"] for p in plays if p["at"] + p["dur"] > at), "the first stopped where it was")
+    check(not any(p["line"] == 2 for p in plays), "the second never heard")
+    check(page.evaluate("say.run") is None and page.evaluate("$('#talksay').hidden"), "no run left, the mark gone")
+    page.evaluate("window.c = sayRun('c34', false, 0.9, null, null, { after: a })")
+    check(page.evaluate("say.run === c && !c.after"), "after a run already over: a plain run")
+    page.evaluate("sayStop()")
+
+
 def main():
     from playwright.sync_api import sync_playwright
 
@@ -404,6 +515,8 @@ def main():
         page.evaluate("say.prov = undefined")
         reopen(page)
         quiet(page)
+        linger(page)
+        after(page)
         check(not errors, "no script errors" + (": " + "; ".join(errors[:3]) if errors else ""))
         browser.close()
     srv.shutdown()

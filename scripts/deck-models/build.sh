@@ -35,19 +35,23 @@ fetch() {
       for a in carved_wooden_elephant brass_vase_03; do ln -s "$cache/polyhaven/$a" "$src/$a"; done
       echo "$src" ;;
     bridge)
-      # The captain's chair made by image-to-3D (Tripo, bridge-redesign.md
-      # 8c), already fitted to the stand-in: 2.8 MB, so kept in the media
-      # store (MEDIA/deck-models/captain_chair/, with its LICENSE.txt), not
-      # in git, and copied into the cache. With neither (the public repo, a
-      # box without the NAS) nothing is passed, and bridge.py builds its
-      # scripted chair.
-      src="$cache/generated/captain_chair"
+      # The captain's chair and the conn's and ops' chair made by image-to-3D
+      # (Tripo, bridge-redesign.md 8c and section 9's slice 4), already fitted
+      # to their stand-ins: 2.3-2.8 MB each, so kept in the media store
+      # (MEDIA/deck-models/<prop>/, with its LICENSE.txt), not in git, and
+      # copied into the cache, one folder each under the one the room
+      # imports (kept there for a build while the NAS is away). A prop in
+      # neither (the public repo, a box without the NAS) is not passed, and
+      # bridge.py builds its scripted one; with neither chair, nothing is.
+      src="$cache/generated/bridge"
       root=${LCARS_MEDIA_ROOT:-$(sed -n 's/^\(export \)\{0,1\}LCARS_MEDIA_ROOT=["'\'']\{0,1\}\([^"'\'']*\).*/\2/p' "$HOME/.env" 2>/dev/null | tail -n 1)}
-      if [ -n "$root" ] && [ -f "$root/media/deck-models/captain_chair/captain_chair.glb" ]; then
-        mkdir -p "$src"
-        cp -p "$root/media/deck-models/captain_chair/captain_chair.glb" "$root/media/deck-models/captain_chair/LICENSE.txt" "$src/"
-      fi
-      if [ -f "$src/captain_chair.glb" ]; then echo "$src"; fi ;;
+      for p in captain_chair conn_chair; do
+        if [ -n "$root" ] && [ -f "$root/media/deck-models/$p/$p.glb" ]; then
+          mkdir -p "$src/$p"
+          cp -p "$root/media/deck-models/$p/$p.glb" "$root/media/deck-models/$p/LICENSE.txt" "$src/$p/"
+        fi
+      done
+      if ls "$src"/*/*.glb >/dev/null 2>&1; then echo "$src"; fi ;;
   esac
 }
 # The packs: a room made of a downloaded pack alone, through pack.py, and

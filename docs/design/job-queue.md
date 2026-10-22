@@ -105,7 +105,7 @@ Heavy, always through `engineer.py job`: `lcars-ui/test/run.sh` (full or
 `PERF=0`, and `--changed` when it picks QuickJS, keyboard or perf),
 `perf.py`, `buttons.py`, `qa_chat.py`, `keyboard.py` and its shards,
 `dates.sh`, `architect.py`, `deckvoice.py`, `editor.py`, `classified.py`,
-`deckshots.py`, `shots.py`, `scripts/deck-models/build.sh` (the rooms),
+`deckshots.py`, `deckmem.py`, `shots.py`, `scripts/deck-models/build.sh` (the rooms),
 `make lcars-release`, `make lcars-one`, `make lcars-embed`. (`back.py` was
 on the order's list; at 21 s it is light by its own measure.)
 
@@ -276,7 +276,7 @@ check: watch `engineer.py jobs` and the log.
 **The classifier** (`heavy_command`, not wired): heavy = a part running
 `run.sh` (not `--changed`), `perf.py`, `buttons.py`, `qa_chat.py`,
 `keyboard.py`, `dates.sh`, `architect.py`, `deckvoice.py`, `editor.py`,
-`classified.py`, `deckshots.py`, `shots.py`, `deck-models/build.sh`, or
+`classified.py`, `deckshots.py`, `deckmem.py`, `shots.py`, `deck-models/build.sh`, or
 `make lcars-release|lcars-one|lcars-embed|lcars-static`; never a command
 that runs `engineer.py`. The deny text, `HEAVY_DENY.format(what, eng,
 name)`: "{what} is a heavy command: run it as `{eng} job {name} -- <the
@@ -360,3 +360,323 @@ docs/design/job-queue.md)".
 - Tests: `test_jobs.py` `test_the_hook_is_wired` (the settings, Number One's
   and the seat off without it, heavy_check's deny and passes, the verb on
   stdin, garbage failing open).
+
+## More than one: an adaptive seat and an adaptive job line
+
+Lieutenant Torres, 2026-10-22, at main `fae274c` (0.296.1). The
+captain's order through Number One: let more than one engineer work at
+once, and more than one heavy job run at once, when the box has CPU and
+RAM to spare. **Design only.** Number One reviews it before anything is
+built. Marked **[captain]**: the rules that are his to settle. The
+numbers and margins are also in the HTML report published with this
+commit.
+
+### What was measured
+
+On the VPS (4 vCPU, 7.9 GiB, 975 MB swap), 2026-10-22 11:15-12:15, a
+1 Hz sampler read `/proc/meminfo`, `/proc/stat`, `/proc/loadavg` and
+`/proc/pressure/*`, the cgroup of every `lcars-job-*` and
+`lcars-eng-deploy-*` unit (`memory.current`, `cpu.stat`), and each
+Claude Code, `lcars`, and `llama-server` process (RSS, VmSwap, CPU
+ticks). My own three heavy runs went through the job line, one after the
+other, with marks. The others are the crew's own jobs from the same hour,
+measured where they ran. The box was as it is on a working day: Number
+One awake, one to three engineers waking for their turns, the live
+server, and llama-server.
+
+| what | wall | memory, its peak | cores, mean / peak over 10 s | box: lowest MemAvailable | CPU pressure (PSI some, mean) |
+|---|---:|---:|---|---:|---:|
+| `run.sh`, full (perf included) | 184 s | 1.6 GB | 1.7 / 3.0 | 3.0 GB | 22% |
+| `run.sh`, `PERF=0` | 70 s | 1.6 GB | 1.7 / 3.2 | 3.3 GB | 11% |
+| `buttons.py` (263 checks) | 357 s | 0.54 GB | 0.8 / 1.6 | 4.3 GB | 2% |
+| deckshots (zimmerman's, slice 6) | 973 s | 1.4 GB | **3.2 / 3.7** | 3.2 GB | 14% |
+| deckshots (okafor's, timed out at 20 min) | 1200 s | 1.5 GB | **3.1 / 3.8** | 3.2 GB | 13% |
+| explainer `render.sh` + `deliver.sh` (kim's) | 494 s | **3.1 GB, at MemoryHigh=3G** | **3.1 / 3.7** | **1.8 GB** | **40%**; memory PSI full up to **47%** |
+| a deploy with its web suite | ~1200 s, mostly waiting for the cores | 1.8 GB | | | |
+
+| resident, beside the jobs | memory | CPU |
+|---|---:|---|
+| a Claude Code, awake and working (9 engineers seen) | 300-400 MB RSS (230 MB just started), + its `fff-mcp` 55-95 MB | 16-35% of a core over a turn; p95 0.4-1.1 cores; peaks 1.3 |
+| a Claude Code, idle (Number One, 1 h) | 380 MB | 2.4% (busy 9% of the time) |
+| `lcars`, the live server | 36-42 MB RSS (its cgroup 117 MB with page cache) | 0.5% |
+| llama-server (`lcars-embed`, MemoryMax 800M) | 590 MB, resident all hour | 0.5%, bursts of a core on writes |
+| journald, alloy, tailscaled, herdr, node_exporter | ~430 MB | ~2% |
+| the timers (`crew@social`, `crew-notes`) | 10-40 MB | ~0 |
+| **the box at rest** (no job, 103 s of the hour) | **MemAvailable 4.6 GB** (6.7 GB on 10-14) | 12% busy (median), 30% (p90) |
+
+What this says:
+
+- **The job line was never idle.** A job ran for 57 of the 59 minutes,
+  and 2-4 waited behind it the whole hour. That line limits the crew now,
+  not the seat. More seats alone mostly make the line longer.
+- **Three kinds of job.** *Saturating*: deckshots and the explainer
+  render keep 3.1-3.2 of the 4 cores busy for 8-20 minutes. Nothing fits
+  beside them, and deckshots measures frame times anyway. *Parallel*:
+  run.sh averages 1.7 cores, with peaks of 3 (QuickJS beside the
+  keyboard shards, perf's two Chromiums). *One browser*: buttons.py and
+  its kind (qa_chat, editor, back, deckvoice) use 0.8 of a core, mostly
+  waiting. Two of those, or one beside a `PERF=0` run, fit.
+- **A Claude Code is cheap for the box**: ~450 MB with its fff, about a
+  quarter of a core while it works, ~0 idle. Three awake cost ~1.4 GB and
+  under one core. That is less than one run.sh.
+- **Memory is the real limit, and RAM is leaking into /tmp now.** Swap
+  is **100% used** (973 of 975 MB). MemAvailable at rest is 4.6 GB,
+  against 6.7 GB on 10-14. The gap is `/tmp`, a tmpfs: 2.3 GB in use,
+  **1.66 GB of it 18 `remotion-webpack-bundle-*` dirs** the explainer
+  renders leave behind (96-174 MB each). Nothing reaps them (`reap_test_tmp`
+  does not know the name). tmpfs pages are what went to swap: the herdr
+  cgroup holds 1.4 GB of shmem and 880 MB of swap, with only 670 MB of
+  anon. This must be fixed first (slice 0). Every margin below counts on
+  getting that 1.7 GB back.
+- **The explainer render is the one job that reaches its cgroup's cap.**
+  At MemoryHigh=3G its memory stalls reached 47% of the time
+  (throttled), and the box fell to 1.8 GB available. It runs alone, and
+  its class gets a higher MemoryHigh (below).
+- **Today the OOM killer would not spare the server.** Every process
+  here has `oom_score_adj` 200: the server, llama-server, the Claude
+  Codes and the Chromiums alike (the user manager's default). The kernel
+  would take the largest process first, a Chromium GPU process at 800 MB,
+  and the server's 40 MB keeps it low on the list. But nothing
+  *guarantees* that. `systemd-oomd` is not running.
+
+The 10-14 numbers still hold for two full suites at once: 153 and 163 s
+each, against 132 s alone, with 3.0 GB left and CPU pressure at 43%.
+Perf was noisy in both: scroll-up went over budget (16.7 and 19.2 ms,
+against 12.2 ms alone).
+
+### The rules
+
+1. **Two limits, opened one step at a time.** `N`, the seats: engineers
+   awake at once. Number One is outside them, as now, and a scheduled
+   role takes a seat as now. `M`, the cores: heavy jobs running at once.
+   Each has a ceiling, `LCARS_SEATS_MAX` (proposed 3) and
+   `LCARS_JOBS_MAX` (proposed 2), and a current value from 1 up to it.
+   **[captain]** A limit moves only in `step()` (the seat) and
+   `job_next()` (the jobs), on the moves that call them now: a turn's
+   end, a job's end, a deploy's end, `reap` every 5 minutes. No daemon is
+   added.
+2. **Opening a seat.** Seat `k+1` opens when all of these hold:
+   - MemAvailable ≥ **2.7 GB**: the reserve (1.5 GB, below), plus
+     0.5 GB for the Claude Code and its fff, plus 0.7 GB for the bare light
+     tests it runs (one Chromium, an ASan build);
+   - CPU pressure (PSI `some` avg60) < **20%** (12-22% with one run.sh
+     going), and the 1-minute load < 4;
+   - at least **3 minutes** since the last seat opened, so that the new
+     one's cost shows in the readings before the next step.
+   A seat is the line's head being started, as now. The line's order is
+   kept: the next seat goes to the first in line, never to someone
+   further back.
+3. **Starting a second job.** Job `j+1` starts when all of these hold:
+   - the job line's head is that job. **FIFO, kept**: a job that cannot
+     start yet holds the ones behind it, so a saturating job is never
+     starved by small ones. Held jobs (the submitter's turn not over)
+     still do not block, as now;
+   - the running jobs and this one are all *shared* (below), and their
+     core weights sum to ≤ 4 (nproc);
+   - MemAvailable less this job's class peak ≥ the **1.5 GB reserve**;
+   - CPU pressure avg60 < **25%**;
+   - no deploy is queued or running. A deploy still has the cores first.
+4. **Closing, and what "close" means.** A limit drops by one (never below
+   1) when any of these hold:
+   - MemAvailable < 1.0 GB;
+   - memory PSI `some` avg60 > 5% (0% in every reading here except the
+     explainer at its own cap);
+   - swap-in > 2 MB/s for a minute (`pswpin` in `/proc/vmstat`);
+   - CPU pressure avg60 > 40% (two full suites at once measured 43%).
+   Closing **never cuts a turn and never kills a job**. A seat over the
+   limit is given up at its holder's next turn end (they stand down, as
+   an idle holder does now, and nobody is seated in their place). A job
+   over the limit runs to its end, and the next one waits. A limit opens
+   again only after the opening margins hold for 5 minutes (hysteresis),
+   so the limits do not flap on one reading.
+5. **The jobs that run alone.** A job's class comes from `heavy_command`'s
+   parse, which already knows the heavy list:
+
+   | class | jobs | weight (cores) | peak, its unit's MemoryHigh/Max |
+   |---|---|---:|---|
+   | **exclusive** (measures time, or fills the box) | `perf.py`; `run.sh` without `PERF=0`, and `--changed` when changed.py picks perf; `deckshots.py`, `shots.py`, `deckmem.py`; `video/explainer/render.sh`; `deck-models/build.sh`, `dates.sh` (not measured yet: exclusive until they are); **any command it cannot class** | 4 | as now, 3G / 4G; the explainer 3.5G / 4.5G |
+   | shared, parallel | `run.sh` with `PERF=0`, or `--changed` without perf; `keyboard.py` | 2 | 1.8 GB; 2.5G / 3G |
+   | shared, one browser | `buttons.py`, `qa_chat.py`, `editor.py`, `architect.py`, `deckvoice.py`, `classified.py` | 1 | 0.7 GB; 1G / 1.5G |
+   | shared, a build | `make lcars-release`, `lcars-one`, `lcars-embed` | 1 | 0.3 GB; 1G / 1.5G |
+
+   An exclusive job starts only when nothing else runs. While one is at
+   the head of the line, nothing new starts. A job that runs two things
+   (`run.sh && buttons.py`) takes the stricter class. **[captain]**: perf
+   and deckshots alone is the order's own rule. Running unknown commands
+   alone is the safe default.
+6. **The cores lock becomes shared and exclusive.** `STATE/cores.lock`
+   stays one file. A shared job takes `flock(LOCK_SH)`, an exclusive job
+   or a deploy's suite and `vps-rebuild.sh` takes `LOCK_EX`, and so does a
+   `heavy: true` crew run. *How many* shared jobs run is `job_next()`'s
+   decision, under `seat.lock`. The lock only guarantees that an
+   exclusive holder is alone. The order stays `deploy.lock`, then
+   `cores.lock`, and a deploy that wants `LOCK_EX` waits out the running
+   shared jobs (at most their timeouts, which is today's rule).
+7. **The switch.** In `~/.env`, `LCARS_SEATS_MAX=1` and `LCARS_JOBS_MAX=1`
+   give exactly today's behaviour. **I propose shipping with both at 1**:
+   the code is live, but nothing changes until the captain sets 3 and 2.
+   `LCARS_ADAPT_FIXED=1` pins the limits at their ceilings without the
+   readings, for testing. **[captain]**
+8. **Memory pressure, and keeping the server alive.**
+   - *Get the RAM back first* (slice 0). `reap_test_tmp` learns
+     `remotion-webpack-bundle-*`, and `render.sh` removes its bundle on
+     exit (a trap). That frees ~1.7 GB of RAM and swap now, and it keeps
+     the margins honest.
+   - *The gate is the main defence*. The 1.5 GB reserve is kept beside
+     everything: llama-server waking (~600 MB), a Claude Code growing
+     (~100 MB a turn), git and the server's page cache.
+   - *The victims are ordered.* Every job unit gets
+     `OOMScoreAdjust=900`, and herdr's unit (the Claude Codes) 500.
+     Raising it needs no privilege, so the user manager can set both. The
+     server keeps 200 and becomes the last choice by far: the kernel adds
+     adj × RAM / 1000 to a process's score, so 900 counts as 7 GB. A
+     job's Chromium goes first, then a Claude Code, and llama-server is
+     restarted on demand anyway. Lowering the server *below* 200 needs
+     root (a drop-in on `user@1000.service`), and so does `MemoryLow`
+     protection for `lcars.service`, which only takes effect when the
+     user slice is protected too. Those are the captain's to add if he
+     wants them, and nothing here depends on them.
+   - *No systemd-oomd.* It kills a whole cgroup on pressure, and the
+     herdr cgroup is every Claude Code at once.
+   - *Swap* stays 1 GB. With the /tmp leak gone it holds idle pages only,
+     and swap-in is one of the closing signals (rule 4).
+
+### Two engineers at once: what must not collide
+
+- **Worktrees**: each has their own (`~/lcars-eng/<name>`), their own
+  branch, their own `STATE/<name>.*`, and their own herdr pane. Scratch
+  servers and Chromiums pick free ports, and test scratch is per run
+  (`killclean.mkdtemp`). Nothing here is shared.
+- **The job line**: as above. Submissions are already one per engineer
+  (`job_find`), the line is one list under `seat.lock`, and a completion
+  goes to the head of the *seat's* line as now. With N seats it is
+  usually seated at once.
+- **The tree guard** (rule 9) holds per job. A deploy's rebase only moves
+  its own branch.
+- **The deploy lock**: deploys stay one at a time (`deploy.lock`,
+  deploy.json's queue). With two engineers finishing at once, the second
+  rebases onto the first's merge, so **CHANGELOG/APP_VERSION conflicts
+  become more frequent** (11 of 29 failed deploys on 10-14 were those).
+  The deploy reports the conflict, and the engineer rebases and bumps
+  again, as the brief already says. I do not propose an automatic version
+  merge here (that is a separate TODO).
+- **The bare light tests** of several awake engineers run beside a job
+  and outside the line: `make lcars`, a functional test under 30 s,
+  `scripts/test_*.py`. That costs a few seconds of CPU each. The opening
+  margin's 0.7 GB per seat is for them.
+- **Number One gets several reports at once.** Each forwarded last
+  message is its own `crew_inbox` note, and the flusher types them
+  together under their `[thread …]` lines (test_no1_threads covers
+  several at once). The forward already names the sender. `brief_no1`
+  gains one line: reports may come in twos or threes, and each is
+  answered on its own.
+- **The stuck rule** (SLICE, 30 min) fires only when someone waits and
+  every open seat is taken. Otherwise the waiter just gets the next seat
+  to open.
+- **A live server restart** (a deploy rebuilding C) is seen by several
+  sessions at once. Their journal calls get `Down` and retry, as one
+  does now.
+
+### State and views
+
+- **crew_seat's block**: `holder` becomes `holders: [{name, since, by,
+  turn, …}]`, and `normal()` migrates a lone `holder` into it. A new
+  `limits: {seats, seats_max, jobs, jobs_max, at, why, opened}`, where
+  `why` is the last reading in words ("2 of 3 seats: 3.4 GB free, CPU
+  pressure 12%" / "held at 1: memory pressure 7%"). `jobs.running`
+  becomes a list. The entry's text: `Seated: torres-c37 since 14:02,
+  kim-c32 since 14:10 - 2 of 3 open (3.4 GB free, CPU 12%)` and `Jobs
+  running: 2 of 2: …`.
+- **`engineer.py jobs` / `crew list` / `crew poll`**: `seat_brief` gains
+  `holders` and `limits`, and `jobs.running` is a list. `no1.py crew
+  list`'s seat block prints one line per holder and a `limits:` line.
+- **The console's Queue view**: the Seated block lists each holder. A
+  chip in its header reads "seats 2/3 · cores 1/2", or "seats held at 1:
+  memory" when the limit is closed. The Jobs block lists every running
+  job with its elapsed time and its Cancel button. "computer, show the
+  seats" opens the Queue at that block, the palette has a row for it,
+  and the existing "show the jobs" stays.
+
+### Tests
+
+`scripts/test_seat.py` gets the pure decisions: `limits(s, readings,
+now)` opening one step and not a second within 3 minutes; a close
+cutting nobody and the holder over the limit stood down at their turn's
+end; hysteresis; the line's order across two free seats; the stuck rule
+only with every seat taken; `LCARS_SEATS_MAX=1` giving today's sequence
+exactly (the existing cases unchanged). `scripts/test_jobs.py` gets the
+classes from `heavy_command`; two shared jobs together; an exclusive job
+at the head holding a shared one behind it; a deploy holding both; the
+memory reserve; `LCARS_JOBS_MAX=1` as now; and `LOCK_SH`/`LOCK_EX` on a
+scratch `cores.lock` with two direct runners. The readings come in
+through `facts` (no `/proc` in the pure code), so the tests feed them.
+
+### What the captain should know it costs
+
+- **His Claude usage goes faster per hour, for the same work.** An
+  engineer spends tokens only while working. Three awake at once spend
+  them up to three times as fast, so the plan's 5-hour and weekly limits
+  arrive up to three times sooner. The total for a piece of work does not
+  fall. It only finishes sooner. Number One, which reviews every report,
+  spends faster too.
+- **Some extra work, too**: more deploy conflicts (above), each a short
+  extra turn; and jobs running in twos are each ~15-25% slower (153/163
+  s against 132 s, measured on 10-14). That is box time, not tokens.
+- **The gain is limited by the job line.** In the hour measured, the
+  line was busy 57 of 59 minutes, mostly with exclusive jobs (deckshots,
+  the render). Those still run one at a time. More seats help most while
+  engineers read, think and edit. Parallel jobs help when the line is
+  full of `PERF=0` runs and buttons-like checks.
+
+### Slices (after the captain's review)
+
+| slice | what | estimate |
+|---|---|---|
+| 0 | the /tmp leak: `reap_test_tmp` learns the remotion bundles, `render.sh` traps its own; `OOMScoreAdjust=900` on job units, 500 on herdr's (patch, ops) | 10 min |
+| 1 | the seat: `holders`, `limits()` with the readings in `facts`, the switch, the stuck rule over N, `normal()`'s migration; test_seat (patch, ops) | 30 min |
+| 2 | the jobs: classes, `job_next` over a list, shared/exclusive `cores.lock`, the deploy's `LOCK_EX`, per-class MemoryHigh/Max; test_jobs, test_deploy_suite (patch, ops) | 30 min |
+| 3 | the views: `seat_brief`, crew list/poll, the Queue view's Seated block, chip and Jobs list, the voice order and palette row; full run.sh (minor) | 30 min |
+| 4 | the briefs (`brief_seat`: others may be awake; `brief_no1`: reports in twos), CLAUDE.md, engineer-time.md's "second seat" (patch) | 10 min |
+
+## As built: slice 0 (0.296.4)
+
+Number One's order (on the design's review). It deferred herdr's 500.
+
+- **The leak.** `video/explainer/render.sh` makes `lcars-render-XXXXXXXX`
+  under `$TMPDIR` and exports it as `TMPDIR` for the render (Node's
+  `os.tmpdir()`, so Remotion's bundle and its Chromium's scratch land in
+  it). Traps remove it on exit; TERM, INT and HUP `exit` so that dash runs
+  the EXIT trap, which a job's cancel or timeout (SIGTERM to the group)
+  needs. `engineer.py`: `REMOTION_TMP_RE` (`remotion-webpack-bundle-`,
+  `remotion-v<ver>-assets`, `lcars-render-`), `REMOTION_KEEP_H` (2,
+  `$LCARS_REMOTION_KEEP_H`), `remotion_running()`. `reap_test_tmp` judges
+  those dirs by the Remotion keep instead of the tests' 24 h, and skips
+  them all while a Remotion process of ours runs. The /proc scan happens
+  once per sweep, and only if there is such a dir. Why both guards: a
+  bundle is written at its render's start and only read after, so its age
+  is the render's, and a job runs at most 60 minutes. The process check
+  covers a render outside the job line (the studio, a hand-run
+  stills.mjs). The scan reads argv words, not a shell's `-c` script, so
+  a tool call that only *mentions* remotion does not hold the sweep. Its
+  first version did, and caught my own shell.
+- **Cleared on 2026-10-22, 12:40**, with no render running (a deckshots
+  job was): 18 dirs, 1650 MB. MemAvailable 3285 → 4307 MB; swap in use
+  972 → 376 MB; shmem 1461 → 407 MB; /tmp 2323 → 672 MB.
+- **OOM.** `JOB_UNIT_PROPS` = MemoryHigh=3G, MemoryMax=4G,
+  OOMScoreAdjust=900, passed to `systemd-run`. Checked live on a scratch
+  transient unit: `oom_score_adj` 900, `oom_score` 1266, against the
+  server's 802 (the kernel's scale, which the adjustment shifts). The
+  deploy's own unit (its web suite) is left at 200. It runs alone on the
+  cores and is short.
+- **Herdr at 500 without a restart: the proposal, not built.**
+  `oom_score_adj` is per process and inherited by children, and a process
+  may raise its own, or another of its uid's, without privilege. So
+  `engineer.py`'s `cmd_start` can write 500 to
+  `/proc/<claude pid>/oom_score_adj` once the pane's Claude Code is up
+  (the pid `agent_info` already reads), and reap can do the same for the
+  sessions already running. Number One's too, by the same path. Neither
+  herdr nor a session is restarted. The cost is a few lines and one more
+  test. The order is then a job's process (900), a Claude Code (500), and
+  llama-server and the server last (200). Worth it only if the box ever
+  runs short with the gate in place; the gate (slices 1-2) is the real
+  defence.

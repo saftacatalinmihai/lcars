@@ -1,0 +1,45 @@
+{
+ "hits": [
+  {
+   "created_at": "2026-10-18T11:00:00Z",
+   "created_at_i": 1792321200,
+   "objectID": "9002",
+   "author": "alice",
+   "comment_text": "<p>Nice write-up, how do you sync it?</p><p>Also see <a href=\"https://example.org/x\" rel=\"nofollow\">https://example.org/x</a> &amp; that&#x27;s it.",
+   "parent_id": 9001,
+   "story_id": 9001,
+   "story_title": "Software for One"
+  },
+  {
+   "created_at": "2026-10-19T09:00:00Z",
+   "created_at_i": 1792400400,
+   "objectID": "9003",
+   "author": "bob",
+   "comment_text": "Why SQLite and not Postgres?",
+   "parent_id": 9001,
+   "story_id": 9001,
+   "story_title": "Software for One"
+  },
+  {
+   "created_at": "2026-10-20T08:00:00Z",
+   "created_at_i": 1792483200,
+   "objectID": "9010",
+   "author": "captain_hn",
+   "comment_text": "Thanks, good point.",
+   "parent_id": 9003,
+   "story_id": 9001,
+   "story_title": "Software for One"
+  },
+  {
+   "created_at": "2026-10-20T15:00:00Z",
+   "created_at_i": 1792508400,
+   "objectID": "9004",
+   "author": "carol",
+   "comment_text": "Same question as alice.",
+   "parent_id": 9002,
+   "story_id": 9001,
+   "story_title": "Software for One"
+  }
+ ],
+ "nbHits": 4
+}

@@ -85,7 +85,7 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
   `PERF=0`; `--changed` too when it picks the behaviour, keyboard or perf
   stages), `perf.py`, `buttons.py`, `qa_chat.py`, `keyboard.py`,
   `dates.sh`, `architect.py`, `deckvoice.py`, `editor.py`, `classified.py`,
-  `deckshots.py`, `shots.py`, `scripts/deck-models/build.sh`, and `make
+  `deckshots.py`, `deckmem.py`, `shots.py`, `scripts/deck-models/build.sh`, and `make
   lcars-release|lcars-one|lcars-embed|lcars-static`. Light, run bare: `make
   check`, `make lcars`, `make lcars-cli`, a `--changed` run of no slow
   stage, one functional test under ~30s, every `scripts/test_*.py`. A
@@ -110,6 +110,12 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     the console in demo mode, edits, reloads, resets and loads the deck,
     with every request off the folder refused and counted. After touching
     `demo/static.js`, `static.py`, `fixture.py`, or the pages' `DEMO` paths.
+  - `site/landing/` (the hosted waitlist's page and Worker, its README):
+    `node --test site/landing/test/` (~1s, the signup route's contract)
+    and `python3 site/landing/test/page.py` (~15s, the page in Chromium
+    at 393x852 and 1280x800 against `preview.mjs`), `test/deploy.py`
+    (~2s, `deploy.sh --dry-run`'s staged copy: the share card's absolute
+    URLs). Deploying it, D1 and DNS are the captain's.
   - `test/reports.py` (~40s): hosted reports - `scripts/report.py`
     publish/list on a scratch media root, `GET /reports`, and the headers
     `/media/reports/` is served with (the CSP sandbox, nosniff, from the
@@ -159,12 +165,30 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     check, the lines in the message, the Read rule) with claude and
     engineer.py stood in for; and the server's sockets all close-on-exec
     (`/proc/<pid>/fdinfo`), the stand-ins started holding none.
+  - `test/deckmem.py` (~10 min, no server; a heavy job): the deck's
+    memory on a walk at an iPhone's 393x852 at 3x (graphics low by
+    default, `--gfx high`) - deck 8's wings, the lift to decks 12 and 3,
+    back to the concourse, three times; WebGL's textures, buffers and
+    renderbuffers counted at the context, the heap, the live three.js
+    objects (CDP). `--check` fails if a room taken down is still
+    referenced (live objects over the boot's), anything grows from loop
+    to loop, or a lost context does not come back. After touching what
+    builds or takes down a room or deck (`buildRoom`, `dropCell`,
+    `unloadDeck`), or anything that keeps a record of a placement.
   - `test/turn.py` (~20s, no server): the course map's turning
     (`crsTurnable`) in headless Chromium against perf.py's fake API - a
     faked compass turns it, every marker upright on its spot, the needle,
     a fit on a turned map, a drag, a pinch that does not turn, a two-finger
     turn about the fingers' middle, a long press's stop, shift and the
     wheel, an upright popup, a stop dragged. After touching "plot a course".
+  - `test/quick.py` (~30s): `POST /quick` (`HandleQuick` in
+    `lcars_chat.h`, voice-quick-answer.md 4), claude stood in for - the
+    argv (haiku, `--tools ""`, `--system-prompt`, no `--resume`), stdin's
+    `<context>` and `<question>` (a tag in either defused), the PASS
+    mapping, the caps' 400s, one at a time (429), the 8 s timeout (504,
+    the child killed), a closed connection killing it, a failed run's
+    502, the limited logins' 403, and a log line with no word of the
+    question.
   - `test/caldav.py` (~40s): `lcars_caldav.h`, with raw WebDAV.
   - `test/api.py` (~30s): the timestamps `POST /entries` and
     `PUT`/`PATCH /entries/<id>` take (`NormalizeStoredTimestamp` in
@@ -295,6 +319,15 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     and Cloudflare adapters on saved responses (`scripts/testdata/shares/`),
     the captain's numbers line, the readings and their sums, and a run
     against a stand-in server (what is posted, a run with no shares).
+  - `python3 scripts/test_social.py` (~6s): the social watch
+    (`scripts/social.py`, `crew/social.md`, docs/design/social-watch.md) -
+    the HN, GitHub and Cloudflare adapters on recordings
+    (`scripts/testdata/social/`: deleted, dead and bots skipped, the
+    captain's replies, the day's stars and traffic), the read-only guard, and runs
+    against a stand-in journal: a comment written once, the notice naming
+    only the new, a later reply PATCHed with `if_modified`, the daily
+    readings, no token in any output, a platform failing alone and three
+    failures raising one task.
   - `python3 scripts/test_linker.py` (~1s): `lcars_linker.py measure`, the
     hourly pass - start/end pairing (a mis-tapped start, an orphan end, out
     of range, creation order), the stopwatch's one-row spans counted once,
@@ -340,6 +373,12 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     the poll's `th` and `thread=` filter, and the Stop hook switching
     nothing. `test_no1.py` has `no1.py thread`. Every test that imports
     engineer.py imports `scripts/testguard.py` first: no live journal.
+  - `python3 scripts/test_teststate.py` (~1s): no test reaches the box's
+    real engineer state (`scripts/teststate.py`, which testguard.py
+    imports): every path engineer.py made when it loaded is a scratch
+    one, 0.294.3's leak replayed leaves the real deploy.json alone, a real
+    `LCARS_ENG_STATE` is replaced and a test's own kept, and every
+    `scripts/test_*.py` that loads engineer.py guards the import first.
   - `python3 scripts/test_engineer_model.py` (~40s; `LCARS_TEST_BIN`
     skips the build, `SKIP_ROUTE=1` the server): the model per engineer -
     `engineer.py model`/`model-apply` and `POST /engineer/<name>/model`;

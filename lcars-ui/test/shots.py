@@ -7,20 +7,35 @@ anyway — and captures the screens that matter into test/shots/.
 
 Usage:  python3 test/shots.py            # writes test/shots/*.png
         python3 test/shots.py /tmp/out   # writes elsewhere
+        python3 test/shots.py /tmp/out --only phone-list.png,phone-tasks.png
+
+A shot whose steps fail (a button moved) is reported as FAILED and the run
+goes on to the next, so one stale step costs one picture, not the rest;
+the run then exits 1, naming them.
 
 This is an eyeball harness, not an assertion suite: run it after a visual
 change and look at the pictures. It found the clipped stats headers and the
 flex-collapsed placeholder spaces that motivated it.
 """
 import datetime
+import json
+import math
 import pathlib
 import re
 import sys
+import urllib.parse
 
 from playwright.sync_api import sync_playwright
 
 HERE = pathlib.Path(__file__).resolve().parent
-OUT = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "shots"
+_args = sys.argv[1:]
+ONLY = set()
+if "--only" in _args:
+    i = _args.index("--only")
+    ONLY = set(_args[i + 1].split(","))
+    del _args[i:i + 2]
+OUT = pathlib.Path(_args[0]) if _args else HERE / "shots"
+FAILED = []
 PAGE = (HERE.parent / "index.html").as_uri()
 BASE = "https://lcars.test"   # the server the file:// page is pointed at (its lcars.cfg)
 
@@ -130,6 +145,94 @@ for n, (age, t, c) in enumerate(OLD):
     })
 
 
+# Rows one shot adds to the journal (shoot's `extra`), newest first, on top of
+# `rows`: a view that needs a Secret entry or a crew note's thread gets them
+# without moving any other shot's list by a line.
+EXTRA = []
+
+# GET /reports, for the Reports page (made-up titles, the store's shape)
+REPORTS = [
+    {"path": "reports/2026/10/main-bridge-before-and-after-1a2b3c4d.html", "title": "Main bridge: before and after",
+     "type": "html", "bytes": 48213, "published_utc": (now - datetime.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")},
+    {"path": "reports/2026/10/sleep-the-last-ninety-days-5e6f7a8b.png", "title": "Sleep, the last ninety days",
+     "type": "png", "bytes": 182044, "published_utc": (now - datetime.timedelta(hours=20)).strftime("%Y-%m-%dT%H:%M:%SZ")},
+    {"path": "reports/2026/10/deck-frame-budget-week-42-9c0d1e2f.html", "title": "Deck frame budget, week 42",
+     "type": "html", "bytes": 73410, "published_utc": (now - datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")},
+    {"path": "reports/2026/10/german-course-words-learned-3a4b5c6d.csv", "title": "German course: words learned",
+     "type": "csv", "bytes": 9120, "published_utc": (now - datetime.timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")},
+    {"path": "reports/2026/10/ten-forward-models-measured-7e8f9a0b.html", "title": "Ten Forward models, measured",
+     "type": "html", "bytes": 61877, "published_utc": (now - datetime.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")},
+    {"path": "reports/2026/10/the-arena-sizes-a-year-on-1c2d3e4f.pdf", "title": "The arena's sizes, a year on",
+     "type": "pdf", "bytes": 240117, "published_utc": (now - datetime.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ")},
+]
+
+
+def xrow(rid, kind, title, content, ago_h=0.5, **more):
+    day = now - datetime.timedelta(hours=ago_h)
+    r = {"id": rid, "kind": kind, "title": title, "content": content, "content_length": len(content.encode()),
+         "value_int": 0, "value_float": 0.0, "done_bool": 0, "deleted": 0,
+         "created_at_utc": day.strftime("%Y-%m-%d %H:%M:%S"), "last_modified_at_utc": day.strftime("%Y-%m-%d %H:%M:%S")}
+    r.update(more)
+    return r
+
+
+# A Secret entry (docs/design/confidential-entries.md): on the server only
+# its envelope, the title and text empty. The envelope is a made-up one of
+# the right shape; the page never opens it here (the unlocked shot puts the
+# plaintext in memory itself, as an unlock would).
+SECRET_ENV = "lcs1.eyJ2IjoxLCJpdiI6IjNxN0Z3aU1rIn0.U2VjcmV0IGJ5IGRlc2lnbjogdGhlIHNlcnZlciBrZWVwcyBvbmx5IHRoaXM"
+SECRET_PLAIN = {"title": "Doctor, Thursday", "value_int": 0, "value_float": 0,
+                "content": "- Appointment moved to **Thursday, 10:30**.\n- Bring the old results.\n"
+                           "- Ask about the dose, and whether the morning one can move to the evening."}
+SECRET = [xrow(1301, "personal_log", "", "", classification=2, sealed=SECRET_ENV)]
+
+# A crew note (docs/design/crew-notes.md): an "@yeoman" line in an entry and
+# its thread, a crew_note row whose value_int is the entry. The captain's
+# turn names the note by its hash, which the page works out from the line
+# (noteHash): NOTEHASH is put right in the page before the shot.
+NOTE_TEXT = "- Slow morning, coffee on the balcony.\n- @yeoman log my run this morning, 5 km\n- Call the garage about the tyres."
+NOTE_ENTRY = xrow(1302, "personal_log", "Log for today", NOTE_TEXT, ago_h=0.4)
+
+
+def note_thread(status):
+    t0 = (now - datetime.timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M")
+    t1 = (now - datetime.timedelta(minutes=19)).strftime("%Y-%m-%d %H:%M")
+    body = (f"status: {status}\nentry: #1302\nrole: yeoman\n\n"
+            f"### Captain · {t0} · note NOTEHASH\nlog my run this morning, 5 km\n")
+    if status == "answered":
+        body += (f"\n### Yeoman · {t1}\nLogged: a 5 km run this morning, 07:40, as #1304. "
+                 "That makes three runs this week.\n\n"
+                 "```crew-changes\n" + '{"op": "create", "id": 1304, "kind": "gym", "title": "Run, 5 km"}' + "\n```\n")
+    return xrow(1303, "crew_note", "Yeoman · #1302 Log for today", body, ago_h=0.3, value_int=1302,
+                done_bool=1 if status == "answered" else 0)
+
+
+NOTE_SENT = [note_thread("queued"), NOTE_ENTRY]
+NOTE_ANSWERED = [xrow(1304, "gym", "Run, 5 km", "> Yeoman created this, from a crew note\n\n- 5 km, 07:40", ago_h=0.3),
+                 note_thread("answered"), NOTE_ENTRY]
+
+# A trip (ARCHITECTURE.md, "Plot a course"): a coast by car, leaving
+# tomorrow so the weather along it is a forecast. Shot with what the page
+# uses with no Mapy.com key: OpenStreetMap's tiles, BRouter's route,
+# Open-Meteo's weather - fetched for real, so it wants the network. A box
+# may shoot its own trip from shots_trip.local.json beside this file
+# ({"title", "points": [{"name", "lat", "lon", "stay"}, ...]}, a loop's
+# start repeated at its end): the explainer film's course is measured on
+# the captain's, and the public tree has neither (the *.local.* rule).
+_dep = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT09:00")
+_trip = {"title": "The Amalfi coast", "points": [
+    {"name": "Sorrento", "lat": 40.6263, "lon": 14.3757, "stay": 0},
+    {"name": "Positano", "lat": 40.6281, "lon": 14.4850, "stay": 60},
+    {"name": "Amalfi", "lat": 40.6340, "lon": 14.6027, "stay": 45},
+    {"name": "Ravello", "lat": 40.6492, "lon": 14.6117, "stay": 90},
+    {"name": "Sorrento", "lat": 40.6263, "lon": 14.3757, "stay": 0}]}
+if (HERE / "shots_trip.local.json").exists():
+    _trip = json.loads((HERE / "shots_trip.local.json").read_text(encoding="utf-8"))
+TRIP_PLAN = {"v": 1, "depart": _dep, "points": _trip["points"],
+             "legs": [{"mode": "car_fast"}] * (len(_trip["points"]) - 1)}
+TRIP = [xrow(1305, "trip", _trip["title"], json.dumps(TRIP_PLAN), ago_h=0.2)]
+
+
 def meta(r):  # the content=0 sweep: no "content" key at all
     return {k: v for k, v in r.items() if k != "content"}
 
@@ -146,13 +249,20 @@ def handle(route):
         # writes are acknowledged but not applied: a screenshot run has no
         # business mutating even a fixture halfway through a capture
         return route.fulfill(json={"ok": True, "id": 1200})
+    every = EXTRA + rows
     if "/stats" in url:
-        return route.fulfill(json={"count": len(rows),
-                                   "newest_created_at_utc": rows[0]["created_at_utc"]})
+        return route.fulfill(json={"count": len(every),
+                                   "newest_created_at_utc": every[0]["created_at_utc"]})
+    if url.split("?")[0].endswith("/reports"):
+        return route.fulfill(json=REPORTS)
+    if url.split("?")[0].endswith("/vault"):
+        # a vault with a password set (its wrap's contents never read here):
+        # the header's lock shows, and a Secret entry asks to be unlocked
+        return route.fulfill(json={"version": 1, "vault": {"v": 1, "wraps": [{"type": "password"}]}})
     m = re.search(r"/entries/(\d+)", url)
     if m:
         rid = int(m.group(1))
-        hit = next((r for r in rows if r["id"] == rid), None)
+        hit = next((r for r in every if r["id"] == rid), None)
         if not hit:
             return route.fulfill(status=404, json={"error": "no such entry"})
         if CLASH_ID is not None and rid == CLASH_ID:
@@ -163,12 +273,16 @@ def handle(route):
         q = dict(p.split("=", 1) for p in url.split("?", 1)[1].split("&") if "=" in p)
         off, lim = int(q.get("offset", 0)), int(q.get("limit", 1000))
         body = q.get("content") != "0"
-        sel = [r if body else meta(r) for r in rows]
+        sel = [r if body else meta(r) for r in every]
         return route.fulfill(json=sel[off:off + lim])
     return route.fulfill(status=404, json={"error": "not found"})
 
 
-def shoot(p, width, height, name, prep=None, seed="", query=""):
+def shoot(p, width, height, name, prep=None, seed="", query="", extra=()):
+    global EXTRA
+    if ONLY and name not in ONLY:
+        return
+    EXTRA = list(extra)
     browser = p.chromium.launch(headless=True)
     ctx = browser.new_context(viewport={"width": width, "height": height},
                               device_scale_factor=2)
@@ -185,14 +299,19 @@ def shoot(p, width, height, name, prep=None, seed="", query=""):
     # `query` is how a share sheet hands the app a link or a paragraph: a GET
     # share target is nothing but a query string on the app's own url, so the
     # picture is taken by arriving the way the OS would
-    page.goto(PAGE + query)
-    page.wait_for_timeout(1200)          # let both sweeps land
-    if prep:
-        prep(page)
-        page.wait_for_timeout(700)
-    page.screenshot(path=str(OUT / name))
-    print(name, "ok")
-    browser.close()
+    try:
+        page.goto(PAGE + query)
+        page.wait_for_timeout(1200)          # let both sweeps land
+        if prep:
+            prep(page)
+            page.wait_for_timeout(700)
+        page.screenshot(path=str(OUT / name))
+        print(name, "ok")
+    except Exception as e:
+        FAILED.append(name)
+        print(name, "FAILED:", str(e).splitlines()[0])
+    finally:
+        browser.close()
 
 
 def open_entry(page):                    # a markdown-heavy row (i=0 -> id 1200)
@@ -563,6 +682,71 @@ def open_conflict(page):
     page.keyboard.press("Control+s")
 
 
+def open_reports(page):
+    page.evaluate("() => openReports()")
+
+
+def open_secret(page):
+    page.click('.item[data-id="1301"]')
+
+
+def open_secret_unlocked(page):
+    # an unlock (clsUnlock) leaves the master key and each envelope's
+    # plaintext in memory; this puts them there itself, since the made-up
+    # envelope opens with no key: the reader then shows what an unlocked
+    # page shows, the header's lock reading Unlocked
+    page.evaluate("""p => { cls.key = {}; cls.plain.set(p.env, p.plain);
+      clsApply(st.byId.get(1301)); clsPaint(); fillList(); }""", {"env": SECRET_ENV, "plain": SECRET_PLAIN})
+    page.wait_for_timeout(200)
+    open_secret(page)
+
+
+def note_prep(page, open_card):
+    # the thread's captain turn names the note by its hash, as the watcher
+    # writes it: the page's own noteHash of the line, put in its row
+    page.evaluate("""open => { const e = st.byId.get(1302), t = st.byId.get(1303);
+      t.content = t.content.replace("NOTEHASH", noteScan(e.content)[0].hash);
+      if (open) ntState.open.add(noteKey(1302, "yeoman")); }""", open_card)
+    page.click('.item[data-id="1302"]')
+
+
+def open_note_sent(page):
+    note_prep(page, False)
+
+
+def open_note(page):
+    note_prep(page, True)
+
+
+def brouter_stub(route):
+    """BRouter's answer for one leg (crsBrouter), made up: brouter.de is a
+    volunteer's server and answers an HTML error page when busy, which the
+    leg shows as a JSON parse error - not a picture for the explainer. A
+    line from stop to stop with a gentle sideways wave (a coast road, more
+    or less), its length by the great circle and its time at 45 km/h."""
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(route.request.url).query)
+    (lon0, lat0), (lon1, lat1) = [map(float, p.split(",")) for p in q["lonlats"][0].split("|")]
+    n, co = 48, []
+    for i in range(n + 1):
+        u = i / n
+        w = 0.012 * math.sin(u * math.pi * 3) * math.sin(u * math.pi)
+        co.append([lon0 + (lon1 - lon0) * u - (lat1 - lat0) * w, lat0 + (lat1 - lat0) * u + (lon1 - lon0) * w, 0])
+    m = sum(6371000 * math.hypot(math.radians(b[0] - a[0]) * math.cos(math.radians(a[1])), math.radians(b[1] - a[1]))
+            for a, b in zip(co, co[1:]))
+    body = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "LineString", "coordinates": co},
+                                                       "properties": {"track-length": str(round(m)), "total-time": str(round(m / 12.5))}}]}
+    route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+
+def open_course(page):
+    # the trip opened on its map; the route stood in for (brouter_stub), the
+    # weather (Open-Meteo) along it fetched for real, then the map fits it
+    page.route("https://brouter.de/**", brouter_stub)
+    page.evaluate("() => crsOpen(st.byId.get(1305))")
+    page.wait_for_function("crs.map && crs.map._loaded", timeout=30000)
+    page.wait_for_timeout(9000)
+
+
 def main():
     global CLASH_ID
     OUT.mkdir(parents=True, exist_ok=True)
@@ -611,6 +795,12 @@ def main():
         shoot(p, 1440, 900, "desktop-fuzzy-kinds.png", open_fuzzy_kinds)
         shoot(p, 1440, 900, "desktop-ambient.png", open_ambient)
         shoot(p, 1440, 900, "desktop-config.png", open_config)
+        shoot(p, 1440, 900, "desktop-reports.png", open_reports)
+        shoot(p, 1440, 900, "desktop-secret-locked.png", open_secret, extra=SECRET)
+        shoot(p, 1440, 900, "desktop-secret-unlocked.png", open_secret_unlocked, extra=SECRET)
+        shoot(p, 1440, 900, "desktop-note-sent.png", open_note_sent, extra=NOTE_SENT)
+        shoot(p, 1440, 900, "desktop-note.png", open_note, extra=NOTE_ANSWERED)
+        shoot(p, 1440, 900, "desktop-course.png", open_course, extra=TRIP)
         shoot(p, 1440, 900, "desktop-confirm-delete.png", open_delete_confirm)
         CLASH_ID = 1200
         shoot(p, 1440, 900, "desktop-confirm-conflict.png", open_conflict)
@@ -629,10 +819,13 @@ def main():
         shoot(p, 390, 844, "phone-fuzzy.png", open_fuzzy)
         shoot(p, 390, 844, "phone-stack.png", open_stack)
         shoot(p, 390, 844, "phone-month.png", open_month_phone)
+        shoot(p, 390, 844, "phone-course.png", open_course, extra=TRIP)
         shoot(p, 390, 844, "phone-cal-week.png", open_week)
         shoot(p, 390, 844, "phone-cal-year.png", open_year)
         shoot(p, 390, 844, "phone-ambient.png", open_ambient)
         shoot(p, 390, 844, "phone-views.png", open_drawer_phone, seed=VIEWS)
+    if FAILED:
+        sys.exit(f"shots: {len(FAILED)} failed: {', '.join(FAILED)}")
 
 
 if __name__ == "__main__":

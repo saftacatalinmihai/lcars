@@ -1,0 +1,46 @@
+{
+ "data": {
+  "viewer": {
+   "accounts": [
+    {
+     "rumPageloadEventsAdaptiveGroups": [
+      {
+       "count": 50,
+       "sum": {
+        "visits": 40
+       },
+       "dimensions": {
+        "requestHost": "blog.example",
+        "requestPath": "/posts/one/",
+        "refererHost": "news.ycombinator.com"
+       }
+      },
+      {
+       "count": 30,
+       "sum": {
+        "visits": 25
+       },
+       "dimensions": {
+        "requestHost": "blog.example",
+        "requestPath": "/posts/one/",
+        "refererHost": ""
+       }
+      },
+      {
+       "count": 10,
+       "sum": {
+        "visits": 5
+       },
+       "dimensions": {
+        "requestHost": "blog.example",
+        "requestPath": "/",
+        "refererHost": "kagi.com"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "errors": null
+}

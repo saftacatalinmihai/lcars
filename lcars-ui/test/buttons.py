@@ -364,6 +364,75 @@ def shares_view(page, size, mobile, srv, errs):
           + ("" if len(errs) == before else ": " + "; ".join(errs[before:before + 3])))
 
 
+def share_view(page, size, mobile, srv, errs):
+    """The Share sheet (./share/<id>, social-publish.md 3.2): opened from an
+    entry as a person opens it - Share… in the editor's row on a desktop, its
+    tile in the ⋯ sheet on a phone; its url, Close, Escape and Back; every
+    button in it pressed (the chips, Schedule…, Save link, Mastodon's Save;
+    each Open is a link to a network and is not); the phone's fit."""
+    def open_it():
+        force_close(page)
+        page.evaluate("() => { if (document.body.classList.contains('dirty')) setClean(); "
+                      "select(st.all.find(e => e.kind === 'work_log').id); }")
+        page.wait_for_timeout(300)
+        if mobile:
+            if not tap(page, "#bEdMore", f"{size} the editor's ⋯ (for Share)"):
+                return False
+            page.wait_for_selector("#dlg .shtile")
+            i = page.evaluate("[...document.querySelectorAll('#dlg .shtile')].findIndex(t => /Share/.test(t.textContent))")
+            if i < 0:
+                check(False, f"{size}: the editor's ⋯ sheet has a Share tile")
+                return False
+            tap(page, f'#dlg .shtile[data-i="{i}"]', f"{size} ⋯ › Share")
+        else:
+            tap(page, "#bShare", f"{size} Share…")
+        return until(page, "/\\/share\\/\\d+$/.test(location.pathname) && !!document.querySelector('#soc_cards')")
+    page.evaluate("localStorage.removeItem('lcars.soc.mastodon'); localStorage.removeItem('lcars.soc.nets'); shx = null")
+    ok = open_it()
+    check(ok, f"{size}: the Share sheet opens from the entry, at ./share/<id>  ({rel(page, srv.base)})")
+    n = page.evaluate("document.querySelectorAll('#soc_cards .soccard').length")
+    check(n == 7, f"{size}: a card per network  ({n})")
+    if mobile:
+        fits(page, size, "on the Share sheet")
+        SHOTS.mkdir(exist_ok=True)
+        page.screenshot(path=str(SHOTS / "share-phone.png"), full_page=False)
+    tap(page, "#soc_close", f"{size} Share Close")
+    check(until(page, OV_OFF) and until(page, "!/\\/share\\//.test(location.pathname)", 2000),
+          f"{size}: the Share sheet's Close closes it  ({rel(page, srv.base)})")
+    open_it()
+    page.keyboard.press("Escape")
+    if not until(page, OV_OFF, 1500):        # the link field had the focus: Escape left it first
+        page.keyboard.press("Escape")
+    check(until(page, OV_OFF, 1500), f"{size}: Escape closes the Share sheet")
+    open_it()
+    page.go_back()
+    check(until(page, "!/\\/share\\//.test(location.pathname)", 2000), f"{size}: Back leaves the Share sheet  ({rel(page, srv.base)})")
+    force_close(page)
+    open_it()
+    todo = buttons_in(page, "#dlg")
+    force_close(page)
+    before = len(errs)
+    for b in todo:
+        if not open_it():
+            break
+        press_nth(page, "#dlg", b["i"])
+        last[0] = f"share › {b['id'] or b['t']}"
+        force_close(page)
+    check(len(todo) >= 10 and len(errs) == before, f"{size}: {len(todo)} buttons in the Share sheet pressed, no error"
+          + ("" if len(errs) == before else ": " + "; ".join(errs[before:before + 3])))
+    # Schedule… shows the reminder row, and its Set reminder makes one (the
+    # chips reset: the pass above pressed X's off, and that is kept per device)
+    page.evaluate("localStorage.removeItem('lcars.soc.nets'); shx = null")
+    open_it()
+    page.evaluate("document.querySelector('#soc_cards [data-sched=\"x\"]').click()")
+    check(until(page, "!!document.querySelector('#soc_cards [data-remind=\"x\"]')"), f"{size}: Schedule… shows its reminder row")
+    if tap(page, '#soc_cards [data-remind="x"]', f"{size} Set reminder"):
+        check(until(page, "/reminder #\\d+/.test(document.querySelector('#socst_x').textContent)", 5000),
+              f"{size}: Set reminder makes one  ({page.evaluate('document.querySelector(\"#socst_x\").textContent')})")
+    force_close(page)
+    page.evaluate("() => { if (document.body.classList.contains('dirty')) setClean(); if (st.sel || st.isNew) closeEditor(); }")
+
+
 def run(p, srv, mobile):
     size = "phone" if mobile else "desktop"
     print(f"-- {size} --", flush=True)
@@ -478,6 +547,7 @@ def run(p, srv, mobile):
 
     day_pin(page, size)
     shares_view(page, size, mobile, srv, errs)
+    share_view(page, size, mobile, srv, errs)
 
     # ---- the main page and the reader
     page.goto(base, wait_until="domcontentloaded")

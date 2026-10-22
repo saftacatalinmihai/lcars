@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LCARS · a Star Trek console for your journal</title>
+<meta name="description" content="A Star Trek console for your journal: one file, a small server, a console and a 3D deck. Free and open source to run yourself; hosted is coming.">
+<meta name="theme-color" content="#000000">
+<meta property="og:title" content="LCARS · a Star Trek console for your journal">
+<meta property="og:description" content="Free and open source to run yourself. Hosted is coming: leave your email.">
+<!-- The share card. Scrapers want absolute URLs, and the host must stay out
+     of the tree (the export audit): the placeholder is replaced by https://<host>
+     in the copy deploy.sh uploads, and by the preview's own origin. -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="__SITE__/">
+<meta property="og:image" content="__SITE__/og-card.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="LCARS: a Star Trek console for your journal. Join the waitlist.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="LCARS · a Star Trek console for your journal">
+<meta name="twitter:description" content="Free and open source to run yourself. Hosted is coming: leave your email.">
+<meta name="twitter:image" content="__SITE__/og-card.jpg">
+<link rel="canonical" href="__SITE__/">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/fonts/antonio-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/landing.css">
+<script src="/landing.js" defer></script>
+</head>
+<body>
+
+<header class="bar">
+  <span class="elbow"></span>
+  <span class="badge">LCARS</span>
+  <span class="pill p1"></span><span class="pill p2"></span>
+  <a class="pill link" href="#join">Waitlist</a>
+</header>
+
+<main>
+<section class="hero" id="join">
+  <h1>A Star Trek console for your journal.</h1>
+  <p class="lede">One file, a small server, a console for your phone and a 3D deck to walk.
+    Free to run yourself today. <b>Hosted LCARS is coming</b> - leave your email and we write once, when it opens.</p>
+
+  <form class="signup" action="/api/signup" method="post" novalidate>
+    <label class="f">
+      <span>Email</span>
+      <input type="email" name="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@example.com" required maxlength="254">
+    </label>
+    <label class="f">
+      <span>What would you use it for? <i>optional</i></span>
+      <input type="text" name="use" maxlength="280" autocomplete="off" placeholder="a work log, a diary, habits…">
+    </label>
+    <label class="hp" aria-hidden="true">Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+    <label class="consent">
+      <input type="checkbox" name="consent" required>
+      <span>Write to me when hosted LCARS opens. Nothing else, and I can ask to be deleted.</span>
+    </label>
+    <button type="submit" class="go"><span class="go-t">Join the waitlist</span></button>
+    <p class="status" role="status" aria-live="polite"></p>
+  </form>
+
+  <a class="demo-link" href="https://public.mihai-safta.dev/lcars-demo/index.html">Try the demo <span>in your browser, nothing installed →</span></a>
+</section>
+
+<section class="video">
+  <h2><span class="tag">01</span> How it works</h2>
+  <!-- The explainer: the licensed cut is not in the tree (its music is
+       licensed to the captain, not MIT) and not a Worker asset (they answer
+       no byte ranges, which Safari needs to play an mp4): it is served from
+       the captain's public R2 bucket, and deploy.sh puts its URL where
+       __EXPLAINER__ is, from $LCARS_LANDING_EXPLAINER_URL. Nothing of it
+       loads until play is tapped (landing.js); without the script the
+       caption links the file. -->
+  <figure class="player" data-video="__EXPLAINER__" data-captions="">
+    <img src="/shots/explainer.webp" alt="LCARS, a Star Trek computer for one person: the bridge" width="1280" height="720" loading="lazy">
+    <figcaption><a class="play" href="__EXPLAINER__" aria-label="Play the explainer, with sound"><span class="play-i">▶</span></a>Watch the explainer · 2:24 · sound on</figcaption>
+  </figure>
+</section>
+
+<section class="features">
+  <h2><span class="tag">02</span> What it is</h2>
+
+  <article class="row">
+    <div class="shots phone"><img src="/shots/phone-list.webp" alt="The console's journal list on a phone" width="600" height="1261" loading="lazy"><img src="/shots/phone-entry.webp" alt="An entry open to read" width="600" height="1261" loading="lazy"></div>
+    <div class="txt">
+      <h3>A journal that is yours</h3>
+      <p>Every entry in one SQLite file on your own box. Write from the phone, the desktop, the terminal or a Shortcut; search by word or by meaning; it works offline and syncs when you are back.</p>
+    </div>
+  </article>
+
+  <article class="row">
+    <div class="shots wide" data-loop="/video/loop-bridge.mp4"><img src="/shots/loop-bridge.webp" alt="The 3D deck's main bridge, the camera moving through it" width="1280" height="720" loading="lazy"></div>
+    <div class="txt">
+      <h3>A deck to walk</h3>
+      <p>Your journal as a starship: walk the bridge, sit in a chair, pin entries to the viewer. In the browser, on a phone or a laptop.</p>
+    </div>
+  </article>
+
+  <article class="row">
+    <div class="shots phone"><img src="/shots/phone-tasks.webp" alt="Tasks, by state" width="600" height="1261" loading="lazy"><img src="/shots/phone-month.webp" alt="The month calendar" width="600" height="1261" loading="lazy"></div>
+    <div class="txt">
+      <h3>Tasks and a calendar</h3>
+      <p>Tasks live in your entries, with a board and a month view. Reminders reach your phone over CalDAV.</p>
+    </div>
+  </article>
+
+  <article class="row">
+    <div class="shots wide"><img src="/shots/desk-stats.webp" alt="Journal statistics and findings" width="1280" height="800" loading="lazy"></div>
+    <div class="txt">
+      <h3>What the numbers say</h3>
+      <p>Streaks, the busiest hours, what is growing, the link graph between your pages. Measured from what you wrote, nothing sent away.</p>
+    </div>
+  </article>
+
+  <article class="row">
+    <div class="shots wide" data-loop="/video/loop-crew.mp4"><img src="/shots/loop-crew.webp" alt="The crew: an engineer at the deck's console, beside the branches they work on" width="1280" height="720" loading="lazy"></div>
+    <div class="txt">
+      <h3>Linked pages, a computer, a crew</h3>
+      <p>Pages link to each other, and the graph shows how. Ask the ship's computer about your journal, by voice or text. A crew of AI engineers can change the app itself, to your orders.</p>
+    </div>
+  </article>
+</section>
+
+<section class="plans">
+  <h2><span class="tag">03</span> Two ways to run it</h2>
+  <div class="cards">
+    <div class="card self">
+      <h3>Self-host</h3>
+      <p class="state">Free · open source · MIT</p>
+      <p>One static binary for Linux: the server, the console, the deck and the CLI. Your data stays on your machine.</p>
+      <a class="btn" href="https://github.com/saftacatalinmihai/lcars">The repo on GitHub</a>
+    </div>
+    <div class="card hosted">
+      <h3>Hosted</h3>
+      <p class="state">Coming</p>
+      <p>The same LCARS, run for you: no server to keep, your own journal, yours to export or take home at any time.</p>
+      <a class="btn" href="#join2">Join the waitlist</a>
+    </div>
+  </div>
+</section>
+
+<section class="again" id="join2">
+  <h2><span class="tag">04</span> Hear when hosted opens</h2>
+  <!-- The same form; landing.js wires every .signup on the page. -->
+  <form class="signup" action="/api/signup" method="post" novalidate>
+    <label class="f">
+      <span>Email</span>
+      <input type="email" name="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@example.com" required maxlength="254">
+    </label>
+    <label class="f">
+      <span>What would you use it for? <i>optional</i></span>
+      <input type="text" name="use" maxlength="280" autocomplete="off" placeholder="a work log, a diary, habits…">
+    </label>
+    <label class="hp" aria-hidden="true">Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+    <label class="consent">
+      <input type="checkbox" name="consent" required>
+      <span>Write to me when hosted LCARS opens. Nothing else, and I can ask to be deleted.</span>
+    </label>
+    <button type="submit" class="go"><span class="go-t">Join the waitlist</span></button>
+    <p class="status" role="status" aria-live="polite"></p>
+  </form>
+</section>
+
+<section class="privacy" id="privacy">
+  <h2>Privacy</h2>
+  <p>The list is kept by <a href="https://blog.mihaisafta.com/posts/lcars_journal/">the author of LCARS</a>, who decides what is done with it (the controller, in the GDPR's words). We keep your email, the line on what you would use it for if you wrote one, that you ticked the box, and when. They are used for one thing: to write to you when hosted LCARS opens. No tracking, no cookies, no analytics on this page, and the list is never shared or sold.
+  To stop abuse, the address your request came from is kept as a scrambled hash for an hour, then deleted.
+  To be taken off the list, write to <a class="contact">lcars@ this site's domain</a> and it is deleted.</p>
+</section>
+</main>
+
+<footer>
+  <span class="pill p3"></span>
+  <p>Not affiliated with Paramount or CBS. LCARS and Star Trek are their trademarks; this is a fan-made personal project.</p>
+  <p><a href="https://blog.mihaisafta.com/posts/lcars_journal/">How it was made</a> · <a href="https://github.com/saftacatalinmihai/lcars">Source</a> · <a href="https://public.mihai-safta.dev/lcars-demo/index.html">Demo</a></p>
+</footer>
+
+</body>
+</html>

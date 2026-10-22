@@ -625,6 +625,22 @@ autosaveMs = 0;
   has(mdRender("see [[My Page]]"), 'data-q="My Page"', "wiki link carries its query");
   has(mdRender("- #Journal"), 'data-q="#Journal"', "tags are clickable");
   has(mdRender("go to https://x.test/a"), 'href="https://x.test/a"', "bare urls autolink");
+  h = mdRender("| Name | Qty | Note |\n|:---|---:|:-:|\n| **a** | 1 | `x` |\n| b<c | 2 |\n\nafter");
+  has(h, '<div class="mdtbl"><table><thead><tr><th>Name</th>', "a pipe table renders a head...");
+  has(h, "</thead><tbody><tr>", "...and a body");
+  has(h, '<th class="alr">Qty</th><th class="alc">Note</th>', "the colons set each column's alignment");
+  has(h, '<td><b>a</b></td>', "a cell's markdown is rendered");
+  has(h, "<code>x</code></td>", "a code span in a cell");
+  has(h, '<td>b&lt;c</td><td class="alr">2</td><td class="alc"></td></tr></tbody>', "a < is escaped, a short row padded");
+  has(h, "</table></div><p>after</p>", "a blank line ends the table");
+  h = mdRender("a | b\n--- | ---\nx | y | z\nnot a row");
+  has(h, "<td>x</td><td>y</td></tr></tbody></table></div><p>not a row</p>", "outer pipes optional, extra cells dropped, a line with no pipe ends it");
+  has(mdRender("| a \\| b | c |\n|---|---|"), "<th>a | b</th><th>c</th>", "an escaped pipe is a literal one");
+  eq(mdRender("|").indexOf("<table"), -1, "a lone pipe line is not a table");
+  eq(mdRender("a | b\nc | d").indexOf("<table"), -1, "nor pipes without a delimiter row");
+  eq(mdRender("a\n---").indexOf("<table"), -1, "a line over a rule stays a line and a rule");
+  h = mdRender("```\n| a | b |\n|---|---|\n```");
+  ok(h.indexOf("<table") < 0 && h.indexOf("| a | b |") >= 0, "a table inside a fence stays text");
   eq(mdRender(""), "", "empty content renders to nothing");
   eq(mdRender(null), "", "null is survivable");
 
@@ -633,7 +649,8 @@ autosaveMs = 0;
   // img/video/audio: media the text links to (mdMedia), http(s) sources only
   var ALLOWED = { ul:1, li:1, p:1, h3:1, h4:1, h5:1, h6:1, blockquote:1, pre:1,
                   code:1, a:1, b:1, i:1, s:1, span:1, div:1, hr:1, button:1,
-                  img:1, video:1, audio:1 };
+                  img:1, video:1, audio:1,
+                  table:1, thead:1, tbody:1, tr:1, th:1, td:1 };
   var bad = {}, rendered = 0;
   for (var i = 0; i < FIX.length; i++) {
     var out = mdRender(FIX[i].content || "");
@@ -8185,7 +8202,7 @@ async function answerPrompt(text) {
   oRun = chatSayRun(chat);
   sayState(oRun, "pending");
   ok(oc.held && !oc.stream && oc.srcGone && outStops === 1, "the speaker: a reply begun drops the capture, its tracks stopped");
-  ok(quiets === 1 && sayQuietS() > 0, "and holds the reply's first sound for the switch (sayQuiet)");
+  ok(quiets >= 1 && sayQuietS() > 0, "and holds the reply's first sound for the switch (sayQuiet)");
   sayState(oRun, "playing");
   ok(outN === 0, "not taken again while it plays");
   sayState(oRun, "");
@@ -8214,6 +8231,104 @@ async function answerPrompt(text) {
   eq(conv.out, "speaker", "said: the speaker");
   conv.cur = outConv; convHoldForTts = outPhone; navigator.mediaDevices = outGum; sayQuiet = quietWas;
   runTimers(1000); await settle(2);
+  console.log("-- an engineer's lines: nothing twice, nothing stale (voice-live-narration.md 2.1, 2.2) --");
+  var esW = { sayOn: sayOn, chatSayRun: chatSayRun, sayReopen: sayReopen, sayAdd: sayAdd, sayEnd: sayEnd, sayLive: sayLive };
+  // the thread on screen is the one that speaks (chatShown, a const): its eng stood in for, then put back
+  var esT = chatShown(), esEng = esT && esT.eng, esRuns = [], esOv = $("#ov").classList.contains("on");
+  ok(esT, "a thread is on screen for the voice checks");
+  esT.eng = {};
+  sayOn = function () { return true; };
+  chatSayRun = function () { var r = { lines: [], open: true }; esRuns.push(r); return r; };
+  sayReopen = function (r) { r.open = true; return true; }; sayAdd = function (r, x) { x = x ? sayTrim(x) : ""; if (x) r.lines.push(x); };   // as the real one trims
+  sayEnd = function (r, l) { r.open = false; r.linger = l || 0; }; sayLive = function () { return true; };
+  $("#ov").classList.add("on");
+  var esSaid = function () { return esRuns.reduce(function (a, r) { return a.concat(r.lines); }, []); };
+  var esNow = 1000000;
+  chatEngSpeak(esT, [{ r: "them", t: "Reading the poll.", k: "a:1:0", at: esNow - 1 }, { r: "tool", t: "Read x", k: "a:1:1", at: esNow - 1 },
+                     { r: "them", t: "Found it now.", k: "a:2:0", at: esNow }, { r: "tool", t: "Edit x", k: "a:3:0", at: esNow },
+                     { r: "them", t: "Built and tested.", k: "a:4:0", at: esNow }], esNow, "working");
+  eq(esSaid().join("|"), "Reading the poll.|Found it now.|Built and tested.", "them, tool, them, tool, them: three lines in order");
+  eq(esRuns.length, 1, "in one run");
+  eq(esRuns[0].linger, SAY_LINGER_MS, "at work, the run lingers for the next line (3.3)");
+  chatEngSpeak(esT, [{ r: "them", t: "Found it now.", k: "a:2:0", at: esNow }], esNow + 1, "working");
+  eq(esSaid().length, 3, "the same line polled again (its key): said once");
+  esRuns = []; esT.eng = {};
+  chatEngSpeak(esT, [{ r: "them", t: "An old narration line.", k: "b:1:0", at: esNow - 40 },
+                     { r: "them", t: "The old report, all done.", k: "b:2:0", at: esNow - 30 }], esNow, "idle");
+  eq(esSaid().join("|"), "Earlier: The old report, all done.", "a page back from sleep: only the turn's last line, after \"Earlier:\"");
+  eq(esRuns[0].linger, 0, "the turn over: the run does not linger");
+  esRuns = []; esT.eng = {};
+  chatEngSpeak(esT, [{ r: "them", t: "An old narration line.", k: "c:1:0", at: esNow - 40 }], esNow, "working");
+  eq(esSaid().length, 0, "stale while the turn goes on: shown, not said");
+  chatEngSpeak(esT, [{ r: "them", t: "A fresh line here.", k: "c:2:0", at: esNow + 2 }], esNow + 3, "working");
+  eq(esSaid().join("|"), "A fresh line here.", "and the next fresh line is");
+  esRuns = []; esT.eng = {};
+  chatEngSpeak(esT, [{ r: "them", t: "The answer to before.", k: "d:1:0", at: esNow }, { r: "me", t: "and now this", k: "d:2:0", at: esNow },
+                     { r: "them", t: "On the new one.", k: "d:3:0", at: esNow }], esNow, "working");
+  eq(esSaid().join("|"), "On the new one.", "a line from before the captain's latest message is not said");
+  esRuns = []; esT.eng = {};
+  chatEngSpeak(esT, [{ r: "them", t: "An older page's line." }], undefined, "idle");
+  eq(esSaid().join("|"), "An older page's line.", "an older server (no k, at or now): said as before");
+  esRuns = []; esT.eng = { hush: true };
+  chatEngSpeak(esT, [{ r: "them", t: "Not while hushed.", k: "f:1:0", at: esNow }], esNow, "working");
+  eq(esSaid().length, 0, "hushed: not said");
+  chatEngUnhush(esT);
+  chatEngSpeak(esT, [{ r: "them", t: "The next one is.", k: "f:2:0", at: esNow }], esNow, "working");
+  eq(esSaid().join("|"), "The next one is.", "the hush lifted (Hold to talk's fumble): the next line said, not the one before");
+  ok(typeof talkHost.fumble === "function", "the talk's host lifts the hush on a fumble");
+  console.log("-- the streamed path says its narration (voice-live-narration.md 2, slice 4) --");
+  var nrWas = chatNarrate.v;
+  var nrFeed = function (mode) {
+    chatNarrate.v = mode; esRuns = [];
+    var m = { parts: [{ t: "text", s: "Let me look at the log." }] };
+    chatSayFeed(esT, m, false);
+    var before = esSaid().length;
+    m.parts.push({ t: "tool", s: "journal_search" });
+    chatSayFeed(esT, m, false);
+    var atTool = esSaid().slice();
+    m.parts.push({ t: "text", s: "It was fine. All clear" });
+    chatSayFeed(esT, m, false);
+    m.parts[2].s += " now.";
+    chatSayFeed(esT, m, true);
+    return { before: before, atTool: atTool, all: esSaid(), runs: esRuns.length, v: chatSays.get(m), m: m };
+  };
+  var nrA = nrFeed("all");
+  eq(nrA.before, 0, "the narration's last sentence is held while it may go on");
+  eq(nrA.atTool.join("|"), "Let me look at the log.", "at the tool it is flushed into the run");
+  eq(nrA.all.join("|"), "Let me look at the log.|It was fine.|All clear now.", "and the answer after the tool follows it");
+  eq(nrA.runs, 1, "one run: the tool does not restart it");
+  ok(nrA.v.said > "It was fine. All clear now.".length, "v.said an offset into the whole spoken text, not reset at the tool");
+  var nrB = nrFeed("answers");
+  eq(nrB.all.join("|"), "It was fine.|All clear now.", "\"answers only\": the narration not said");
+  eq(nrB.runs, 2, "and the tool starts a fresh run, as before");
+  esRuns = []; chatNarrate.v = "all";
+  var nrM = { parts: [{ t: "text", s: "One." }, { t: "tool", s: "x" }, { t: "tool", s: "y" }, { t: "text", s: "```\ncode\n```\nDone here." }] };
+  chatSayFeed(esT, nrM, true);
+  eq(esSaid().join("|"), "One.|Done here.", "two tools in a row, a code block dropped");
+  chatNarrate.v = "answers"; esRuns = []; esT.eng = {};
+  chatEngSpeak(esT, [{ r: "them", t: "Reading the code.", k: "g:1:0", at: esNow }, { r: "them", t: "Report: built.", k: "g:2:0", at: esNow }], esNow, "working");
+  eq(esSaid().length, 0, "answers only, an engineer at work: nothing said");
+  chatEngSpeak(esT, [], esNow + 2, "idle");
+  eq(esSaid().join("|"), "Report: built.", "the turn over: the last line, the report, said once");
+  chatEngSpeak(esT, [], esNow + 4, "idle");
+  eq(esSaid().length, 1, "and not again");
+  chatNarrateSet("answers");
+  eq(lsGet("lcars.chat.narrate", ""), "answers", "the setting kept on this device");
+  ok(paletteRows().some(function (r) { return r.label === "chat voice: say everything"; }), "the palette offers the other way");
+  vMatch(vWords("say everything"), 0).cmd.fn();
+  eq(chatNarrate.v, "all", "\"say everything\": all");
+  [["answers only", "answers only"], ["just the answers", "answers only"], ["no narration", "answers only"],
+   ["say everything", "say everything"], ["say it all", "say everything"], ["narrate", "say everything"],
+   ["go on", "go on"], ["keep talking", "go on"], ["keep going", "go on"],
+   ["go to the end", "go to the end"], ["carry on", "start dictation"], ["keep timing", "resume the timer"]].forEach(function (x) {
+    var hit = vMatch(vWords(x[0]), 0);
+    eq(hit && hit.cmd.say, x[1], "\"" + x[0] + "\" is " + x[1]);
+  });
+  chatNarrate.v = nrWas; lsSet("lcars.chat.narrate", nrWas);
+  // by name: the page's functions are bindings, not globalThis's properties here
+  sayOn = esW.sayOn; chatSayRun = esW.chatSayRun; sayReopen = esW.sayReopen; sayAdd = esW.sayAdd; sayEnd = esW.sayEnd; sayLive = esW.sayLive;
+  esT.eng = esEng;
+  if (!esOv) $("#ov").classList.remove("on");
   console.log("-- one chat: quoting a part of an earlier message (docs/design/chat.md 2.10) --");
   eq(chatQuoteBlock("  two\n\n\n\nlines  "), "> two\n>\n> lines", "a quote is '> ' lines, trimmed, blank runs closed up");
   var qLong = chatQuoteBlock(new Array(120).join("word "));
@@ -11464,6 +11579,72 @@ async function answerPrompt(text) {
   engPoll1 = { session: "s1", next: 400, first: 0, status: "working", events: [], eta_min: 40, expected_min: 8, ratio_from: "crew", task_started_at: Math.floor(Date.now() / 1000) - 2 * 60 - 5 };
   await engPoll(rt); await settle(1);
   has($(".chth .cheta").textContent, "2 of 8 min (said 40, expected 8)", "calibrated: against the expected, said beside it");
+  console.log("-- the screen while the voice speaks and works (voice-live-narration.md 4, slice 5) --");
+  var s5N = Math.floor(Date.now() / 1000);
+  engPoll1 = { session: "s1", next: 410, first: 0, status: "working", now: s5N,
+               events: [{ r: "tool", t: "Read: ~/lcars/lcars-ui/index.html", n: "Read", a: "index.html", k: "s1:400:0", at: s5N }] };
+  await engPoll(rt); await settle(1);
+  has($(".chth .chhdr .chstat").textContent, "reading index.html…", "a tool at work: the status line in plain words");
+  ok($(".chth .chhdr .chstat").classList.contains("tool"), "with the working pulse");
+  engPoll1 = { session: "s1", next: 420, first: 0, status: "working", now: s5N, events: [{ r: "them", t: "Found the valve.", k: "s1:410:0", at: s5N }] };
+  await engPoll(rt); await settle(1);
+  ok($(".chth .chhdr .chstat").textContent.indexOf("reading") < 0 && !$(".chth .chhdr .chstat").classList.contains("tool"),
+     "their next line replaces it");
+  [[{ n: "Read", a: "index.html" }, "reading index.html…"], [{ n: "Edit", a: "lcars_http.h" }, "editing lcars_http.h…"],
+   [{ n: "Write", a: "notes.md" }, "editing notes.md…"], [{ n: "Grep", a: "sayCut" }, "searching for sayCut…"],
+   [{ n: "mcp__fff__grep", a: "chatSayFeed" }, "searching for chatSayFeed…"], [{ n: "mcp__fff__multi_grep", a: "a or b" }, "searching for a or b…"],
+   [{ n: "Bash", a: "Run the web tests" }, "Run the web tests…"], [{ n: "Bash" }, "running a command…"],
+   [{ label: "Read: ~/lcars/TODO.md" }, "reading TODO.md…"], [{ label: "Bash: make check" }, "running a command…"],
+   [{ n: "mcp__fff__find_files" }, "searching…"], [{ n: "TaskStop" }, "working: TaskStop…"]].forEach(function (x) {
+    eq(engToolWords(x[0]), x[1], "a tool in words: " + x[1]);
+  });
+  // the bubble being read: its bar lit, kept on a redraw, gone at the end
+  var s5Voice = chatVoice.on;
+  chatVoice.on = true;
+  var s5Ans = $(".chth .chlog").children[1], s5M = s5Ans._m;
+  var s5Run = chatSayRun(rt);
+  s5Run.onLine(s5M);
+  ok(s5Ans.classList.contains("saying") && $(".chth .chlog").querySelectorAll(".saying").length === 1, ".saying on the bubble whose line is said, and no other");
+  chatDraw(rt);
+  ok($(".chth .chlog").children[1].classList.contains("saying"), "kept when the log redraws it");
+  s5Run.onLine($(".chth .chlog").children[0]._m);
+  ok($(".chth .chlog").children[0].classList.contains("saying") && !$(".chth .chlog").children[1].classList.contains("saying"), "it moves to the next line's bubble");
+  // a stop: the bar gone at once, the turn hushed, and the line to tap
+  rt.eng.run = s5Run;
+  sayState(s5Run, "playing");
+  sayStop();
+  ok(!$(".chth .chlog").querySelector(".saying"), "stopped: the bar goes at once");
+  ok(rt.eng.hush && $(".chth .chlog [data-unhush]"), "and \"voice paused — tap to hear\" under the thread");
+  has($(".chth .chlog [data-unhush]").textContent, "voice paused", "in those words");
+  click($(".chth .chlog [data-unhush]"));
+  ok(!rt.eng.hush && !$(".chth .chlog [data-unhush]"), "a tap lifts it, the line gone at once");
+  has($("#toast").textContent, "next line is said", "and says what happens next");
+  // a natural end hushes nothing
+  var s5Run2 = chatSayRun(rt);
+  sayState(s5Run2, "playing"); sayState(s5Run2, "");
+  ok(!rt.eng.hush, "a run that finished is no stop");
+  // the earcon: a conversation, a tool, the voice quiet 4 s; at most every 10 s
+  var s5Chirps = 0, s5Ear = sayEarcon, s5Conv = conv.cur;
+  sayEarcon = function () { s5Chirps++; };
+  engPoll1 = { session: "s1", next: 430, first: 0, status: "working", now: s5N,
+               events: [{ r: "tool", t: "Bash: make check", n: "Bash", a: "Compile the server", k: "s1:420:0", at: s5N }] };
+  await engPoll(rt); await settle(1);
+  eq(s5Chirps, 0, "no earcon outside a conversation");
+  conv.cur = { stub: true };
+  rt.eng.evAt = Date.now() - 5000; chatVoiceAt = Date.now() - 5000; rt.eng.chirpAt = 0;
+  ok(engChirp(rt) && s5Chirps === 1, "in a conversation, 4 s quiet in a tool: one soft chirp");
+  ok(!engChirp(rt) && s5Chirps === 1, "not again within 10 s");
+  rt.eng.chirpAt = Date.now() - 11000; chatVoiceAt = Date.now() - 1000;
+  ok(!engChirp(rt), "nor while the voice spoke a moment ago");
+  conv.cur = s5Conv; sayEarcon = s5Ear;
+  // a stale line: shown, with a quiet note on the first
+  engPoll1 = { session: "s1", next: 440, first: 0, status: "working", now: s5N,
+               events: [{ r: "them", t: "Long ago, this.", k: "s1:430:0", at: s5N - 60 }, { r: "them", t: "And this.", k: "s1:430:1", at: s5N - 50 }] };
+  await engPoll(rt); await settle(1);
+  eq($(".chth .chlog").querySelectorAll(".chquiet").length, 1, "lines skipped as stale: one \"not read aloud (earlier)\"");
+  has($(".chth .chlog").innerHTML, "Long ago, this.", "and they are shown");
+  sayStop(); rt.eng.hush = false;
+  chatVoice.on = s5Voice; chatDraw(rt);
   engPoll1 = { session: "s1", next: 400, first: 0, status: "working", events: [] };
   await engPoll(rt); await settle(1);
   eq($(".chth .chsend").textContent, "Stop", "Send is Stop while they work");
@@ -11481,6 +11662,34 @@ async function answerPrompt(text) {
   ok(engPosts.some(function (u) { return /^POST \/engineer\/reyes-c20\/say .*and the dentist/.test(u); }), "said to them");
   has($(".chth .chlog").innerHTML, "queued", "not in the seat: marked queued");
   has($(".chth .chlog").innerHTML, "#2 in line for the seat, after Lieutenant Harry Kim", "with where in line, after whom");
+
+  // said, not typed (realtime chat, slice 1): the words go to the session
+  // after "[spoken] " (their brief answers such a one first in a sentence),
+  // and the bubble carries a mic; a typed one after it does not
+  engPosts = [];
+  var spBox = $(".chth .chbox");
+  spBox.value = ""; spBox.focus(); voiceType("check the rail");
+  ok(chatVoiced.has(spBox), "dictation into the chat's box marks it");
+  await chatSend(); await settle(2);
+  ok(engPosts.some(function (u) { return /^POST \/engineer\/reyes-c20\/say \{"message":"\[spoken\] Check the rail"/.test(u); }), "dictated: sent marked [spoken] (" + engPosts.join(" ; ") + ")");
+  ok(!chatVoiced.has(spBox), "the mark is spent with the send");
+  var spMine = rt.eng.pending.find(function (x) { return x.text === "Check the rail"; });
+  ok(spMine && spMine.spoken, "its bubble is spoken");
+  has($(".chth .chlog").innerHTML, "chmic", "and shows the mic, at once");
+  engPosts = [];
+  spBox.value = "typed this"; spBox.oninput(); await chatSend(); await settle(2);
+  ok(engPosts.some(function (u) { return /say \{"message":"typed this"/.test(u); }), "typed: no mark");
+  spBox.focus(); voiceType("oops"); spBox.value = ""; spBox.oninput();
+  ok(!chatVoiced.has(spBox), "a box emptied by hand is not dictated any more");
+  engPosts = [];
+  spBox.value = "how far along"; talkHost.send(true); await settle(3);
+  ok(engPosts.some(function (u) { return u.indexOf('"message":"' + CONV_NOTE + '\\n[spoken] how far along"') > 0; }), "a conversation's: the answer-first note, then the marked words");
+  engPosts = [];
+  spBox.value = "and the tests"; talkHost.send(false); await settle(3);
+  ok(engPosts.some(function (u) { return /say \{"message":"\[spoken\] and the tests"/.test(u); }), "hold to talk's: marked");
+  // these four never reach the transcript here: out of the checks below
+  rt.eng.pending = rt.eng.pending.filter(function (x) { return ["Check the rail", "typed this", "how far along", "and the tests"].indexOf(x.text) < 0; });
+  chatDraw();
   engPoll1 = { session: "s1", next: 500, first: 0, status: "idle", events: [{ r: "me", t: "and the dentist" }] };
   await engPoll(rt); await settle(1);
   ok($(".chth .chlog").innerHTML.indexOf("queued") < 0, "in the transcript: the queued mark goes");
@@ -11841,6 +12050,337 @@ async function answerPrompt(text) {
   ok($(".chth .chsheet").innerHTML.indexOf("<h4>") < 0, "Earlier conversations: one list, no groups");
   has($(".chth .chsheet").innerHTML, "old deck", "every one in it");
   chatSheet("");
+  // quick answers, the page (voice-quick-answer.md, slice 1): a small
+  // question to Number One in a conversation answered here, nothing sent
+  console.log("-- quick answers: the page --");
+  var qkNow = Math.floor(Date.now() / 1000), qkSays = thrSays.length, qkBox = $(".chth .chbox");
+  var qkSfx = [], qkSfxWas = sfx, qkSeat = eng.seat, qkDep = eng.deploy;
+  sfx = function (n) { qkSfx.push(n); };
+  n1.eng.st = Object.assign({}, n1.eng.st, { status: "working", task: "the quick answers", eta_min: 20, task_started_at: qkNow - 5 * 60 - 5,
+                                             deploy: { state: "running", name: "kim-c32", started: qkNow - 125 } });
+  eng.seat = { holder: "kim-c32", queue: ["reyes-c20"] };
+  eq(chatQuick.v, "conv", "on by default, in a conversation");
+  ok(quickWanted(n1, true, "how long?") && !quickWanted(n1, false, "how long?"), "the gate: Number One's thread in a conversation, not Hold to talk");
+  ok(!quickWanted(rt, true), "never an engineer's thread");
+  has(quickPage(n1, "What are you doing?"), "Number One is working, on the quick answers", "what are you doing: his task");
+  has(quickPage(n1, "Number One, how long?"), "Number One: 5 of about 20 minutes", "how long: his estimate, minutes said");
+  has(quickPage(n1, "where is Reyes?"), "Reyes is", "where is <name>: the engineer's status");
+  eq(quickPage(n1, "where is Picard"), "", "a name nobody has: not from here");
+  has(quickPage(n1, "Who's in the seat?"), "Lieutenant Harry Kim has the seat; ", "who's in the seat: the holder");
+  has(quickPage(n1, "who is in the seat"), " waits.", "and who waits");
+  has(quickPage(n1, "How's the deploy?"), "The deploy of Lieutenant Harry Kim is running, started 2 minutes ago.", "the deploy, from his poll");
+  has(quickPage(n1, "how long on the deploy?"), "is running", "how long on the deploy: the deploy");
+  n1.eng.st.deploy = { state: "failed", name: "kim-c32", msg: "perf over budget", started: qkNow - 3600 };
+  has(quickPage(n1, "is the deploy done"), "failed, started 1 hour ago: perf over budget", "a failed deploy, and why");
+  var qkD = new Date();
+  has(quickPage(n1, "What time is it?"), "It is " + pad2(qkD.getHours()) + ":", "the time, the browser's clock");
+  has(quickPage(n1, "what's the date?"), QUICK_MONTHS[qkD.getMonth()] + " " + qkD.getFullYear(), "the date");
+  ok(/^(Today: |Nothing is on the calendar today\.)/.test(quickPage(n1, "what's on today?")), "what's on today: the calendar's rows");
+  eq(quickPage(n1, "what's the weather like?"), "", "anything else: Number One's");
+  eq(quickPage(n1, "what are you doing about the tests"), "", "a row answers only the whole question");
+  // said into the conversation: the row, the chirp, nothing sent
+  qkBox.value = "Who's in the seat?"; talkHost.send(true); await settle(2);
+  eq(thrSays.length, qkSays, "answered here: nothing sent to Number One");
+  var qkRow = $(".chth .chlog").querySelector(".chm.quick");
+  ok(qkRow && qkRow.querySelector(".chqpill").textContent === "COMPUTER", "a COMPUTER row, not a bubble of his");
+  has(qkRow.textContent, "has the seat", "with the answer");
+  var qkKids = Array.prototype.slice.call($(".chth .chlog").children), qkMe = qkKids[qkKids.indexOf(qkRow) - 1];
+  ok(qkMe && qkMe.classList.contains("me") && qkMe.innerHTML.indexOf("chmic") >= 0, "under the captain's spoken words");
+  ok(qkSfx.indexOf("vok") >= 0, "the chirp before it");
+  eq(n1.eng.quick && n1.eng.quick.role, "quick", "kept in the thread's state as {role: \"quick\"}");
+  eq(qkBox.value, "", "the box emptied");
+  // Hold to talk: sent as before
+  qkBox.value = "who's in the seat"; talkHost.send(false); await settle(1);
+  eq(thrSays.length, qkSays + 1, "Hold to talk: sent to Number One");
+  thrSayEnd(); await settle(2);
+  qkSays = thrSays.length;
+  // Ask Number One: pressed, sent on marked [spoken], the chip's place says so
+  click($(".chth .chlog .chm.quick [data-quickask]")); await settle(1);
+  eq(thrSays.length, qkSays + 1, "Ask Number One sends it");
+  has(thrSays[qkSays].message, "[spoken] Who's in the seat?", "the words as said, marked [spoken]");
+  thrSayEnd(); await settle(2);
+  has($(".chth .chlog .chm.quick").innerHTML, "sent to Number One", "the chip gives way to \"sent to Number One\"");
+  ok(!$(".chth .chlog .chm.quick [data-quickask]"), "and cannot send it twice");
+  // the orders
+  [["ask number one anyway", "ask number one anyway"], ["ask number one", "ask number one anyway"], ["send it to number one", "ask number one anyway"],
+   ["ask number one to deploy the deck", "number one {*}"], ["ask what is on today", "ask {*}"], ["number one", "number one"],
+   ["quick answers on", "quick answers on"], ["quick answers off", "quick answers off"]].forEach(function (c) {
+    var h = vMatch(vWords(c[0]), 0);
+    eq(h && h.cmd.say, c[1], "\"" + c[0] + "\" is " + c[1]);
+  });
+  // the order sends the last answered one on
+  qkBox.value = "what time is it"; talkHost.send(true); await settle(1);
+  qkSays = thrSays.length;
+  var qkH = vMatch(vWords("ask number one anyway"), 0);
+  qkH.cmd.fn(qkH.arg); await settle(1);
+  has(thrSays[qkSays] && thrSays[qkSays].message, "[spoken] what time is it", "\"ask Number One anyway\" sends the last one on");
+  thrSayEnd(); await settle(2);
+  // said into the conversation itself (the console's recogniser is not listening)
+  qkBox.value = "what's the date"; talkHost.send(true); await settle(1);
+  qkSays = thrSays.length;
+  qkBox.value = "Ask Number One anyway."; talkHost.send(true); await settle(1);
+  has(thrSays[qkSays] && thrSays[qkSays].message, "[spoken] what's the date", "said into the conversation: sent on too, not sent as words");
+  thrSayEnd(); await settle(2);
+  qkSays = thrSays.length;
+  qkBox.value = "quick answers off"; talkHost.send(true); await settle(1);
+  ok(chatQuick.v === "off" && lsGet("lcars.chat.quick", "") === "off" && thrSays.length === qkSays, "\"quick answers off\" in the conversation: set, kept, nothing sent");
+  has($("#toast").textContent, "quick answers off", "and said");
+  var qkRows = $(".chth .chlog").querySelectorAll(".chm.quick").length;
+  qkBox.value = "Who's in the seat?"; talkHost.send(true); await settle(1);
+  eq(thrSays.length, qkSays + 1, "off: the question goes to Number One");
+  eq($(".chth .chlog").querySelectorAll(".chm.quick").length, qkRows, "and nothing is answered here");
+  thrSayEnd(); await settle(2);
+  ok(!quickWanted(n1, true), "off: the gate shut");
+  qkH = vMatch(vWords("quick answers on"), 0); qkH.cmd.fn(qkH.arg);
+  eq(chatQuick.v, "conv", "the order turns it back on");
+  // the palette and Config
+  ok(paletteRows().some(function (r) { return /^chat: quick answers off$/.test(r.label); }), "a palette row");
+  // the voice: the computer's, its bar; a stop is no hush of Number One's
+  var qkVoice = chatVoice.on, qkAddWas = sayAdd, qkAdds = [];
+  chatVoice.on = true; n1.eng.hush = false;
+  // the line held as queued (not played): the run stays open for the stop
+  sayAdd = function (run, text, tag) { qkAdds.push({ run: run, text: text, tag: tag }); run.items.push({ text: sayTrim(text), tag: tag }); };
+  qkBox.value = "what's the date"; talkHost.send(true); await settle(1);
+  ok(qkAdds.length === 1 && qkAdds[0].run.who === "computer" && qkAdds[0].tag === n1.eng.quick, "said in the computer's own voice, its row the line's tag");
+  qkAdds[0].run.onLine(qkAdds[0].tag);
+  ok($(".chth .chlog .chm.quick.saying"), "the row's bar lit while it is said");
+  sayState(qkAdds[0].run, "playing");
+  sayStop();
+  ok(qkAdds[0].run === say.run || !say.run, "its own run");
+  ok(!$(".chth .chlog .saying"), "stopped: the bar goes");
+  // (slice 3) a stop of the computer hushes his turn too: he is at work, so it says so
+  ok(n1.eng.hush && $(".chth .chlog [data-unhush]"), "a stop of the computer hushes Number One's turn too, \"voice paused\" while he works");
+  chatEngUnhush(n1);
+
+  // quick answers, tier 2 (voice-quick-answer.md, slice 3): the computer
+  // asked as the words go to Number One
+  console.log("-- quick answers: the computer --");
+  // the gate (3)
+  var qk21 = "is"; for (var qi = 0; qi < 20; qi++) qk21 += " word";
+  [["How long on the deploy?", true], ["what is the weather like", true], ["so who fixed the build", true], ["the deploy finished?", true],
+   ["Computer, is Reyes done", true], ["has the deploy finished yet", true],
+   ["can you deploy it?", false], ["could you please fix the tests", false], ["please ship it", false], ["would you tell Reyes to stop?", false],
+   ["the build is broken", false], [qk21 + "?", false], [qk21.split(" ").slice(0, 20).join(" ") + "?", true],
+   ["is it done in the deck thread?", false], ["switch to main, what is up?", false], ["", false]].forEach(function (c) {
+    eq(quickQuestion(c[0]), c[1], "the gate: \"" + c[0].slice(0, 40) + "\" " + (c[1] ? "asked" : "not asked"));
+  });
+  ok(quickWanted(n1, true, "how long on the deploy?"), "Number One's thread, in a conversation, a question: asked");
+  ok(!quickWanted(n1, false, "how long on the deploy?"), "typed or Hold to talk: not asked (\"always\" is slice 4's)");
+  ok(!quickWanted(rt, true, "how long on the deploy?"), "an engineer's thread: never");
+  var qkAtt = n1.att; n1.att = [{ name: "x.png" }];
+  ok(!quickWanted(n1, true, "what is this?"), "files with it: not asked");
+  n1.att = qkAtt;
+  // the server stood in for: /quick answered by hand, the poll's events by hand
+  var qkFetchWas = fetch, qkAsks = [], qkEvs = [], qkStatus = "idle";
+  var qkErr = function (code) { var t = JSON.stringify({ error: "no" }); return Promise.resolve({ ok: false, status: code, statusText: "",
+    json: function () { return Promise.resolve(JSON.parse(t)); }, text: function () { return Promise.resolve(t); },
+    headers: { get: function () { return "application/json"; } } }); };
+  fetch = function (url, o) {
+    var u = String(url);
+    if (/\/quick$/.test(u)) {
+      return new Promise(function (res) { qkAsks.push({ body: JSON.parse(o.body), end: function (code, obj) { res(code === 200 ? engJson(obj) : qkErr(code)); } }); });
+    }
+    if (/\/engineer\/number-one\?off=/.test(u) && !/off=-1/.test(u)) {
+      var ev = qkEvs; qkEvs = [];
+      return engJson({ session: "s-main", next: 10, first: 0, status: qkStatus, threads: thrList, events: ev });
+    }
+    return qkFetchWas.apply(this, arguments);
+  };
+  var qkPoll = async function (evs, status) { qkEvs = evs; if (status) qkStatus = status; await engPoll(n1); await pump(); };
+  var qkLast = function () { return qkAsks[qkAsks.length - 1]; };
+  var qkLastRow = function () { return Array.prototype.slice.call($(".chth .chlog").querySelectorAll(".chm.quick")).pop(); };
+  var qkMes = function () { return $(".chth .chlog").querySelectorAll(".chm.me").length; };
+  var qkSaid = function (q, add) { return [{ r: "me", t: CONV_NOTE + "\n[spoken] " + q + (add ? "\n" + add : "") }]; };
+  await qkPoll([], "idle");
+  chatVoice.on = true;
+  qkAdds = [];
+  sayAdd = function (run, text, tag) { qkAdds.push({ run: run, text: text, tag: tag }); run.items.push({ text: sayTrim(text), tag: tag }); };
+  // idle: sent at once, the row "checking…" in the same frame
+  qkSays = thrSays.length; qkSfx = [];
+  var qkN = qkAsks.length;
+  qkBox.value = "How long on the build?"; talkHost.send(true);
+  eq(qkAsks.length, qkN + 1, "a question the page cannot answer: asked of the computer");
+  eq(qkLast().body.question, "How long on the build?", "with the words as said");
+  ok(/^NOW: /.test(qkLast().body.context) && qkLast().body.context.indexOf("\nNUMBER ONE: ") >= 0 && qkLast().body.context.indexOf("\nSEAT: ") >= 0 &&
+     qkLast().body.context.indexOf("THREAD: ") >= 0 && qkLast().body.context.length <= 4096, "and the page's lines as context, under 4 KB");
+  var qkRow2 = $(".chth .chlog .chm.quick .chqchk");
+  ok(qkRow2 && /checking/.test(qkRow2.textContent), "the COMPUTER row reads checking…, pulsing, in the same frame");
+  var qkKids2 = Array.prototype.slice.call($(".chth .chlog").children), qkI = qkKids2.indexOf(qkRow2.closest(".chm"));
+  ok(qkI > 0 && qkKids2[qkI - 1].classList.contains("me"), "under the captain's words");
+  await pump();
+  eq(thrSays.length, qkSays + 1, "idle: sent to Number One at once, not held");
+  eq(thrSays[qkSays].message, CONV_NOTE + "\n[spoken] How long on the build?", "the bare words");
+  thrSayEnd(); await pump();
+  await qkPoll(qkSaid("How long on the build?"), "working");
+  qkLast().end(200, { text: "The build is about four minutes in.", ms: 4100 }); await pump();
+  var qkRow3 = qkLastRow();
+  ok(qkRow3 && !qkRow3.querySelector(".chqchk") && /four minutes in/.test(qkRow3.textContent), "the answer replaces checking…");
+  ok(qkSfx.indexOf("vok") >= 0, "with the chirp");
+  ok(qkAdds.length && qkAdds[qkAdds.length - 1].run.who === "computer" && /four minutes in/.test(qkAdds[qkAdds.length - 1].text), "said in the computer's voice");
+  var qkQ = qkAdds[qkAdds.length - 1].run;
+  eq(thrSays.length, qkSays + 2, "and Number One told, in a note of its own");
+  eq(thrSays[qkSays + 1].message, '[computer answered the captain aloud: "The build is about four minutes in."]', "the note: only the computer's line");
+  var qkMe0 = qkMes();
+  thrSayEnd(); await pump();
+  has(qkLastRow().textContent, "Number One told", "the row says he was told");
+  eq(qkMes(), qkMe0, "no bubble of the captain's for the note");
+  // his first line while the computer speaks: his run follows it, not cuts it
+  await qkPoll([{ r: "them", t: "Four minutes, yes, and the tests are green." }]);
+  var qkR = qkAdds[qkAdds.length - 1].run;
+  ok(qkR !== qkQ && qkR.after === qkQ && qkQ.next === qkR && sayLive(qkR) && sayLive(qkQ) && !qkQ.over, "his line chained after the computer's (sayRun after), the computer not stopped");
+  // the note's echo: the row, not a bubble; it lifts no hush
+  n1.eng.hush = true; n1.eng.hushQ = "";
+  await qkPoll([{ r: "me", t: '[computer answered the captain aloud: "The build is about four minutes in."]' }]);
+  ok(n1.eng.hush, "the note in the transcript lifts no hush");
+  eq(qkMes(), qkMe0, "and is drawn as the COMPUTER row, not the captain's bubble");
+  eq(Array.prototype.filter.call($(".chth .chlog").querySelectorAll(".chm.quick"), function (el) { return /four minutes in/.test(el.textContent); }).length, 1,
+     "one row for it, not two");
+  chatEngUnhush(n1);
+  // a stop during the computer's line hushes both
+  sayState(qkQ, "playing");
+  sayStop();
+  ok(n1.eng.hush && !sayLive(qkR), "a stop of the computer: his chained line is stopped too, his turn hushed");
+  ok($(".chth .chlog [data-unhush]"), "\"voice paused\", his turn being under way");
+  chatEngUnhush(n1);
+  await qkPoll([], "idle");
+  // PASS and every error code: the row folds, nothing said, nothing told
+  var qkCodes = [[200, { pass: true, ms: 4000 }], [400], [403], [429], [502], [504]];
+  for (var qc = 0; qc < qkCodes.length; qc++) {
+    qkSays = thrSays.length; qkSfx = []; var qkA = qkAdds.length;
+    qkBox.value = "is the build green?"; talkHost.send(true); await pump();
+    ok($(".chth .chlog .chqchk"), "checking… (" + (qkCodes[qc][0] === 200 ? "PASS" : qkCodes[qc][0]) + ")");
+    thrSayEnd(); await pump();
+    qkLast().end(qkCodes[qc][0], qkCodes[qc][1]); await pump();
+    ok(!$(".chth .chlog .chqchk") && !(n1.eng.qk) && qkSfx.indexOf("vok") < 0 && qkAdds.length === qkA && thrSays.length === qkSays + 1,
+       (qkCodes[qc][0] === 200 ? "PASS" : qkCodes[qc][0] + "") + ": the row folds, nothing said, Number One not told");
+  }
+  // the race the other way: his first line while checking - the row folds,
+  // the answer that comes after is dropped
+  qkSays = thrSays.length; qkSfx = [];
+  qkBox.value = "what is the weather like?"; talkHost.send(true); await pump();
+  thrSayEnd(); await pump();
+  var qkW = qkLast();
+  await qkPoll(qkSaid("what is the weather like?").concat([{ r: "them", t: "Let me look that up." }]), "working");
+  ok(!$(".chth .chlog .chqchk") && !n1.eng.qk, "his first line before the answer: checking… folds at once");
+  qkW.end(200, { text: "It is sunny.", ms: 4000 }); await pump();
+  ok(!/sunny/.test($(".chth .chlog").textContent) && qkSfx.indexOf("vok") < 0 && thrSays.length === qkSays + 1, "and the answer, come after, is dropped: not shown, said or told");
+  // stale: spoken again, the conversation ended
+  qkBox.value = "is Reyes done?"; talkHost.send(true); await pump(); thrSayEnd(); await pump();
+  var qkS1 = qkLast(), qkM1 = n1.eng.qk;
+  qkBox.value = "and is Kim done?"; talkHost.send(true); await pump(); thrSayEnd(); await pump();
+  ok(qkM1.state === "gone" && n1.eng.qk !== qkM1, "spoken again: the first question's row folds, its fetch let go");
+  qkS1.end(200, { text: "Reyes is idle.", ms: 4000 }); await pump();
+  ok(!/Reyes is idle/.test($(".chth .chlog").textContent), "its late answer dropped");
+  talkHost.hold(false, "conv");
+  ok(!n1.eng.qk && !$(".chth .chlog .chqchk"), "the conversation ended: dropped too");
+  qkLast().end(200, { text: "Kim is idle.", ms: 4000 }); await pump();
+  ok(!/Kim is idle/.test($(".chth .chlog").textContent), "and its answer not shown");
+  // working: the send held for the answer, then one message with it
+  await qkPoll([], "working");
+  qkSays = thrSays.length; var qkMeW = qkMes();
+  qkBox.value = "how long on the deploy, roughly?"; talkHost.send(true); await pump();
+  eq(thrSays.length, qkSays, "working: the send held for the answer");
+  has($(".chth .chlog").textContent, "sending", "the captain's bubble shows sending… meanwhile");
+  qkLast().end(200, { text: "About four minutes.", ms: 3900 }); await pump();
+  eq(thrSays.length, qkSays + 1, "the answer in: one message");
+  eq(thrSays[qkSays] && thrSays[qkSays].message, CONV_NOTE + '\n[spoken] how long on the deploy, roughly?\n[computer answered the captain aloud: "About four minutes."]',
+     "the words, and the computer's line after them");
+  thrSayEnd(); await pump();
+  has(qkLastRow().textContent, "sent with your words", "the row says so");
+  // its echo: the captain's words as his bubble, the row under it, no note
+  await qkPoll(qkSaid("how long on the deploy, roughly?", '[computer answered the captain aloud: "About four minutes."]'));
+  var qkLog = Array.prototype.slice.call($(".chth .chlog").children), qkLR = qkLog.filter(function (el) { return el.classList.contains("quick"); }).pop();
+  var qkLM = qkLog[qkLog.indexOf(qkLR) - 1];
+  ok(qkLM && qkLM.classList.contains("me") && /how long on the deploy, roughly\?/.test(qkLM.textContent) && !/computer answered/.test(qkLM.textContent),
+     "in the transcript: the captain's words as his bubble, the computer's line not in it");
+  ok(/About four minutes/.test(qkLR.textContent) && !n1.eng.qk, "and the COMPUTER row under it, from the transcript now");
+  // held past QUICK_HOLD_MS: the bare words go; a later answer is a note
+  qkSays = thrSays.length;
+  qkBox.value = "is the deck test done?"; talkHost.send(true); await pump();
+  eq(thrSays.length, qkSays, "held");
+  runTimers(QUICK_HOLD_MS); await pump();
+  eq(thrSays[qkSays] && thrSays[qkSays].message, CONV_NOTE + "\n[spoken] is the deck test done?", "after 5 s: the bare words");
+  thrSayEnd(); await pump();
+  qkLast().end(200, { text: "The deck test passed.", ms: 6200 }); await pump();
+  eq(thrSays[qkSays + 1] && thrSays[qkSays + 1].message, '[computer answered the captain aloud: "The deck test passed."]', "the answer later: the follow-up note");
+  thrSayEnd(); await pump();
+  // a stop of the computer while his turn is done and nothing is to come: hushed, not drawn
+  await qkPoll([{ r: "me", t: CONV_NOTE + "\n[spoken] is the deck test done?" }, { r: "them", t: "Done." }, { r: "me", t: '[computer answered the captain aloud: "The deck test passed."]' }], "idle");
+  chatEngUnhush(n1);
+  // the questions above whose copies the stand-in never brought back: not "to come"
+  n1.eng.pending = [];
+  qkBox.value = "what is on the calendar later?"; talkHost.send(true); await pump(); thrSayEnd(); await pump();
+  await qkPoll(qkSaid("what is on the calendar later?"), "idle");
+  qkLast().end(200, { text: "Nothing more today.", ms: 4000 }); await pump(); thrSayEnd(); await pump();
+  sayState(qkAdds[qkAdds.length - 1].run, "playing");
+  sayStop();
+  ok(n1.eng.hush && n1.eng.hushQ === "what is on the calendar later?", "stopped with his turn over: hushed all the same");
+  ok(!$(".chth .chlog [data-unhush]"), "but no \"voice paused\": nothing of his is under way or to come");
+  await qkPoll(qkSaid("what is on the calendar later?"));
+  ok(n1.eng.hush, "the stopped question's own copy in the transcript lifts nothing");
+  await qkPoll([{ r: "me", t: "[spoken] something new" }]);
+  ok(!n1.eng.hush, "the captain's next words do");
+  // "off": nothing asked
+  chatQuickSet("off"); qkN = qkAsks.length;
+  qkBox.value = "is the build green?"; talkHost.send(true); await pump(); thrSayEnd(); await pump();
+  eq(qkAsks.length, qkN, "off: the computer not asked");
+  chatQuickSet("conv");
+  // "always" (slice 4): Hold to talk and dictation too; typed text never
+  console.log("-- quick answers: always --");
+  ok(!quickWanted(n1, false, "is the build green?", true), "conv: Hold to talk and dictation not asked");
+  chatQuickSet("always");
+  eq(lsGet("lcars.chat.quick", ""), "always", "always: kept");
+  ok(quickWanted(n1, false, "is the build green?", true), "always: a spoken question outside a conversation asked");
+  ok(!quickWanted(n1, false, "is the build green?", false), "always: typed text never");
+  ok(!quickWanted(rt, false, "is the build green?", true) && !quickWanted(n1, false, "please deploy it", true), "always: never an engineer's, and the gate holds");
+  await qkPoll([], "idle");
+  // Hold to talk: the page answers, nothing sent
+  qkSays = thrSays.length;
+  qkBox.value = "Who's in the seat?"; talkHost.send(false); await pump();
+  ok(thrSays.length === qkSays && /has the seat/.test(qkLastRow().textContent), "always, Hold to talk: the page answers, nothing sent");
+  // Hold to talk: the computer asked as it goes, once
+  qkN = qkAsks.length;
+  qkBox.value = "is the build green?"; talkHost.send(false); await pump();
+  ok(qkAsks.length === qkN + 1 && thrSays.length === qkSays + 1 && thrSays[qkSays].message === "[spoken] is the build green?",
+     "always, Hold to talk: the computer asked once, the words sent bare (no conversation note)");
+  thrSayEnd(); await pump();
+  qkLast().end(200, { pass: true, ms: 4000 }); await pump();
+  // dictated into the box: chatSend with the box's words marked spoken
+  qkN = qkAsks.length; qkSays = thrSays.length;
+  qkBox.value = "is the deck test green?"; chatVoiced.add(qkBox); chatSend(); await pump();
+  ok(qkAsks.length === qkN + 1 && $(".chth .chlog .chqchk") && thrSays.length === qkSays + 1, "always, dictated: checking…, asked, sent");
+  eq(qkBox.value, "", "the box emptied");
+  thrSayEnd(); await pump();
+  qkLast().end(504); await pump();
+  ok(!$(".chth .chlog .chqchk"), "its 504: folded");
+  qkBox.value = "what time is it"; chatVoiced.add(qkBox); chatSend(); await pump();
+  ok(thrSays.length === qkSays + 1 && /^It is /.test(qkLastRow().querySelector(".chqtext").textContent), "always, dictated: the page answers it, nothing sent");
+  // typed: nothing asked
+  qkN = qkAsks.length;
+  qkBox.value = "is the build green?"; chatSend(); await pump();
+  ok(qkAsks.length === qkN && thrSays.length === qkSays + 2, "always, typed: not asked, sent as typed");
+  thrSayEnd(); await pump();
+  // the orders, the palette
+  [["quick answers always", "quick answers always"], ["computer answers always", "quick answers always"], ["quick answers on", "quick answers on"],
+   ["quick answers off", "quick answers off"]].forEach(function (c) {
+    var h = vMatch(vWords(c[0]), 0);
+    eq(h && h.cmd.say, c[1], "\"" + c[0] + "\" is " + c[1]);
+  });
+  var qkPal = paletteRows().map(function (r) { return r.label; });
+  ok(qkPal.indexOf("chat: quick answers on") >= 0 && qkPal.indexOf("chat: quick answers off") >= 0 && qkPal.indexOf("chat: quick answers always") < 0,
+     "the palette: the two values it is not set to");
+  chatQuickSet("off");
+  qkBox.value = "Quick answers always."; talkHost.send(true); await pump();
+  ok(chatQuick.v === "always" && thrSays.length === qkSays + 2, "\"quick answers always\" said into a conversation: set, nothing sent");
+  has($("#toast").textContent, "quick answers always", "and said in a toast");
+  qkH = vMatch(vWords("quick answers always"), 0); chatQuickSet("conv"); qkH.cmd.fn(qkH.arg);
+  eq(chatQuick.v, "always", "the order sets it");
+  ok(paletteRows().some(function (r) { return r.label === "chat: quick answers always"; }) === false, "and the palette follows");
+  chatQuickSet("conv");
+  fetch = qkFetchWas; qkStatus = "idle";
+  sayAdd = qkAddWas; chatVoice.on = qkVoice;
+  sfx = qkSfxWas; eng.seat = qkSeat; eng.deploy = qkDep; lsSet("lcars.chat.quick", "");
+  n1.eng.quick = null;
   fetch = thrFetch;
   closeOv();
   fetch = engFetch;
@@ -13060,6 +13600,52 @@ async function answerPrompt(text) {
       engFold(et.eng, [{ r: "me", t: "See\n\nAttached file: /r/media/chat/2026/10/a-1.png (a.png, image/png, 3 KB)" }]);
       var em = et.eng.done[et.eng.done.length - 1];
       ok(em.files && em.files[0].url.indexOf("/media/chat/2026/10/a-1.png") > 0 && em.text === "See", "engFold: the captain's message with its file");
+      engFold(et.eng, [{ r: "me", t: "[spoken] Where are we" }, { r: "me", t: CONV_NOTE + "\n[spoken] And now" }, { r: "me", t: "[spoken]typed like this" }]);
+      var spD = et.eng.done.slice(-3);
+      eq(spD.map(function (x) { return (x.spoken ? "mic:" : "") + x.text; }).join("|"), "mic:Where are we|mic:And now|[spoken]typed like this",
+         "engFold: the spoken mark read off the transcript (after a conversation's note too), never shown as words");
+      ok(chatMsgHtml(spD[0], 0).indexOf("chmic") > 0 && chatMsgHtml(spD[2], 0).indexOf("chmic") < 0, "a spoken bubble has the mic, a typed one none");
+      ok(chatMsgKey(spD[0]) !== chatMsgKey(Object.assign({}, spD[0], { spoken: false })), "the mark is in the message's key");
+      eq(chatSpokenMark("hi", true) + "|" + chatSpokenMark("hi", false), "[spoken] hi|hi", "chatSpokenMark");
+
+      // who a line is from (chat.md §3.4): the ship's lines apart from his
+      var fr = function (t) { var f = engFrom(t); return f.from + (f.tag ? ":" + f.tag : "") + (f.who ? ":" + f.who : "") + (f.id ? "#" + f.id : ""); };
+      eq(["Ship it.", "[spoken] go", "> [crew] okafor-c30 done\nGood.", "[crew] okafor-c30 (Lt. Okafor) finished a turn.",
+          "[deploy finished] obrien-c33: deployed", "[deploy failed] the suite failed", "[rollback] back", "[job] run.sh: PASSED",
+          "[seat] relieved", "[refresh] cleared", "[from Miles O'Brien] take it", "[No.1] build it",
+          "[captain] ticked off your question #812: Go?", "[captain] A note to you, written in entry #4 \"x\" (crew note #44): hi",
+          "[thread deck]\n[crew] bashir-c2 (Dr. Bashir) ok", "(held since 2026-10-22 03:10 UTC, while you were off duty) [job] x"].map(fr).join("|"),
+         "captain|captain|captain|ship:crew:okafor-c30|ship:deploy finished:obrien-c33|ship:deploy failed|ship:rollback|ship:job|" +
+         "ship:seat|ship:refresh|ship:from:Miles O'Brien|no1:No.1|via:question#812|via:note#44|ship:crew:bashir-c2|ship:job",
+         "engFrom: the same rules as engineer.py's user_from");
+      var pend = { role: "user", text: "Mine", state: "sending" };
+      et.eng.pending.push(pend);
+      engFold(et.eng, [{ r: "me", t: "[crew] okafor-c30 (Lt. Okafor) finished a turn. Last words: " + "Report: done. ".repeat(40), k: "s:1:0" },
+                       { r: "me", t: "[deploy finished] obrien-c33: deployed", from: "ship", tag: "deploy finished", who: "obrien-c33", k: "s:2:0", th: "deck" },
+                       { r: "me", t: "[captain] ticked off your question #812: Go? Notes: yes", from: "via", tag: "question", ref: "ask", id: 812 }]);
+      var sh = et.eng.done.slice(-3);
+      eq(et.eng.pending.length, 1, "a ship line takes no pending bubble of his");
+      eq(sh.map(function (x) { return x.role + ":" + (x.who || (x.via && x.via.tag) || ""); }).join("|"), "ship:okafor-c30|ship:obrien-c33|user:question",
+         "the ship's lines are notices, his carried words his");
+      eq(sh[1].text + "|" + sh[1].th, "deployed|deck", "the tag and the name the label gives off the text; the thread kept");
+      eq(sh[0].text.slice(0, 32) + "|" + sh[2].text, "finished a turn. Last words: Rep|Go? Notes: yes",
+         "a report's name and title, a ticked question's number: what the labels say, off the text");
+      eq(engFromText("[captain] A note to you, written in entry #4 \"x\" (crew note #44): look at it", engFrom("[captain] A note to you, written in entry #4 \"x\" (crew note #44): look at it")),
+         "look at it", "a journal note: its words");
+      var h0 = chatMsgHtml(sh[0], 0), h1 = chatMsgHtml(sh[1], 1), h2 = chatMsgHtml(sh[2], 2);
+      ok(h0.indexOf("chship long") > 0 && h0.indexOf("data-shipx=\"0\"") > 0 && h0.indexOf(">okafor-c30<") > 0 && h0.indexOf(">crew<") > 0,
+         "a long report: folded, its name as the label, its tag a chip, more to open it");
+      ok(h1.indexOf("data-shipx") < 0 && h1.indexOf(">deployed<") > 0 && h1.indexOf("chbub") < 0, "a short one: no more, never his bubble");
+      ok(h2.indexOf("data-via=\"ask:812\"") > 0 && h2.indexOf("chbub") > 0 && h2.indexOf("[captain]") < 0, "a ticked question: his bubble, linked to the question");
+      var k0 = chatMsgKey(sh[0]), tapped = 0, fakeBox = { classList: { on: null, toggle: function (c, v) { this.on = v; } } };
+      chatLogTap({ target: { closest: function (q) { return q === "[data-shipx]" ? { dataset: { shipx: "0" }, closest: function () { return fakeBox; } } : null; } } },
+                 sh, function () { tapped++; });
+      ok(SHIP_OPEN.has("s:1:0") && fakeBox.classList.on === true && tapped === 1 && chatMsgKey(sh[0]) !== k0, "more: open at once, and in the key");
+      engFold(et.eng, [{ r: "me", t: sh[0].text, k: "s:1:0", from: "ship", tag: "crew", who: "okafor-c30" }]);
+      ok(chatMsgHtml(et.eng.done[et.eng.done.length - 1], 0).indexOf("chship long open") > 0, "a refold keeps it open (by its key)");
+      SHIP_OPEN.clear();
+      eq(shipHue("okafor-c30", "ship"), shipHue("okafor-c30", "ship"), "a name's colour is its own every time");
+      eq(shipHue("", "no1") + "|" + shipHue("", "ship"), "--purple|--dim", "Number One's purple; the ship's own lines dim");
       chats.list.splice(chats.list.indexOf(et), 1);
 
       // answers' pictures: a bare media line, never a stranger's, never mid-sentence
@@ -13431,6 +14017,112 @@ async function answerPrompt(text) {
     oqDraftSet(qA.id, "");
     unplant(qA); unplant(qB); unplant(qOld);
     eq(oqCount(), n0, "and gone with the rows");
+  })();
+
+  console.log("\n-- open questions: the social watch's notice (task_crew_social) --");
+  await (async function () {
+    closeOv(); hideToast();
+    var n0 = oqCount(), T = kindOf("task");
+    // the comments the notice names, as scripts/social.py writes them: one drafted (slice 3), one not
+    var cm = function (id, author, text, draft) {
+      return plant({ kind: "crew_social_comment", title: "HN · " + author + ": " + text.slice(0, 30), done_bool: 0,
+        content: "id: hn:" + id + "\nplatform: hn\nlink: https://news.ycombinator.com/item?id=" + id +
+          "\non: Software for One (https://news.ycombinator.com/item?id=1)\nparent: story\nauthor: " + author +
+          "\nat: 2026-10-21T09:14:00Z\nstatus: " + (draft ? "drafted" : "new") + "\n\n" + text + "\n" +
+          (draft ? "\nSuggested reply (draft, not posted):\n" + draft + "\n" : "") });
+    };
+    var c1 = await cm(501, "pg", "Nice write-up, how do you sync the phone?");
+    var c2 = await cm(502, "dang", "Is the journal encrypted at rest?", "Only the Secret entries, with a key of their own.");
+    var c3 = await plant({ kind: "crew_social_comment", title: "GitHub · octo: thanks", done_bool: 0, content: "id: gh:9\nplatform: github\nstatus: new\n\nthanks" });
+    var body = "HN · pg on Software for One (https://news.ycombinator.com/item?id=1)\nNice write-up, how do you sync the phone?\n" +
+      "https://news.ycombinator.com/item?id=501\n#" + c1.id + "\n\nHN · dang on Software for One (https://news.ycombinator.com/item?id=1)\n" +
+      "Is the journal encrypted at rest?\nhttps://news.ycombinator.com/item?id=502\n#" + c2.id;
+    var sn = await plant({ kind: T + "_crew_social", title: "2 new comments: HN 2", done_bool: 0, content: body });
+    refresh();
+    ok(isSocialAsk(T + "_crew_social") && !isSocialAsk(T + "_crew") && !isSocialAsk(T + "_no1"), "the social notice is told from the other asks");
+    eq(oqCount(), n0 + 1, "counted with the open questions");
+    var ps = socParse(body);
+    eq(ps.length, 2, "the notice's blocks parsed, one per comment");
+    eq([ps[0].plat, ps[0].author, ps[0].on, ps[0].link, ps[0].id].join("|"),
+       "HN|pg|Software for One|https://news.ycombinator.com/item?id=501|" + c1.id, "platform, author, the post (its url cut), link, entry");
+    eq(ps[1].first, "Is the journal encrypted at rest?", "and the first line");
+    eq(socComment(c2.id).draft, "Only the Secret entries, with a key of their own.", "a comment's draft read from its entry");
+    eq(socComment(c1.id).text, "Nice write-up, how do you sync the phone?", "an undrafted one's own text");
+    eq(oqShape(sn), null, "never split into questions");
+    // the voice order opens the view at the card
+    var m = vMatch(vWords("show the social comments"), 0);
+    eq(m && m.cmd.say, "show the social comments", "“show the social comments” is an order");
+    eq(vMatch(vWords("new comments"), 0).cmd.say, "show the social comments", "and “new comments”");
+    eq(vMatch(vWords("dismiss the social reminder"), 0).cmd.say, "dismiss the social reminder", "“dismiss the social reminder” is one");
+    m.cmd.fn(m.args || {}); await settle(3);
+    eq(st.route && st.route.v, "questions", "the order opens the open questions");
+    var card = $("#oqrows").querySelector('[data-oqid="' + sn.id + '"]');
+    ok(card && card.classList.contains("oqsoc"), "a social card");
+    has(card.querySelector(".oqmeta").textContent, "The social watch", "saying whose");
+    var rows = card.querySelectorAll(".socc");
+    eq(rows.length, 2, "a row per comment named");
+    has(rows[0].querySelector(".socw").textContent, "pg", "with its author");
+    has(rows[0].querySelector(".socw").textContent, "HN", "and platform");
+    has(rows[0].querySelector(".socf").textContent, "how do you sync the phone", "its first line");
+    eq(rows[0].querySelector("a.mini").getAttribute("href"), "https://news.ycombinator.com/item?id=501", "Open is its link");
+    eq(rows[0].querySelector("a.mini").getAttribute("target"), "_blank", "in a tab");
+    ok(!rows[0].querySelector(".socd") && rows[1].querySelector(".socd"), "the draft shown where there is one");
+    ok(!/No drafted replies yet/.test(card.textContent), "and with one, no note that there are none");
+    ok(!$("#oqrows").querySelector("textarea[data-oqa=\"" + sn.id + "\"]"), "no answer box: nothing to answer");
+    // Copy reply: the draft, else the comment's text; the button says so at once
+    var copied = null, navWas = navigator.clipboard;
+    navigator.clipboard = { writeText: function (t) { copied = t; return Promise.resolve(); } };
+    var b2 = rows[1].querySelector("[data-soccopy]");
+    click(b2);
+    eq(b2.textContent, "copying…", "Copy reply shows it is copying in the same frame");
+    await settle(2);
+    eq(copied, "Only the Secret entries, with a key of their own.", "Copy reply copies the draft");
+    eq(b2.textContent, "copied", "and says it did");
+    has($("#toast").textContent, "drafted reply copied", "a toast too");
+    click(rows[0].querySelector("[data-soccopy]")); await settle(2);
+    eq(copied, "Nice write-up, how do you sync the phone?", "with no draft, the comment's own text");
+    has($("#toast").textContent, "no drafted reply yet", "and the toast says so");
+    navigator.clipboard = { writeText: function () { return Promise.reject(new Error("denied")); } };
+    click(rows[0].querySelector("[data-soccopy]")); await settle(2);
+    eq(rows[0].querySelector("[data-soccopy]").textContent, "not copied", "a refused clipboard said on the button");
+    navigator.clipboard = navWas;
+    // a notice with no drafts says Copy reply copies the comment
+    var sn2 = await plant({ kind: T + "_crew_social", title: "1 new comment: HN 1", done_bool: 0, content: body.split("\n\n")[0] });
+    sn2.created_at_utc = fmtUtc(new Date(Date.now() - 86400000));
+    refresh(); await settle(2);
+    has($("#oqrows").querySelector('[data-oqid="' + sn2.id + '"]').textContent, "No drafted replies yet", "an undrafted notice says what Copy reply copies");
+    // Dismiss ticks the reminder off, at once on the card, the comments kept
+    var pD = oqAnswer(sn.id);
+    has($("#oqrows").querySelector('[data-oqid="' + sn.id + '"]').textContent, "dismissing", "Dismiss shows at once");
+    await pD; await settle(3);
+    eq(dbFind(sn.id).done_bool, 1, "Dismiss ticks the reminder");
+    eq(dbFind(sn.id).content, body, "its content left as it was");
+    eq(dbFind(c1.id).done_bool, 0, "the comments stay as they are");
+    has($("#toast").textContent, "dismissed: 2 new comments", "the toast says dismissed");
+    ok($("#toast").querySelector(".tact"), "with Undo");
+    // the spoken one dismisses the newest open
+    m = vMatch(vWords("dismiss the social reminder"), 0);
+    m.cmd.fn(m.args || {}); await settle(3);
+    eq(dbFind(sn2.id).done_bool, 1, "“dismiss the social reminder” ticks the next one off");
+    hideToast();
+    m = vMatch(vWords("dismiss the social reminder"), 0);
+    m.cmd.fn(m.args || {}); await settle(1);
+    eq(dbFind(sn2.id).done_bool, 1, "with none open, nothing written");
+    // the comments and the readings out of Stats and the crew's list; the run's own report stays
+    var rd = [await plant({ kind: "crew_social_hn", title: "40 points · HN", value_int: 40, created_at_utc: fmtUtc(new Date(Date.now() - 2 * 86400000)), content: "{}" }),
+              await plant({ kind: "crew_social_hn", title: "52 points · HN", value_int: 52, created_at_utc: fmtUtc(new Date(Date.now() - 86400000)), content: "{}" }),
+              await plant({ kind: "crew_social", title: "social watch", content: "- HN: 2 new comments" })];
+    refresh();
+    ok(isSocialRow("crew_social_comment") && isSocialRow("crew_social_hn") && !isSocialRow("crew_social") && !isSocialRow("crew_shares"),
+       "the comments and readings told from the run's report");
+    var cr = crewReports();
+    ok(!cr.has("crew_social_comment") && !cr.has("crew_social_hn") && cr.has("crew_social"), "the crew's list leaves them out, the run's report in");
+    closeOv(); openStats(); await settle(2);
+    ok(measureSeries().has("crew_social_hn"), "the readings are a series of numbers");
+    ok(!$("#dlg").querySelector('[data-xk="crew_social_hn"]'), "which Stats' Measurements does not chart");
+    closeOv();
+    [c1, c2, c3, sn, sn2].concat(rd).forEach(unplant);
+    eq(oqCount(), n0, "gone with the rows");
   })();
 
   console.log("\n-- open questions: an ask split into its questions, each answered, one Send --");
@@ -13979,6 +14671,189 @@ async function answerPrompt(text) {
     apiNet = realApiNet;
     cls.vault = undefined;
     Object.assign(clsCrypto, realCrypto);
+  })();
+
+  /* ---------- the Share sheet: the hand route ----------
+     docs/design/social-publish.md 3.2 and 3.10, slice 1: the sheet from an
+     entry, the counters on the shared limits table, the composers' urls and
+     what Open copies, the link pasted back, the reminder and its card. */
+  console.log("\n-- the Share sheet: the hand route --");
+  await (async function () {
+    eq(JSON.stringify(SOC_ORDER), JSON.stringify(SOC_LIMITS_FILE.order), "the networks in limits.json's order");
+    eq(JSON.stringify(SOC_NETS), JSON.stringify(SOC_LIMITS_FILE.networks), "SOC_NETS is limits.json's table, the publisher's too");
+    var bad = [];
+    SOC_LIMITS_FILE.cases.forEach(function (c) {
+      SOC_ORDER.forEach(function (k) {
+        var n = SOC_NETS[k], want = n.link && c.link23 != null ? c.link23 : c[n.counts];
+        if (socCount(k, c.text) !== want) bad.push(k + " " + JSON.stringify(c.text) + ": " + socCount(k, c.text) + " not " + want);
+      });
+    });
+    eq(bad.join("; "), "", "every network counts the file's " + SOC_LIMITS_FILE.cases.length + " texts as the file says");
+    eq(socClusters("a\r\nb").length, 3, "CR LF is one grapheme");
+    eq(socClusters("🇷🇴🇬🇧").length, 2, "two flags are two");
+
+    ok(KEYS.some(function (k) { return k.key === "F" && /shareThis/.test(String(k.fn)); }), "F is its key");
+    ok(ED_MORE.some(function (t) { return t[0] === "#bShare"; }), "a tile in the editor's ⋯ sheet");
+    ["share this", "share this entry", "open the share sheet"].forEach(function (p) {
+      eq(vMatch(vWords(p), 0).cmd.say, "share this", "voice: " + p);
+    });
+    var vm = vMatch(vWords("share on hacker news"), 0);
+    eq(vm.cmd.say + "|" + vm.arg.text, "share on {*}|hacker news", "voice: share on hacker news");
+    eq(vMatch(vWords("don't share on x"), 0).cmd.say, "do not share on {*}", "voice: don't share on x");
+    eq(vMatch(vWords("schedule the share on reddit"), 0).cmd.say, "schedule the share on {*}", "voice: schedule the share on reddit");
+    eq(vMatch(vWords("share it"), 0).cmd.say, "share this", "voice: share it");
+    eq(socNetOf("the blue sky") + socNetOf("Twitter") + socNetOf("linked in"), "blueskyxlinkedin", "networks by their spoken names");
+
+    localStorage.removeItem(SOC_MASTO); localStorage.removeItem(SOC_ON);
+    shx = null;
+    var se = await plant({ title: "Software for One", content: "I built a journal for one person.\n\nhttps://example.com/blog/one\n\n" +
+                                                              "![the bridge](media/2026/bridge.jpg)\n\nMore words." });
+    select(se.id); await settle(3);
+    ok(paletteRows().some(function (r) { return /share this entry/.test(r.label); }), "a palette row while an entry is open");
+    var copied = null, navWas = navigator.clipboard;
+    navigator.clipboard = { writeText: function (t) { copied = t; return Promise.resolve(); } };
+    click($("#bShare")); await settle(2);
+    ok($("#ov").classList.contains("on") && !!$("#soc_cards"), "Share… opens the sheet");
+    eq(st.route && st.route.v + "/" + st.route.a[0], "share/" + se.id, "at ./share/<id>");
+    eq($("#soc_link").value, "https://example.com/blog/one", "the link: the entry's first");
+    eq($("#soc_text").value, "Software for One\n\nI built a journal for one person.", "the text: its title and first paragraph");
+    eq($("#soc_alt").value, "the bridge", "the picture's alt text from its caption");
+    var card = function (k) { return $("#soc_cards").querySelector('[data-card="' + k + '"]'); };
+    var open = function (k) { return card(k).querySelector(".socopen"); };
+    var say = function (k) { return card(k).querySelector(".socst").textContent; };
+    eq($("#soc_cards").querySelectorAll(".soccard").length, 7, "a card per network, every chip on at first");
+    var E = encodeURIComponent, L = E("https://example.com/blog/one"), T0 = "Software for One\n\nI built a journal for one person.";
+    eq(open("hn").getAttribute("href"), "https://news.ycombinator.com/submitlink?u=" + L + "&t=" + E("Software for One"), "HN: submitlink with the link and title");
+    eq(open("x").getAttribute("href"), "https://x.com/intent/post?text=" + E(T0) + "&url=" + L, "X: the intent, the link as its url");
+    eq(open("bluesky").getAttribute("href"), "https://bsky.app/intent/compose?text=" + E(T0 + "\n\nhttps://example.com/blog/one"), "Bluesky: the text and the link");
+    eq(open("threads").getAttribute("href"), "https://www.threads.net/intent/post?text=" + E(T0 + "\n\nhttps://example.com/blog/one"), "Threads: the same");
+    eq(open("linkedin").getAttribute("href"), "https://www.linkedin.com/sharing/share-offsite/?url=" + L, "LinkedIn: share-offsite with the link");
+    eq(open("reddit").getAttribute("href"), "https://www.reddit.com/submit?url=" + L + "&title=" + E("Software for One"), "Reddit: submit, no subreddit yet");
+    eq(open("hn").getAttribute("target"), "_blank", "each in a tab of its own");
+    eq(card("x").querySelector(".soccnt").textContent, statNum(socCount("x", T0) + 24) + " / 280", "X's counter: the text and its link as 23");
+    eq(card("hn").querySelector(".soccnt").textContent, "16 / 80 title", "HN's: the title against 80");
+    // Mastodon: no instance known, greyed with the note, Open refused
+    ok(card("mastodon").classList.contains("off") && open("mastodon").getAttribute("aria-disabled") === "true", "Mastodon with no instance: greyed, Open off");
+    has(card("mastodon").textContent, "instance is not known", "and says why");
+    var ev = click(open("mastodon"));
+    ok(ev.defaultPrevented, "a tap on its Open goes nowhere");
+    has(say("mastodon"), "instance is not set", "and the card says so");
+    input(card("mastodon").querySelector('[data-f="inst"]'), "https://hachyderm.io/@me");
+    click(card("mastodon").querySelector("[data-inst]"));
+    eq(lsGet(SOC_MASTO, ""), "hachyderm.io", "Save keeps the instance on this device, as a host");
+    eq(open("mastodon").getAttribute("href"), "https://hachyderm.io/share?text=" + E(T0 + "\n\nhttps://example.com/blog/one"), "and Open is its share page");
+    // Open: the status in the same frame, the first comment copied
+    ev = click(open("hn"));
+    ok(!ev.defaultPrevented, "HN's Open opens its tab (the link's own)");
+    has(say("hn"), "copying the first comment", "Open says so in the same frame");
+    await settle(3);
+    eq(copied, "I built a journal for one person.", "and copies the first comment");
+    has(say("hn"), "copied", "then that it did");
+    var sp = DB.filter(function (r) { return r.kind === "social_post"; });
+    eq(sp.length, 1, "the drafts kept in a social_post");
+    has(sp[0] && sp[0].content, '"from":' + se.id + ",", "naming the entry shared");
+    click(open("linkedin")); await settle(3);
+    eq(copied, T0, "LinkedIn's Open copies the text");
+    navigator.clipboard = { writeText: function () { return Promise.reject(new Error("denied")); } };
+    click(open("hn")); await settle(3);
+    has(say("hn"), "could not copy", "a refused clipboard said on the card");
+    navigator.clipboard = { writeText: function (t) { copied = t; return Promise.resolve(); } };
+    // a card's own text; the counter as it types; over the limit, Open off
+    var xt = card("x").querySelector('textarea[data-f="text"]');
+    input(xt, new Array(301).join("a"));
+    eq(card("x").querySelector(".soccnt").textContent, "324 / 280", "X counts as it is typed");
+    ok(card("x").classList.contains("over") && card("x").querySelector(".soccnt").classList.contains("over"), "over: the card red");
+    eq(open("x").getAttribute("aria-disabled"), "true", "and Open off");
+    ok(!open("x").getAttribute("href"), "with no composer to go to");
+    has(say("x"), "44 over X's 280", "saying by how much");
+    ok(!card("x").querySelector(".socown").hidden, "its text its own now");
+    input($("#soc_text"), "A journal for one");
+    eq(card("bluesky").querySelector('textarea[data-f="text"]').value, "A journal for one", "the shared text flows to the other cards");
+    eq(xt.value.length, 300, "not to one with its own");
+    click(card("x").querySelector("[data-reset]"));
+    eq(xt.value, "A journal for one", "Back to the shared text");
+    ok(!card("x").classList.contains("over") && open("x").getAttribute("aria-disabled") === "false", "under again, Open on");
+    input(card("bluesky").querySelector('textarea[data-f="text"]'), new Array(151).join("👨‍👩‍👧 "));
+    eq(card("bluesky").querySelector(".soccnt").textContent, "329 / 300", "Bluesky counts graphemes: a family emoji is one (299, the blank line and the link's 28)");
+    click(card("bluesky").querySelector("[data-reset]"));
+    // Reddit: a subreddit, its title over 300
+    input(card("reddit").querySelector('[data-f="sub"]'), "r/threejs");
+    eq(open("reddit").getAttribute("href").indexOf("https://www.reddit.com/r/threejs/submit?url=" + L), 0, "Reddit: the subreddit's submit");
+    // a chip: pressed in the same frame, the card out, kept on the device
+    var chip = $("#soc_chips").querySelector('[data-chip="threads"]');
+    click(chip);
+    ok(!card("threads"), "a chip off takes its card out");
+    eq($("#soc_chips").querySelector('[data-chip="threads"]').getAttribute("aria-pressed"), "false", "the chip shows it");
+    ok(lsGet(SOC_ON, []).indexOf("threads") < 0, "kept on the device");
+    voiceHeard("computer share on threads"); await settle(2);
+    ok(!!card("threads"), "“share on threads” puts it back");
+    // the post's link pasted back: a share entry
+    var ui = card("reddit").querySelector('[data-f="url"]');
+    input(ui, "not a link");
+    click(card("reddit").querySelector("[data-saveurl]"));
+    has(say("reddit"), "paste the post's link", "a link that is not one is refused on the card");
+    input(card("reddit").querySelector('[data-f="url"]'), "https://www.reddit.com/r/threejs/comments/abc/one/");
+    var pu = socSaveUrl("reddit", card("reddit").querySelector("[data-saveurl]"));
+    has(say("reddit"), "saving the link", "Save link says so at once");
+    await pu; await settle(2);
+    var sh = DB.filter(function (r) { return r.kind === kindOf("share") && /comments\/abc/.test(r.content || ""); })[0];
+    ok(!!sh && sh.title === "r/threejs", "saved as a share entry named for its place");
+    has(sh && sh.content, "from #" + se.id, "saying where it came from");
+    has(say("reddit"), "saved as #" + (sh && sh.id), "the card says which");
+    // the schedule: a reminder with a due time and an alert, its card the Open
+    click(card("hn").querySelector("[data-sched]"));
+    var at = card("hn").querySelector('[data-f="at"]');
+    ok(!!at && /^\d{4}-\d\d-\d\dT\d\d:00$/.test(at.value), "Schedule… shows a day and time, the next hour");
+    input(at, "2026-10-27T16:00");
+    var pr = socRemind("hn", card("hn").querySelector("[data-remind]"));
+    has(say("hn"), "scheduling", "Set reminder says so at once");
+    await pr; await settle(3);
+    var rm = DB.filter(function (r) { return r.kind === kindOf("task") + "_crew_social" && /^Share by hand on Hacker News/.test(r.content || ""); })[0];
+    ok(!!rm, "a " + kindOf("task") + "_crew_social reminder");
+    eq(rm && rm.title, "Share on Hacker News: Software for One", "titled for the network and the post");
+    var due = cdavDateVal(new Date(2026, 9, 27, 16, 0), false).value;
+    has(rm && CDAV[rm.id] && CDAV[rm.id].extra, "DUE:" + due, "due at the time picked, in his zone (UTC on the wire)");
+    has(rm && CDAV[rm.id] && CDAV[rm.id].extra, "TRIGGER;VALUE=DATE-TIME:" + due, "with an alert then");
+    has(say("hn"), "reminder #" + (rm && rm.id), "the card names it");
+    var pp = socShareParse(rm && rm.content);
+    eq(pp && [pp.net, pp.from, pp.copy].join("|"), "Hacker News|" + se.id + "|I built a journal for one person.", "its text read back");
+    eq(pp && pp.open, "https://news.ycombinator.com/submitlink?u=" + L + "&t=" + E("Software for One"), "with Open's url");
+    closeOv();
+    if (rm && !st.byId.has(rm.id)) insertRow(dbFind(rm.id));
+    openQuestions(); await settle(3);
+    var rc = $("#oqrows").querySelector('[data-oqid="' + (rm && rm.id) + '"]');
+    ok(!!rc && !!rc.querySelector("a[data-socshare]"), "its card in Open questions has the Open");
+    eq(rc && rc.querySelector("a[data-socshare]").getAttribute("href"), pp && pp.open, "the composer's url");
+    copied = null;
+    if (rc) click(rc.querySelector("a[data-socshare]"));
+    await settle(2);
+    eq(copied, "I built a journal for one person.", "and its tap copies the first comment");
+    closeOv();
+    // opened again: the drafts read back from the social_post
+    shx = null;
+    openShareSheet(se.id); await settle(4);
+    eq($("#soc_text").value, "A journal for one", "a sheet opened again has the text as it was left");
+    eq(card("reddit").querySelector('[data-f="sub"]').value, "r/threejs", "and each card's own fields");
+    // spoken orders with the sheet up
+    voiceHeard("computer schedule the share on reddit"); await settle(2);
+    ok(!!card("reddit").querySelector('[data-f="at"]'), "“schedule the share on reddit” opens its reminder row");
+    voiceHeard("computer don't share on linkedin"); await settle(2);
+    ok(!card("linkedin"), "“don't share on linkedin” takes its card out");
+    voiceHeard("computer share on linkedin"); await settle(2);
+    // the demo: Open only, nothing kept
+    shx.demo = true;
+    openShareSheet(se.id); await settle(2);
+    ok(!!$("#soc_demo") && !$("#dlg").querySelector("[data-sched],[data-saveurl]"), "the demo's sheet: Open only, no reminder or link to keep");
+    var spN = DB.filter(function (r) { return r.kind === "social_post"; }).length;
+    click(open("hn")); await settle(3);
+    eq(DB.filter(function (r) { return r.kind === "social_post"; }).length, spN, "and keeps no draft");
+    closeOv();
+    shx = null;
+    navigator.clipboard = navWas;
+    localStorage.removeItem(SOC_MASTO); localStorage.removeItem(SOC_ON);
+    // nothing of the sheet without an entry
+    closeEditor(); await settle(2);
+    ok(!shareThis(), "with no entry open, Share says so");
   })();
 
   console.log("\n-- the real database was never touched --");

@@ -1,0 +1,20 @@
+[
+ {
+  "starred_at": "2026-09-01T10:00:00Z",
+  "user": {
+   "login": "early"
+  }
+ },
+ {
+  "starred_at": "2026-10-20T07:00:00Z",
+  "user": {
+   "login": "heidi"
+  }
+ },
+ {
+  "starred_at": "2026-10-20T23:30:00Z",
+  "user": {
+   "login": "ivan"
+  }
+ }
+]
