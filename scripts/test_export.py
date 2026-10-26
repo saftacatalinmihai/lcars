@@ -3,7 +3,8 @@
 a small fixture repo in a temp directory (a made-up pattern file, never
 the real one: this test ships): the exclusions, the badge's substitution,
 the public CHANGELOG and TODO, an audit hit named with its file and line,
-a narrowed rule, a clean tree exported and committed, a dirty tree and a
+a narrowed rule, a link kept as a link (and one out of the tree
+refused), a clean tree exported and committed, a dirty tree and a
 DEST that is no repo refused, and --audit-only's groups.
 
     python3 scripts/test_export.py
@@ -114,6 +115,29 @@ class Export(unittest.TestCase):
             self.assertTrue(X.excluded(path), path)
         self.assertFalse(X.excluded("scripts/metrics.py"), "a directory rule is not a prefix of a name")
         self.assertTrue(os.access(self.dest / "scripts/tool.py", os.X_OK), "the executable bit copied")
+
+    def test_a_link_kept_as_a_link(self):
+        # scripts/omarchy/'s links to the plugin's omarchy/bin/: the public
+        # tree's own tests run the installer through one
+        (self.src / "scripts/omarchy").mkdir()
+        os.symlink("../tool.py", self.src / "scripts/omarchy/tool")
+        sh(self.src, "git", "add", "-A")
+        sh(self.src, "git", "commit", "-qm", "link")
+        rc, out = self.export()
+        self.assertEqual(rc, 0, out)
+        link = self.dest / "scripts/omarchy/tool"
+        self.assertTrue(link.is_symlink(), "a link, not a copy")
+        self.assertEqual(os.readlink(link), "../tool.py")
+        self.assertIn("120000", sh(self.dest, "git", "ls-files", "-s", "scripts/omarchy/tool"))
+        self.assertTrue(os.access(link, os.X_OK), "its target executable")
+
+    def test_a_link_out_of_the_tree_refused(self):
+        os.symlink("../CLAUDE.local.md", self.src / "scripts/rules.md")
+        sh(self.src, "git", "add", "-A")
+        sh(self.src, "git", "commit", "-qm", "link")
+        rc, out = self.export()
+        self.assertIn("scripts/rules.md links to ../CLAUDE.local.md, which does not ship", str(rc))
+        self.assertEqual(sh(self.dest, "git", "status", "--porcelain"), "", "nothing written")
 
     def test_substitution_and_public_files(self):
         rc, out = self.export("--repo", "starfleet/lcars-public")

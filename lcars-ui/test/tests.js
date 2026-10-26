@@ -7562,8 +7562,15 @@ var sayQ = say;
   ok(!wSk, "a pinned panel's bar and facts carry no #id (" + wSk + ")");
   stackClose(wRow.id);
   ambStart();
-  var wAm = wFound($("#ambmem"));
+  // the memory is a random old entry: its title and words are the captain's
+  // own (a real one may well hold an ISO date), compared with its fields;
+  // the rule is for what the page puts round them (the head, a day label)
+  var wAmE = ambMem, wAm = wFound(wAmE && wAmE.title ? $("#ambmem .ambmh") : $("#ambmem"));
   ok(!wAm, "ambient mode's memory: no slug or #id (" + wAm + ")");
+  if (wAmE) {
+    eq($("#ambmem .ambmt").textContent, wAmE.title || dayLabelText(dayKey(wAmE.created_at_utc)), "its title the entry's own");
+    eq($("#ambmem .ambmb").textContent, ttsText(wAmE.content || "").slice(0, AMB_BODY), "its words the entry's own");
+  }
   ok($("#ambmem .ambmh") && $("#ambmem .ambmh").textContent.indexOf("\u00b7") < 0, "and its facts apart, not dotted");
   ambStop();
   eq([$("#fCase"), $("#fWord"), $("#fInv")].map(function (c) { return c.parentNode.textContent.trim(); }).join("|"),
@@ -16640,6 +16647,9 @@ var sayQ = say;
   await (async function () {
     closeOv(); hideToast();
     var n0 = oqCount(), T = kindOf("task");
+    // the journal's own open social reminders (the captain's Share reminders
+    // are task_crew_social too): the planted ones are made newer than any
+    var socReal = oqList().filter(function (e) { return isSocialAsk(e.kind); });
     // the comments the notice names, as scripts/social.py writes them: one drafted (slice 3), one not
     var cm = function (id, author, text, draft) {
       return plant({ kind: "crew_social_comment", title: "HN · " + author + ": " + text.slice(0, 30), done_bool: 0,
@@ -16705,7 +16715,10 @@ var sayQ = say;
     navigator.clipboard = navWas;
     // a notice with no drafts says Copy reply copies the comment
     var sn2 = await plant({ kind: T + "_crew_social", title: "1 new comment: HN 1", done_bool: 0, content: body.split("\n\n")[0] });
-    sn2.created_at_utc = fmtUtc(new Date(Date.now() - 86400000));
+    // older than sn, newer than every real one: the next the spoken order takes
+    var sn2At = Date.now() - 86400000;
+    socReal.forEach(function (e) { sn2At = Math.max(sn2At, parseUtc(e.created_at_utc).getTime() + 60000); });
+    sn2.created_at_utc = fmtUtc(new Date(sn2At));
     refresh(); await settle(2);
     has($("#oqrows").querySelector('[data-oqid="' + sn2.id + '"]').textContent, "No drafted replies yet", "an undrafted notice says what Copy reply copies");
     // Dismiss ticks the reminder off, at once on the card, the comments kept
@@ -16722,9 +16735,12 @@ var sayQ = say;
     m.cmd.fn(m.args || {}); await settle(3);
     eq(dbFind(sn2.id).done_bool, 1, "“dismiss the social reminder” ticks the next one off");
     hideToast();
-    m = vMatch(vWords("dismiss the social reminder"), 0);
-    m.cmd.fn(m.args || {}); await settle(1);
-    eq(dbFind(sn2.id).done_bool, 1, "with none open, nothing written");
+    if (!socReal.length) {
+      m = vMatch(vWords("dismiss the social reminder"), 0);
+      m.cmd.fn(m.args || {}); await settle(1);
+      eq(dbFind(sn2.id).done_bool, 1, "with none open, nothing written");
+    } else  // the next would be the captain's own: never dismissed by a test
+      eq(socFirst() && socFirst().id, socReal.slice().sort(oqByNew)[0].id, "with the planted ones done, the next is the journal's own");
     // the comments and the readings out of Stats and the crew's list; the run's own report stays
     var rd = [await plant({ kind: "crew_social_hn", title: "40 points · HN", value_int: 40, created_at_utc: fmtUtc(new Date(Date.now() - 2 * 86400000)), content: "{}" }),
               await plant({ kind: "crew_social_hn", title: "52 points · HN", value_int: 52, created_at_utc: fmtUtc(new Date(Date.now() - 86400000)), content: "{}" }),
@@ -17325,6 +17341,9 @@ var sayQ = say;
     shx = null;
     var se = await plant({ title: "Software for One", content: "I built a journal for one person.\n\nhttps://example.com/blog/one\n\n" +
                                                               "![the bridge](media/2026/bridge.jpg)\n\nMore words." });
+    // the social_posts there before: the captain's own drafts
+    var sp0 = {};
+    DB.forEach(function (r) { if (r.kind === "social_post") sp0[r.id] = 1; });
     select(se.id); await settle(3);
     ok(paletteRows().some(function (r) { return /share this entry/.test(r.label); }), "a palette row while an entry is open");
     var copied = null, navWas = navigator.clipboard;
@@ -17366,7 +17385,8 @@ var sayQ = say;
     await settle(3);
     eq(copied, "I built a journal for one person.", "and copies the first comment");
     has(say("hn"), "copied", "then that it did");
-    var sp = DB.filter(function (r) { return r.kind === "social_post"; });
+    // the journal may hold the captain's own drafts: only the one this Open wrote
+    var sp = DB.filter(function (r) { return r.kind === "social_post" && !sp0[r.id]; });
     eq(sp.length, 1, "the drafts kept in a social_post");
     has(sp[0] && sp[0].content, '"from":' + se.id + ",", "naming the entry shared");
     click(open("linkedin")); await settle(3);
@@ -17425,7 +17445,11 @@ var sayQ = say;
     var pr = socRemind("hn", card("hn").querySelector("[data-remind]"));
     has(say("hn"), "scheduling", "Set reminder says so at once");
     await pr; await settle(3);
-    var rm = DB.filter(function (r) { return r.kind === kindOf("task") + "_crew_social" && /^Share by hand on Hacker News/.test(r.content || ""); })[0];
+    // by the entry it shares, never the first: the captain's own may come before it
+    var rm = DB.filter(function (r) {
+      return r.kind === kindOf("task") + "_crew_social" && /^Share by hand on Hacker News/.test(r.content || "") &&
+        String((socShareParse(r.content) || {}).from) === String(se.id);
+    })[0];
     ok(!!rm, "a " + kindOf("task") + "_crew_social reminder");
     eq(rm && rm.title, "Share on Hacker News: Software for One", "titled for the network and the post");
     var due = cdavDateVal(new Date(2026, 9, 27, 16, 0), false).value;

@@ -106,6 +106,35 @@ systemctl --user enable --now lcars
 loginctl enable-linger "$USER"   # keep it running after you log out
 ```
 
+## On omarchy
+
+`lcars-webapp` (`omarchy/bin/`, the omarchy plugin's own folder;
+`scripts/omarchy/lcars-webapp` links to it) sets LCARS up and puts it in
+omarchy's app launcher as a web app. With no argument it asks which:
+
+```sh
+scripts/omarchy/lcars-webapp --local                 # the whole system here
+scripts/omarchy/lcars-webapp --remote https://HOST   # a server elsewhere
+scripts/omarchy/lcars-webapp --uninstall             # the service and launcher gone
+```
+
+`--local` downloads the latest release and checks it against
+`SHA256SUMS`, unpacks it under `~/.local/lib/lcars/<version>/`, links
+`~/.local/bin/lcars` and `lcars-cli` to it, runs `lcars init
+~/.local/share/lcars` (it prints the login), writes a user unit like the
+one above (`--port 8080`, on 127.0.0.1) and starts it. `--remote` asks
+for the server's login. Both write the address and the login to
+`~/.config/lcars/env` (mode 600; the theme hook and the plugin read it
+too) and add the launcher with omarchy's `omarchy-webapp-install`; the
+login is never in the launcher or its URL, and the browser asks for it
+once. Run again, it says what it left alone; with a newer release out,
+`--local` unpacks it, relinks and restarts. `--uninstall` stops and
+removes the unit and the launcher; the journal, the releases and the env
+file stay where they are. `--dry-run` prints each step and runs none. At the end it offers to
+have the console follow omarchy's theme: on yes it links the theme hook,
+`lcars-theme-set` beside it, into `~/.config/omarchy/hooks/theme-set.d/`
+(`--uninstall` removes the link). By hand, the hook's first lines say how.
+
 ## An example: the author's setup
 
 A small VPS runs the server on `127.0.0.1` with no public port;

@@ -67,7 +67,9 @@ python3 lcars-ui/demo/live_check.py --base https://<the demo's host>/lcars-demo/
    `text/javascript; charset=utf-8`, `.css` `text/css; charset=utf-8`,
    `.json` `application/json`, `.png` `image/png`, `.glb`
    `model/gltf-binary`, `.webp` `image/webp`, `.woff2` `font/woff2`,
-   `.webmanifest` `application/manifest+json` (`TYPES`; a file of
+   `.webmanifest` `application/manifest+json`, `.ktx2` `image/ktx2`,
+   `.wasm` `application/wasm`, `.theme` and the themes' extensionless
+   `LICENSE` and `NOTICE` `text/plain; charset=utf-8` (`TYPES`; a file of
    another type stops the run before anything is written).
 3. Deletes each object under the prefix that is not in the build
    (`wrangler@3 r2 object delete`), and nothing outside it.

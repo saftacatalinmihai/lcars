@@ -38,6 +38,12 @@ TYPES = {
     ".svg": "image/svg+xml", ".ico": "image/x-icon", ".glb": "model/gltf-binary",
     ".webp": "image/webp", ".woff2": "font/woff2",
     ".webmanifest": "application/manifest+json", ".txt": "text/plain; charset=utf-8",
+    # the deck's KTX2 textures and their transcoder (0.302.5; a wasm must be
+    # application/wasm for instantiateStreaming), the themes' btop files
+    # (0.335.0), and their LICENSE and NOTICE, the build's only files with
+    # no extension: licence texts
+    ".ktx2": "image/ktx2", ".wasm": "application/wasm",
+    ".theme": "text/plain; charset=utf-8", "": "text/plain; charset=utf-8",
 }
 
 

@@ -50,6 +50,7 @@ The console can wear another palette: LCARS's own is the default, and 41 more ar
 - A theme marked "low contrast" has text that is hard to read on its own background. It is offered anyway.
 - The theme is kept in the journal, so every phone and computer wears the one you chose, and an open console follows a change made elsewhere within a second or two.
 - A theme of your own: from a terminal, `lcars-cli theme load FILE` takes a btop `.theme` file or an omarchy `colors.toml`, and it appears in the picker under its name, marked "from omarchy" or "from a file". `lcars-cli theme set nord` chooses a built-in, `lcars-cli theme reset` brings LCARS back, and `lcars-cli theme` says which is worn.
+- On omarchy, `scripts/omarchy/lcars-webapp --local` installs LCARS on the machine and puts it in the app launcher; `lcars-webapp --remote https://HOST` adds a launcher for a server elsewhere, and `lcars-webapp --uninstall` takes it away (your journal stays). The password is kept in `~/.config/lcars/env`, never in the launcher: the browser asks for it once. It also offers to install the theme hook below for you.
 - On omarchy, the console can follow the desktop: copy `scripts/omarchy/lcars-theme-set` into `~/.config/omarchy/hooks/theme-set.d/` and make it executable. Each time omarchy changes theme, the console takes the same colours. It needs lcars-cli and the server's address and password, as lcars-cli takes them (the script's first lines say how).
 - Red and yellow alert keep their own colours under every theme.
 

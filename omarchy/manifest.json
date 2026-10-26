@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.mihai-safta.lcars",
+  "name": "LCARS",
+  "version": "0.1.0",
+  "author": "Mihai Safta",
+  "license": "MIT",
+  "description": "Your LCARS journal in the bar: open the console as an app, and set up a local server or connect to your own.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "LCARS",
+    "description": "The LCARS journal's console as an app; lit while the server answers.",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": { "url": "", "pollSec": 60 },
+    "schema": [
+      { "key": "url", "type": "string", "label": "Server address (empty: LCARS_URL in ~/.config/lcars/env)", "defaultValue": "" },
+      { "key": "pollSec", "type": "integer", "label": "Check the server every (seconds)", "min": 15, "max": 3600, "step": 15, "defaultValue": 60 }
+    ]
+  }
+}

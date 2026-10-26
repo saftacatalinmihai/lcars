@@ -5,6 +5,12 @@ shows it under the LCARS badge (`APP_VERSION` in `lcars-ui/index.html`), so a
 page showing an older number is running a cached copy. A feature bumps the
 minor, a fix the patch, in the same commit as `APP_VERSION`.
 
+## 0.339.1 — 2026-10-26
+
+- **omarchy plugin:** LCARS for omarchy (`omarchy/`, published on its own as saftacatalinmihai/omarchy-lcars, 0.1.0): a bar widget whose LCARS mark opens the console as an app (focusing it when open), lit, urgent or dimmed by the server's `/health`, with a popup to open it, write a new entry or set it up; and its installer, `lcars-webapp`: `--local` installs the latest release as a systemd user service (checked against SHA256SUMS), `--remote` connects to a server elsewhere, both put LCARS in omarchy's app launcher and offer the theme hook, `--uninstall` keeps the data.
+- **release:** the export keeps the tree's symlinks as links; the demo's upload knows the newer file types (`.ktx2`, `.wasm`, the themes).
+- **tests:** the behaviour suite's Share, social reminder and ambient checks find their own rows, not the journal's.
+
 ## 0.337.2 — 2026-10-26
 
 - **console, the design pass:** the phone's list denser (two lines a row) in an LCARS elbow frame, one drawn SVG icon set, a type scale of tokens, the desk's reading size at 16px; Tasks with a tick on every row, one Day view for Today, the week and day read like the month's dot grid, select mode's bar, the new entry's one kind chip, and every control a 44px target checked on every view (with axe-core, WCAG 2.2 AA).

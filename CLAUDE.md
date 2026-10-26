@@ -502,6 +502,19 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     entries (docs/design/release-entries.md) - CHANGELOG's sections, the
     entry's shape, noon in the captain's zone, and the import on a scratch
     journal twice. The deploy's write is test_version_stamp.py's.
+  - `python3 scripts/test_webapp.py` (~3s): `omarchy/bin/lcars-webapp`
+    (`scripts/omarchy/lcars-webapp` links to it), the omarchy plugin's
+    installer (docs/design/omarchy-plugin.md 2), in a scratch HOME with
+    stand-ins for omarchy-webapp-install/-remove, curl, gh, systemctl and
+    the release's lcars - `--local` (the release checked, unpacked,
+    linked, init, the unit, /health, the env file 0600, the launcher with
+    the plugin's icon) and run again ("left alone"), a newer release
+    relinked and restarted, a bad checksum, `--remote` and its login,
+    another env file's lines kept, `--uninstall` keeping the data,
+    `--dry-run` running nothing, the file alone, the refusal off omarchy;
+    the theme hook's offer (in a pty: yes, no, none without a terminal,
+    found again, unlinked by `--uninstall`); the icon by path, the
+    server's fetched with the login on curl's stdin, or empty.
   - `python3 scripts/test_version_stamp.py` (~2s): the version the deploy
     gives (docs/design/version-at-deploy.md) - `scripts/version-stamp.py`'s
     plan (patch, minor, the floor, an old-style number kept or renumbered,
@@ -536,6 +549,15 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
   - `python3 scripts/test_ctx.py` (~1s): the context gauge -
     `engineer.py`'s `context_tokens` on a sample session file, and the
     turn-ended hook's handover line for Number One, once per crossing.
+  - `python3 scripts/test_omarchy_plugin.py` (~7s, no server): the
+    omarchy plugin in `omarchy/` (docs/design/omarchy-plugin.md) where no
+    omarchy runs - omarchy's own validator, pinned in
+    `scripts/testdata/omarchy/` (its README: the commit, the refresh; with
+    no jq, the same checks in Python, said), broken plugins refused, the
+    marketplace's rules, `Model.js` in node, BarWidget.qml through qmllint
+    when there is one (else a said skip), and `scripts/omarchy-publish.sh`
+    on scratch repos (the dry run, a push, an unbumped change refused, a
+    fast-forward). After touching `omarchy/` or the publish script.
   - `python3 scripts/test_export.py` (~1s): `scripts/export-public.py`,
     the public release's export, on a fixture repo with made-up patterns:
     the exclusions (`*.local.*` included), the badge's substitution, the

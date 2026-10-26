@@ -2626,7 +2626,7 @@ TEST_TMP_ROOTS = [tempfile.gettempdir(), os.path.join(HOME, ".cache")]
 TEST_TMP_KEEP_H = float(os.environ.get("LCARS_TEST_TMP_KEEP_H") or 24)
 TEST_TMP_RE = re.compile(
     r"(lcars-(perf-base|seat-test|model-test|logins|metrics|caldav|framing|uigzip|transcribe|say|api|config|onebin|measure|back|btn|editor|dbswap"
-    r"|qachat|off|upd|rec|media|media-chat|reports|prune|dedupe|demo|features|architect|kinds|conncap|classified|quick|theme|publish)-|lcars-run\.|(brief|crew|crew-notes|ctx|no1-inbox|no1|queue|reap|deploy-suite|prune|merge|export|jobs|guard|housekeeping|version-stamp|release)-test-|no1-refresh-|no1-threads-"
+    r"|qachat|off|upd|rec|media|media-chat|reports|prune|dedupe|demo|features|architect|kinds|conncap|classified|quick|theme|publish)-|lcars-run\.|(brief|crew|crew-notes|ctx|no1-inbox|no1|queue|reap|deploy-suite|prune|merge|export|jobs|guard|housekeeping|version-stamp|release|webapp)-test-|no1-refresh-|no1-threads-"
     r"|playwright-artifacts-|playwright_(chromium|webkit)dev_profile-)[A-Za-z0-9_]+")
 RUN_SH_OUTPUTS = {"deck", "behaviour", "keyboard", "qjs.out", "kb.out"}
 # Remotion's scratch (video/explainer: render.sh, stills.mjs, the studio):

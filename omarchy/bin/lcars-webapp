@@ -1,0 +1,623 @@
+#!/usr/bin/env python3
+"""lcars-webapp - LCARS on omarchy: the server set up, the app launcher's
+entry made (docs/design/omarchy-plugin.md, section 2).
+
+    lcars-webapp                      asks: local or remote
+    lcars-webapp --local              the whole system on this machine
+    lcars-webapp --remote https://HOST  a server that runs elsewhere
+    lcars-webapp --uninstall          the service and the launcher gone
+    ... --dry-run                     every step printed, none run
+
+LOCAL fetches the latest release from GitHub (the API's releases/latest,
+through gh when it is there and answers, else curl), the tarball for this
+machine (uname -m: x86_64 or arm64) and SHA256SUMS, checks the one against
+the other, unpacks it under ~/.local/lib/lcars/<version>/, links
+~/.local/bin/lcars and lcars-cli to it, runs `lcars init
+~/.local/share/lcars` when that directory has no lcars.env (init prints the
+login), writes the systemd user unit (`lcars --data ... --port 8080`, on
+loopback), enables and starts it, and waits for /health. Run again it
+changes nothing it finds in place and says so; with a newer release out it
+unpacks that one beside the old, relinks and restarts. Never a second
+journal.
+
+REMOTE takes the address (or asks for it), tries its /health, and asks for
+the login.
+
+Both end the same way: ~/.config/lcars/env written (0600: LCARS_URL,
+LCARS_AUTH_USER, LCARS_AUTH_PASS, the file the plugin's widget, the theme
+hook and lcars-cli read; other lines in it kept), and the launcher made by
+omarchy-webapp-install at <url>/ui/ with the plugin's own icon.png
+(by its path). The
+login is in that file only: never in the launcher or its URL (the browser
+asks for it once and keeps it). Nothing under ~/.config/omarchy/ is
+written but by omarchy's own commands, and the theme hook's link: at the
+end it asks "Have the console follow omarchy's theme?" (default yes; no
+terminal, no question) and on yes links bin/lcars-theme-set into
+~/.config/omarchy/hooks/theme-set.d/.
+
+--uninstall stops and removes the unit, runs omarchy-webapp-remove
+LCARS and removes the theme hook's link; it leaves the env file (it holds no data), and never deletes the
+journal or the releases: it says where they are.
+
+It stands alone: run from the plugin's bin/
+(~/.config/omarchy/plugins/<id>/bin/lcars-webapp), from this repo
+(scripts/omarchy/ links here) or from anywhere, from any directory. The
+one file it reads beside itself is ../icon.png (the plugin's), and
+without it the icon is the server's /ui/icon-512.png, fetched with the
+login. Refused off omarchy (no
+omarchy-webapp-install on PATH) but with --dry-run.
+
+LCARS_WEBAPP_REPO (owner/name) points it at another repository's
+releases. LCARS_AUTH_USER and LCARS_AUTH_PASS in the environment answer
+--remote's login question without asking.
+"""
+
+import getpass
+import hashlib
+import json
+import os
+import pathlib
+import platform
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+
+REPO = os.environ.get("LCARS_WEBAPP_REPO", "saftacatalinmihai/lcars")
+NAME = "LCARS"
+PORT = 8080
+LOCAL_URL = f"http://127.0.0.1:{PORT}"
+# the plugin's icon, beside bin/ (launcher() says what stands in for it)
+ICON = pathlib.Path(__file__).resolve().parent.parent / "icon.png"
+# the theme hook, its real file beside this one in the plugin's bin/
+HOOK_SRC = pathlib.Path(__file__).resolve().parent / "lcars-theme-set"
+HEALTH_WAIT = float(os.environ.get("LCARS_WEBAPP_HEALTH_WAIT", "20"))
+
+HOME = pathlib.Path.home()
+XDG_DATA = pathlib.Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share")
+XDG_CONFIG = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config")
+DATA = XDG_DATA / "lcars"
+RELEASES = HOME / ".local/lib/lcars"
+BIN = HOME / ".local/bin"
+UNIT = XDG_CONFIG / "systemd/user/lcars.service"
+ENV = XDG_CONFIG / "lcars/env"
+APPS = XDG_DATA / "applications"
+DESKTOP = APPS / f"{NAME}.desktop"
+# the one path under ~/.config/omarchy/ written by this script, on the
+# captain's word: omarchy's hooks are files the user places there
+HOOK = XDG_CONFIG / "omarchy/hooks/theme-set.d/lcars-theme-set"
+
+# The binary is the link, so a newer release is a relink and a restart,
+# never a new unit. LCARS_BIND here wins over lcars.env's (the real
+# environment does): loopback whatever the file says.
+UNIT_TEXT = f"""[Unit]
+Description=LCARS
+[Service]
+Environment=LCARS_BIND=127.0.0.1
+ExecStart=%h/.local/bin/lcars --data {DATA} --port {PORT}
+Restart=on-failure
+[Install]
+WantedBy=default.target
+"""
+
+DRY = False
+
+
+def say(msg=""):
+    print(msg, flush=True)
+
+
+def step(msg):
+    """A step that changes something: printed, and run only off --dry-run."""
+    say(("would  " if DRY else "") + msg)
+    return not DRY
+
+
+def left(msg):
+    say("left alone " + msg)
+
+
+def die(msg, code=1):
+    print("lcars-webapp: " + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def run(argv, capture=False):
+    """Runs argv; a failure ends the script with its command named."""
+    try:
+        r = subprocess.run(argv, text=True, capture_output=capture)
+    except FileNotFoundError:
+        die(f"{argv[0]} not found")
+    if r.returncode != 0:
+        err = (r.stderr or "").strip() if capture else ""
+        die(f"{' '.join(argv)} failed ({r.returncode}){': ' + err if err else ''}")
+    return r
+
+
+def quiet(argv):
+    """True when argv runs and exits 0; nothing printed."""
+    try:
+        return subprocess.run(argv, capture_output=True).returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def tilde(p):
+    p, h = str(p), str(HOME)
+    return "~" + p[len(h):] if p == h or p.startswith(h + "/") else p
+
+
+def ask(prompt, choices=None, secret=False):
+    """gum when it is there, a plain read otherwise; no terminal, no answer."""
+    if not sys.stdin.isatty():
+        return ""
+    if shutil.which("gum"):
+        if choices:
+            argv = ["gum", "choose", "--header", prompt, *choices]
+        else:
+            argv = ["gum", "input", "--placeholder", prompt] + (["--password"] if secret else [])
+        return subprocess.run(argv, stdout=subprocess.PIPE, text=True).stdout.strip()
+    if choices:
+        prompt += f" ({'/'.join(choices)})"
+    try:
+        return (getpass.getpass if secret else input)(prompt + ": ").strip()
+    except EOFError:
+        return ""
+
+
+def on_omarchy():
+    if shutil.which("omarchy-webapp-install"):
+        return
+    if DRY:
+        say("(omarchy-webapp-install is not on PATH: on omarchy the steps below would run)")
+        return
+    die("this is for omarchy, and omarchy-webapp-install is not on PATH here.\n"
+        f"Elsewhere, run LCARS as https://github.com/{REPO}#run-it says, and open its /ui/ in a browser.\n"
+        "--dry-run shows what it would do.")
+
+
+def http_ok(url):
+    return quiet(["curl", "-fsS", "-o", "/dev/null", "-m", "5", url])
+
+
+# ---- the env file ----------------------------------------------------------
+
+def read_env(path):
+    """NAME=value lines, as the theme hook's sh reads them (export, quotes)."""
+    out = {}
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.removeprefix("export ").strip()
+        v = v.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+            v = v[1:-1]
+        out[k] = v
+    return out
+
+
+def sh_value(v):
+    """A value the hook's `. file` reads back as it is: single-quoted
+    unless it is plain."""
+    if v and all(c.isalnum() or c in "@%+=:,./_-" for c in v):
+        return v
+    return "'" + v.replace("'", "'\\''") + "'"
+
+
+def write_env(url, user, password):
+    """~/.config/lcars/env: the three lines set, every other line kept."""
+    want = {"LCARS_URL": url}
+    if user:
+        want["LCARS_AUTH_USER"] = user
+        want["LCARS_AUTH_PASS"] = password
+    have = read_env(ENV)
+    if all(have.get(k) == v for k, v in want.items()):
+        left(f"{tilde(ENV)} (LCARS_URL={url})")
+        return
+    if have.get("LCARS_URL") and have["LCARS_URL"] != url:
+        say(f"{tilde(ENV)} pointed at {have['LCARS_URL']}: now {url}")
+    if not step(f"write {tilde(ENV)} (0600: LCARS_URL{', the login' if user else ''})"):
+        return
+    kept = []
+    if ENV.exists():
+        for line in ENV.read_text().splitlines():
+            k = line.strip().removeprefix("export ").split("=", 1)[0].strip()
+            if k not in want:
+                kept.append(line)
+    text = "\n".join(kept + [f"{k}={sh_value(v)}" for k, v in want.items()]) + "\n"
+    ENV.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ENV.with_name(ENV.name + ".lcars-webapp")
+    # made 0600 before a byte of the login is in it
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, ENV)
+
+
+# ---- the launcher ----------------------------------------------------------
+
+def server_icon(base, user, password, tmp):
+    """The server's /ui/icon-512.png fetched here with the login, a file in
+    tmp; None when it will not come. The login goes to curl on its stdin
+    (-K -), never on its command line, where ps would show it."""
+    out = tmp / "icon-512.png"
+    conf = 'user = "%s:%s"\n' % (user.replace('\\', '\\\\').replace('"', '\\"'),
+                                password.replace('\\', '\\\\').replace('"', '\\"')) if user else ""
+    try:
+        r = subprocess.run(["curl", "-fsS", "-m", "10", "-K", "-", "-o", str(out),
+                            base + "/ui/icon-512.png"], input=conf, text=True,
+                           capture_output=True)
+    except FileNotFoundError:
+        return None
+    return out if r.returncode == 0 and out.is_file() and out.stat().st_size else None
+
+
+def launcher(base, user="", password=""):
+    url = base + "/ui/"
+    if DESKTOP.exists():
+        if url in DESKTOP.read_text(errors="replace"):
+            left(f"the launcher {tilde(DESKTOP)} ({url})")
+            return
+        say(f"the launcher {tilde(DESKTOP)} opens another address: replacing it")
+    # omarchy-webapp-install's icon argument: an existing file's path it
+    # copies into ~/.local/share/icons/hicolor itself; a URL it downloads
+    # with no login (and fails the install when that is refused, as a
+    # server behind its login does); empty, it looks for the site's icon.
+    # So: the plugin's icon.png by its absolute path; else the server's,
+    # fetched here with the login into a temp file; else empty.
+    with tempfile.TemporaryDirectory(prefix="lcars-webapp-") as tmp:
+        if ICON.is_file():
+            icon = str(ICON)
+        elif DRY:
+            icon = f"<{base}/ui/icon-512.png, fetched with the login>"
+        else:
+            got = server_icon(base, user, password, pathlib.Path(tmp))
+            icon = str(got) if got else ""
+            if not got:
+                say(f"no icon.png beside the plugin's bin/ and none from {base}/ui/icon-512.png: "
+                    "omarchy looks for the site's icon itself")
+        if step(f"omarchy-webapp-install {NAME} {url} {icon or repr('')}"):
+            run(["omarchy-webapp-install", NAME, url, icon])
+            say(f"LCARS is in the app launcher (Super + Space, \"{NAME}\").")
+
+
+# ---- local -----------------------------------------------------------------
+
+def arch():
+    m = platform.machine()
+    if m in ("x86_64", "amd64"):
+        return "x86_64"
+    if m in ("aarch64", "arm64"):
+        return "arm64"
+    die(f"no release is built for {m}: x86_64 and arm64 only "
+        f"(to build it: https://github.com/{REPO}#build-from-source)")
+
+
+def latest_release():
+    """The latest release's version and assets, by gh if it answers, else curl."""
+    path = f"repos/{REPO}/releases/latest"
+    out = None
+    if shutil.which("gh"):
+        r = subprocess.run(["gh", "api", path], capture_output=True, text=True)
+        out = r.stdout if r.returncode == 0 else None
+    if out is None:
+        out = run(["curl", "-fsSL", "-H", "Accept: application/vnd.github+json",
+                   f"https://api.github.com/{path}"], capture=True).stdout
+    try:
+        rel = json.loads(out)
+        tag = rel["tag_name"]
+        assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}
+    except (ValueError, KeyError, TypeError):
+        die(f"GitHub's answer for {path} is not a release")
+    return tag.lstrip("v"), assets
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def unpack(version, tarball, assets):
+    """~/.local/lib/lcars/<version>/, from a checked tarball; its path."""
+    dest = RELEASES / version
+    if (dest / "lcars").exists():
+        left(f"the release {tilde(dest)}")
+        return dest
+    for need in (tarball, "SHA256SUMS"):
+        if need not in assets:
+            die(f"release {version} has no {need}")
+    step(f"download {tarball} and SHA256SUMS, check, unpack to {tilde(dest)}")
+    with tempfile.TemporaryDirectory(prefix="lcars-webapp-") as tmp:
+        tmp = pathlib.Path(tmp)
+        for f in (tarball, "SHA256SUMS"):
+            run(["curl", "-fsSL", "-o", str(tmp / f), assets[f]])
+        want = None
+        for line in (tmp / "SHA256SUMS").read_text().splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].lstrip("*") == tarball:
+                want = parts[0].lower()
+        if not want:
+            die(f"SHA256SUMS has no line for {tarball}")
+        got = sha256(tmp / tarball)
+        if got != want:
+            die(f"{tarball} does not match SHA256SUMS (got {got}, want {want}): not installed")
+        say(f"checked {tarball} against SHA256SUMS")
+        out = tmp / "x"
+        out.mkdir()
+        with tarfile.open(tmp / tarball) as t:
+            # the data filter refuses absolute paths, .. and links out of the tree
+            if hasattr(tarfile, "data_filter"):
+                t.extractall(out, filter="data")
+            else:
+                t.extractall(out)
+        top = list(out.iterdir())
+        root = top[0] if len(top) == 1 and top[0].is_dir() else out
+        if not (root / "lcars").is_file():
+            die(f"{tarball} has no lcars binary at its top")
+        RELEASES.mkdir(parents=True, exist_ok=True)
+        os.replace(root, dest)  # one rename: a half-unpacked release is never seen
+    say(f"made       {tilde(dest)}")
+    return dest
+
+
+def link(dest):
+    """~/.local/bin/lcars and lcars-cli -> the release; True if either moved."""
+    moved = False
+    target = dest / "lcars"
+    for name in ("lcars", "lcars-cli"):
+        ln = BIN / name
+        if ln.is_symlink() and pathlib.Path(os.readlink(ln)) == target:
+            left(f"the link {tilde(ln)} -> {tilde(target)}")
+            continue
+        if ln.exists() and not ln.is_symlink():
+            die(f"{tilde(ln)} is a file, not a link this script made: move it away and run again")
+        if step(f"link {tilde(ln)} -> {tilde(target)}"):
+            BIN.mkdir(parents=True, exist_ok=True)
+            tmp = ln.with_name(ln.name + ".lcars-webapp")
+            if tmp.is_symlink() or tmp.exists():
+                tmp.unlink()
+            tmp.symlink_to(target)
+            os.replace(tmp, ln)
+        moved = True
+    return moved
+
+
+def init():
+    if (DATA / "lcars.env").exists():
+        left(f"the journal {tilde(DATA)} (it has lcars.env)")
+        return
+    if step(f"lcars init {tilde(DATA)}"):
+        say("--- lcars init ---")
+        run([str(BIN / "lcars"), "init", str(DATA), "--port", str(PORT)])
+        say("---")
+
+
+def service(relinked):
+    if UNIT.exists():
+        if UNIT.read_text() == UNIT_TEXT:
+            left(f"the unit {tilde(UNIT)}")
+        else:
+            left(f"the unit {tilde(UNIT)} (not the one this script writes: yours stands)")
+    elif step(f"write {tilde(UNIT)} (lcars --data {tilde(DATA)} --port {PORT}, on 127.0.0.1)"):
+        UNIT.parent.mkdir(parents=True, exist_ok=True)
+        UNIT.write_text(UNIT_TEXT)
+        run(["systemctl", "--user", "daemon-reload"])
+    else:
+        step("systemctl --user daemon-reload")
+    on = not DRY and quiet(["systemctl", "--user", "is-enabled", "--quiet", "lcars"]) \
+        and quiet(["systemctl", "--user", "is-active", "--quiet", "lcars"])
+    if on and relinked:
+        if step("systemctl --user restart lcars (the new release)"):
+            run(["systemctl", "--user", "restart", "lcars"])
+    elif on:
+        left("the service lcars (enabled, running)")
+    elif step("systemctl --user enable --now lcars"):
+        run(["systemctl", "--user", "enable", "--now", "lcars"])
+    say(f"To keep it running when you log out: loginctl enable-linger {os.environ.get('USER', '$USER')}")
+
+
+def wait_health(base):
+    if not step(f"wait for {base}/health"):
+        return
+    end = time.monotonic() + HEALTH_WAIT
+    while not http_ok(base + "/health"):
+        if time.monotonic() > end:
+            say(f"the server did not answer {base}/health in {HEALTH_WAIT:.0f}s: "
+                "`journalctl --user -u lcars` says why. The rest goes on all the same.")
+            return
+        time.sleep(0.5)
+    say(f"the server answers at {base}/")
+
+
+def local():
+    on_omarchy()
+    a = arch()
+    if DRY:
+        step(f"ask GitHub ({REPO}) for its latest release")
+        dest = RELEASES / "<latest>"
+        step(f"download lcars-<latest>-linux-{a}.tar.gz and SHA256SUMS, check, unpack to {tilde(dest)}")
+    else:
+        version, assets = latest_release()
+        say(f"latest release: {version} ({REPO})")
+        dest = unpack(version, f"lcars-{version}-linux-{a}.tar.gz", assets)
+    relinked = link(dest)
+    init()
+    service(relinked)
+    wait_health(LOCAL_URL)
+    e = read_env(DATA / "lcars.env")
+    user, password = e.get("LCARS_AUTH_USER", ""), e.get("LCARS_AUTH_PASS", "")
+    write_env(LOCAL_URL, user, password)
+    launcher(LOCAL_URL, user, password)
+    say(f"The journal is {tilde(DATA)}; the releases are under {tilde(RELEASES)}.")
+    finish()
+
+
+# ---- remote ----------------------------------------------------------------
+
+def address(raw):
+    a = raw.strip().rstrip("/")
+    a = a[:-3].rstrip("/") if a.endswith("/ui") else a
+    if not a:
+        return ""
+    if "://" not in a:
+        a = "https://" + a
+    if not a.startswith(("http://", "https://")) or any(c.isspace() for c in a):
+        die(f"{raw!r} is not a server's address (https://HOST, or http://HOST:PORT)")
+    return a
+
+
+def remote(raw):
+    on_omarchy()
+    base = address(raw or ask("The server's address, e.g. https://lcars.example.net"))
+    if not base:
+        die("no address: lcars-webapp --remote https://HOST")
+    if not step(f"GET {base}/health"):
+        pass
+    elif http_ok(base + "/health"):
+        say(f"the server answers at {base}/")
+    else:
+        say(f"{base}/health did not answer (a server down, or behind a login of its own): "
+            "the rest goes on all the same")
+    have = read_env(ENV)
+    user = os.environ.get("LCARS_AUTH_USER", "")
+    password = os.environ.get("LCARS_AUTH_PASS", "")
+    if not user and have.get("LCARS_URL") == base and have.get("LCARS_AUTH_USER"):
+        user, password = have["LCARS_AUTH_USER"], have.get("LCARS_AUTH_PASS", "")
+    if not user and not DRY:
+        user = ask("The server's login: user (empty if it asks none)")
+        if user:
+            password = ask(f"The password for {user}", secret=True)
+    if not user:
+        say("no login given: LCARS_URL alone is written")
+    write_env(base, user, password)
+    launcher(base, user, password)
+    finish()
+
+
+def theme_hook():
+    """The offer the captain asked for (the design's Q7): the console
+    follows omarchy's theme through bin/lcars-theme-set, linked into
+    omarchy's hook folder. Asked, default yes; no terminal, no question
+    and nothing done (a script run by another is not answering)."""
+    if not HOOK_SRC.is_file():
+        return  # a copy of this script with no hook beside it
+    if HOOK.is_symlink() or HOOK.exists():
+        if HOOK.is_symlink() and pathlib.Path(os.readlink(HOOK)) == HOOK_SRC:
+            executable(HOOK_SRC)
+        left(f"the theme hook {tilde(HOOK)}")
+        return
+    if DRY:
+        step(f"ask to have the console follow omarchy's theme; on yes link "
+             f"{tilde(HOOK)} -> {tilde(HOOK_SRC)}")
+        return
+    if not sys.stdin.isatty():
+        return
+    q = "Have the console follow omarchy's theme?"
+    if shutil.which("gum"):
+        yes = subprocess.run(["gum", "confirm", "--default=true", q]).returncode == 0
+    else:
+        yes = ask(q + " [Y/n]").lower() in ("", "y", "yes")
+    if not yes:
+        say("the theme hook not installed (run this again to be asked again)")
+        return
+    HOOK.parent.mkdir(parents=True, exist_ok=True)
+    HOOK.symlink_to(HOOK_SRC)
+    executable(HOOK_SRC)
+    say(f"linked     {tilde(HOOK)} -> {tilde(HOOK_SRC)}: the console takes each theme omarchy sets")
+
+
+def executable(path):
+    mode = path.stat().st_mode
+    if mode & 0o111 != 0o111:
+        os.chmod(path, mode | 0o755)
+
+
+def finish():
+    theme_hook()
+    say(f"The login is in {tilde(ENV)} only (0600), never in the launcher or its URL: "
+        "the browser asks for it once and keeps it.")
+
+
+# ---- uninstall -------------------------------------------------------------
+
+def uninstall():
+    on_omarchy()
+    if DESKTOP.exists() or DRY:
+        if step(f"omarchy-webapp-remove {NAME}"):
+            run(["omarchy-webapp-remove", NAME])
+    else:
+        say(f"no launcher {tilde(DESKTOP)}: nothing to remove")
+    if UNIT.exists() or DRY:
+        if step("systemctl --user disable --now lcars"):
+            run(["systemctl", "--user", "disable", "--now", "lcars"])
+        if step(f"remove {tilde(UNIT)}; systemctl --user daemon-reload"):
+            UNIT.unlink()
+            run(["systemctl", "--user", "daemon-reload"])
+    if HOOK.is_symlink():
+        if step(f"remove the theme hook {tilde(HOOK)}"):
+            HOOK.unlink()
+    elif HOOK.exists():
+        left(f"{tilde(HOOK)} (a file, not the link this script makes)")
+    say(f"Kept, never deleted: the journal ({tilde(DATA)}), the releases ({tilde(RELEASES)}), "
+        f"the links in {tilde(BIN)} and {tilde(ENV)}.")
+
+
+# ---- the arguments ---------------------------------------------------------
+
+USAGE = """usage: lcars-webapp [--local | --remote [URL] | --uninstall] [--dry-run]
+  (none)       asks: local or remote
+  --local      the latest release on this machine, as a service, in the launcher
+  --remote URL the launcher for a server elsewhere
+  --uninstall  the service and the launcher gone (the journal kept)"""
+
+
+def main(argv):
+    global DRY
+    mode, url = None, ""
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-h", "--help"):
+            say(USAGE)
+            return 0
+        if a == "--dry-run":
+            DRY = True
+        elif a in ("--local", "--uninstall") and mode is None:
+            mode = a[2:]
+        elif a == "--remote" and mode is None:
+            mode = "remote"
+            if i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+                url = argv[i + 1]
+                i += 1
+        elif a.startswith("--remote=") and mode is None:
+            mode, url = "remote", a.split("=", 1)[1]
+        else:
+            die(f"unknown argument {a!r}\n{USAGE}", 2)
+        i += 1
+    if mode is None:
+        mode = ask("Set up LCARS", ["local", "remote"])
+        if mode not in ("local", "remote"):
+            die(f"which one?\n{USAGE}", 2)
+    if mode == "local":
+        local()
+    elif mode == "remote":
+        remote(url)
+    else:
+        uninstall()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

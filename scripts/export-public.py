@@ -136,6 +136,28 @@ def shipped(src):
     return [p for p in files if p and not excluded(p) and (src / p).is_file()]
 
 
+def links(src, files):
+    """{path: target} of the tracked symlinks that ship (scripts/omarchy/ to
+    the plugin's omarchy/bin/), kept links in DEST: the public tree's tests
+    check them as links (test_webapp.py runs the installer through one). A
+    link must stay inside the tree, to a file that ships too: one out of it,
+    or to an excluded file, would dangle in the public repo or name a path
+    of this box's."""
+    out = {}
+    for line in git(src, "ls-files", "-s", "-z").split("\0"):
+        if not line.startswith("120000 "):
+            continue
+        path = line.split("\t", 1)[1]
+        if path not in files:
+            continue
+        target = os.readlink(src / path)
+        to = os.path.normpath(os.path.join(os.path.dirname(path), target))
+        if os.path.isabs(target) or to not in files:
+            sys.exit(f"export: {path} links to {target}, which does not ship: point it inside the tree")
+        out[path] = target
+    return out
+
+
 def substitute(path, data, repo):
     for where, rx, repl in SUBST:
         if where != path:
@@ -261,8 +283,10 @@ def report_grouped(hits, rules):
 
 
 # ------------------------------------------------------------- the export
-def write(dest, files):
-    """DEST becomes the snapshot: everything but .git cleared, then written."""
+def write(dest, files, linked=None):
+    """DEST becomes the snapshot: everything but .git cleared, then written
+    (a link in `linked` as the link, its bytes having been audited as the
+    file it points to)."""
     for child in dest.iterdir():
         if child.name == ".git":
             continue
@@ -270,7 +294,10 @@ def write(dest, files):
     for path, data in files.items():
         p = dest / path
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(data)
+        if linked and path in linked:
+            p.symlink_to(linked[path])
+        else:
+            p.write_bytes(data)
 
 
 def modes(src, dest, files):
@@ -381,7 +408,8 @@ def main(argv=None):
         for name, path, i, text in hits:
             print(f"{path}:{i}: {name}: {text}")
         sys.exit(f"export: {len(hits)} lines hit the audit: nothing written")
-    write(dest, files)
+    linked = links(src, files)
+    write(dest, files, linked)
     modes(src, dest, files)
     print(f"export: {len(files)} files written to {dest}, the audit clean")
     if not a.no_tests:
