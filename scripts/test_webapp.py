@@ -19,10 +19,12 @@ import os
 import pathlib
 import platform
 import pty
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
+import time
 import unittest
 
 sys.dont_write_bytecode = True
@@ -203,6 +205,11 @@ class Webapp(unittest.TestCase):
         for n in ("lcars", "lcars-cli"):
             self.assertEqual(os.readlink(self.home / ".local/bin" / n), str(rel / "lcars"))
         self.assertIn("checked lcars-0.337.2", out)
+        # downloaded and unpacked beside the releases, never in /tmp (a
+        # tmpfs on omarchy: the one rename into place would cross devices)
+        lib = self.home / ".local/lib/lcars"
+        self.assertRegex(self.log, r"curl -fsSL -o " + re.escape(str(lib)) + r"/\.tmp-[^/ ]+/lcars-0\.337\.2-")
+        self.assertEqual(list(lib.glob(".tmp-*")), [], "the scratch taken away")
         self.assertIn("Login:     lcars / pw", out)  # init's own words, passed on
         self.assertIn(f"lcars init {data} --port 8080", self.log)
         unit = (self.home / ".config/systemd/user/lcars.service").read_text()
@@ -256,6 +263,20 @@ class Webapp(unittest.TestCase):
         self.assertIn("does not match SHA256SUMS", out)
         self.assertFalse((self.home / ".local/lib/lcars/0.337.2").exists())
         self.assertFalse((self.home / ".local/bin/lcars").exists())
+        self.assertEqual(list((self.home / ".local/lib/lcars").glob(".tmp-*")), [], "a failed run leaves no scratch")
+
+    def test_a_killed_runs_scratch(self):
+        # a .tmp-* a killed run left: an hour old it goes, a younger one
+        # (another run's, mid-download) is left alone; neither is a release
+        lib = self.home / ".local/lib/lcars"
+        old, young = lib / ".tmp-killed", lib / ".tmp-running"
+        for d in (old, young):
+            (d / "x").mkdir(parents=True)
+        os.utime(old, (time.time() - 7200,) * 2)
+        self.run_it("--local")
+        self.assertFalse(old.exists())
+        self.assertTrue(young.exists())
+        self.assertTrue((lib / "0.337.2/lcars").is_file())
 
     def test_gh_answers(self):
         (self.fake / "gh").touch()

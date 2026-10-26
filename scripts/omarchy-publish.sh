@@ -30,7 +30,7 @@
 
 set -euo pipefail
 
-REMOTE_DEFAULT="git@github.com:saftacatalinmihai/omarchy-lcars.git"
+REMOTE_DEFAULT="https://github.com/saftacatalinmihai/omarchy-lcars.git"
 src=""
 remote=$REMOTE_DEFAULT
 push=0

@@ -390,6 +390,9 @@ class Publish(unittest.TestCase):
             p = self.src / "omarchy" / "bin" / name
             p.write_text("#!/bin/sh\nexit 0\n")
             p.chmod(0o755)
+        # the fixture's own numbering from 0.1.0, whatever the plugin's is now
+        m = self.src / "omarchy" / "manifest.json"
+        m.write_text(json.dumps({**json.loads(m.read_text()), "version": "0.1.0"}, indent=2) + "\n")
         git(self.t, "init", "-q", "-b", "main", str(self.src))
         git(self.src, "add", "-A")
         git(self.src, "commit", "-q", "-m", "Release 1")
@@ -432,6 +435,11 @@ class Publish(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("uncommitted", r.stderr)
         self.assertEqual(self.remote_main(), "")
+
+    def test_default_remote_by_https(self):
+        # the box's ssh key is a deploy key for lcars alone: the plugin's
+        # repo is pushed over https, with gh's credentials
+        self.assertIn('REMOTE_DEFAULT="https://github.com/saftacatalinmihai/omarchy-lcars.git"', PUBLISH.read_text())
 
     def test_bin_required(self):
         git(self.src, "rm", "-rq", "omarchy/bin")

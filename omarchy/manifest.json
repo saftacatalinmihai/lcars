@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "dev.mihai-safta.lcars",
   "name": "LCARS",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Mihai Safta",
   "license": "MIT",
   "description": "Your LCARS journal in the bar: open the console as an app, and set up a local server or connect to your own.",

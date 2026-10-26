@@ -339,7 +339,16 @@ def unpack(version, tarball, assets):
         if need not in assets:
             die(f"release {version} has no {need}")
     step(f"download {tarball} and SHA256SUMS, check, unpack to {tilde(dest)}")
-    with tempfile.TemporaryDirectory(prefix="lcars-webapp-") as tmp:
+    # The scratch is made under RELEASES itself, never /tmp: the release is
+    # put in place by one rename, which cannot cross filesystems (omarchy's
+    # /tmp is a tmpfs: os.replace failed with EXDEV). A .tmp-* a killed run
+    # left is no release (none holds a version's name) and goes here, once
+    # an hour old: a younger one may be another run's, mid-download.
+    RELEASES.mkdir(parents=True, exist_ok=True)
+    for old in RELEASES.glob(".tmp-*"):
+        if old.is_dir() and not old.is_symlink() and time.time() - old.stat().st_mtime > 3600:
+            shutil.rmtree(old, ignore_errors=True)
+    with tempfile.TemporaryDirectory(dir=RELEASES, prefix=".tmp-") as tmp:
         tmp = pathlib.Path(tmp)
         for f in (tarball, "SHA256SUMS"):
             run(["curl", "-fsSL", "-o", str(tmp / f), assets[f]])
@@ -366,7 +375,6 @@ def unpack(version, tarball, assets):
         root = top[0] if len(top) == 1 and top[0].is_dir() else out
         if not (root / "lcars").is_file():
             die(f"{tarball} has no lcars binary at its top")
-        RELEASES.mkdir(parents=True, exist_ok=True)
         os.replace(root, dest)  # one rename: a half-unpacked release is never seen
     say(f"made       {tilde(dest)}")
     return dest

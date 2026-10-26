@@ -5,6 +5,12 @@ shows it under the LCARS badge (`APP_VERSION` in `lcars-ui/index.html`), so a
 page showing an older number is running a cached copy. A feature bumps the
 minor, a fix the patch, in the same commit as `APP_VERSION`.
 
+## 0.339.3 — 2026-10-26
+
+- **omarchy plugin 0.1.1:** `lcars-webapp --local` no longer fails with "Invalid cross-device link" where `/tmp` is a tmpfs (omarchy's is): the release is downloaded, checked and unpacked beside the releases in `~/.local/lib/lcars/`, so its one rename into place stays on one filesystem; a failed or killed run leaves no scratch behind.
+- **demo:** the build versions the deck's KTX2 transcoder like every other file.
+- **release:** the plugin is published over https by default.
+
 ## 0.339.1 — 2026-10-26
 
 - **omarchy plugin:** LCARS for omarchy (`omarchy/`, published on its own as saftacatalinmihai/omarchy-lcars, 0.1.0): a bar widget whose LCARS mark opens the console as an app (focusing it when open), lit, urgent or dimmed by the server's `/health`, with a popup to open it, write a new entry or set it up; and its installer, `lcars-webapp`: `--local` installs the latest release as a systemd user service (checked against SHA256SUMS), `--remote` connects to a server elsewhere, both put LCARS in omarchy's app launcher and offer the theme hook, `--uninstall` keeps the data.

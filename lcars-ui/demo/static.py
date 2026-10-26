@@ -114,7 +114,10 @@ def page(name, ver):
     rx = re.compile(r'(["\'])(\./)?(' + "|".join(map(re.escape, names)) + r')\1')
     s = rx.sub(lambda m: f"{m[1]}{m[2] or ''}{m[3]}?v={ver[m[3]]}{m[1]}", s)
     if name == "deck.html":
-        table = {k: v for k, v in ver.items() if k.startswith(("deck/", "crew/"))}
+        # the KTX2 loader's transcoder too: its path is set once
+        # ("./vendor/basis-…/") and the loader's FileLoaders, on the default
+        # manager, add "basis_transcoder.js" and ".wasm" to it as they run
+        table = {k: v for k, v in ver.items() if k.startswith(("deck/", "crew/", "vendor/basis-"))}
         swap(TABLE_MARK, '<script>window.LCARS_DEMO_V=' + json.dumps(table, separators=(",", ":")) + ';\n'
              'window.LCARS_DEMO_ASSET=function(u){var h=window.LCARS_DEMO_V[String(u).replace(/^\\.\\//,"")];'
              'return h?u+(String(u).indexOf("?")<0?"?":"&")+"v="+h:u;};</script>\n')
