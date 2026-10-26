@@ -49,7 +49,7 @@ import fixture  # noqa: E402
 
 DEFAULT_OUT = pathlib.Path.home() / "blog-media" / "lcars-demo" / "out"
 MARK = ".lcars-demo"                  # what says a folder is ours to remake
-DIRS = ["vendor", "deck", "crew"]     # the pages' assets, whole
+DIRS = ["vendor", "deck", "crew", "manual", "themes"]  # the pages' assets, whole (manual/: the user manual; themes/: btop's, theming.md)
 FILES = ["icon-192.png", "icon-512.png", "apple-touch-icon.png"]
 FONTS = ["antonio-latin.woff2", "antonio-latin-ext.woff2"]
 

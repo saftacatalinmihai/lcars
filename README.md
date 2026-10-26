@@ -36,6 +36,9 @@ licences. `lcars init` never overwrites anything: run it again and it says
 what it left alone. A new journal starts empty; you make kinds as you go,
 by typing them on an entry.
 
+**The user manual** starts at [site/manual/pages/00-start.md](site/manual/pages/00-start.md);
+a running LCARS serves it at `/manual` (the help's foot links it too).
+
 ## Configuration
 
 Settings are `KEY=value` lines in `<data dir>/lcars.env`, read at start

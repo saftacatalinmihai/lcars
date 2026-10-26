@@ -22,7 +22,7 @@ A role is a file in crew/ (crew/ops.md, ...): front matter, then the prompt.
     budget: 0.40                     claude --max-budget-usd
     timeout: 600                     seconds before the run is killed
     posts: historian                 the entry kind's suffix (default: the role)
-    kind: script                     no model: a function below (ship, qa, shares, social)
+    kind: script                     no model: a function below (ship, qa, shares, social, housekeeping)
     pre: ship                        a script run first; its text heads the entry
     brief: own                       the role's prompt stands alone (no crew_tool brief)
     tools: Bash Read                 claude --tools, instead of the ones the verbs imply
@@ -34,6 +34,7 @@ A role is a file in crew/ (crew/ops.md, ...): front matter, then the prompt.
     writes: append #2291             the one write a run may make (scheduled_apply)
     writer: Science officer          who an appended block says added it (default: the title's)
     heavy: true                      the run takes the cores: it waits for an engineer's job (qa)
+    gate: social                     a check before claude: nothing to do is no model, no seat
     ---
 
 `brief: own` is for the two jobs folded in from ~/.claude in 0.143.0: the
@@ -115,13 +116,21 @@ ROLE_RE = re.compile(r"[a-z][a-z0-9-]{0,30}")
 DEFAULTS = {"model": "sonnet", "kind": "agent", "verbs": "today", "web": "", "read": "", "budget": "0.50",
             "timeout": "900", "min_free_mb": "1000", "lock_wait": "1800", "mem_wait": "600", "effort": "",
             "pre": "", "brief": "crew", "tools": "", "allow": "", "order": "", "notes": "",
-            "note_budget": "0.30", "note_timeout": "300", "writes": "", "writer": "", "heavy": ""}
+            "note_budget": "0.30", "note_timeout": "300", "writes": "", "writer": "", "heavy": "", "gate": ""}
 HOME = os.path.expanduser("~")
 # Read verbs crew_tool.py has; a role's `verbs` must come from these
 READ_VERBS = {"today", "list", "get", "stats", "kinds", "agenda", "onthisday", "month", "weekstats",
-              "counsel", "hygiene", "trip", "audit", "docs"}
+              "counsel", "hygiene", "trip", "audit", "docs", "social"}
 # Never readable even by a role that reads the checkout
 READ_DENY = ("lcars.db", "lcars.db-*", "lcars_bkp.db", "lcars_backups/**", ".env", "**/.env")
+# Never readable by any agent, whatever its role reads: the box's secrets,
+# the publisher's write tokens among them (social-publish.md 3.7). A rule
+# the harness enforces (the agent is the server's own Unix user); Bash
+# needs none of its own, being only the role's crew_tool.py verbs under
+# dontAsk. Each in both spellings Claude Code reads: home-relative and
+# absolute.
+SECRET_DENY = tuple(f"{t}({p})" for t in ("Read", "Edit", "Write")
+                    for p in ("~/.env", "~/.config/lcars/**", f"/{HOME}/.env", f"/{HOME}/.config/lcars/**"))
 RUNS_KEEP = 500
 
 
@@ -170,6 +179,8 @@ def parse_role(text, name, local=None):
             raise ValueError(f"crew/{name}.md: no such read verb {sorted(bad)}")
         if fm["pre"] and fm["pre"] not in SCRIPTS:
             raise ValueError(f"crew/{name}.md: pre is one of {sorted(SCRIPTS)}")
+        if fm["gate"] and fm["gate"] not in GATES:
+            raise ValueError(f"crew/{name}.md: gate is one of {sorted(GATES)}")
         if fm["brief"] not in ("crew", "own"):
             raise ValueError(f"crew/{name}.md: brief is crew or own")
         bad = set(fm["notes"].split()) - READ_VERBS
@@ -177,6 +188,8 @@ def parse_role(text, name, local=None):
             raise ValueError(f"crew/{name}.md: no such read verb in notes {sorted(bad)}")
     elif fm["notes"]:
         raise ValueError(f"crew/{name}.md: a script role has no model to answer notes")
+    elif fm["gate"]:
+        raise ValueError(f"crew/{name}.md: a gate is for an agent role (a script has no model to spare)")
     elif fm.get("script") not in SCRIPTS:
         raise ValueError(f"crew/{name}.md: script is one of {sorted(SCRIPTS)}")
     if fm["writes"]:
@@ -435,8 +448,9 @@ def claude_argv(fm, prompt, tool=TOOL):
     allowed += [expand(r.strip()) for r in fm["allow"].split("|") if r.strip()]
     argv = [CLAUDE_BIN, "-p", "--model", fm["model"], "--output-format", "json",
             "--tools", ",".join(tools), "--allowedTools", *allowed]
+    argv += ["--disallowedTools", *SECRET_DENY]
     if fm["read"]:
-        argv += ["--disallowedTools", *[f"Read(/{REPO}/{p})" for p in READ_DENY], "--add-dir", REPO]
+        argv += [*[f"Read(/{REPO}/{p})" for p in READ_DENY], "--add-dir", REPO]
     argv += ["--permission-mode", "dontAsk", "--setting-sources", "project", "--strict-mcp-config",
              "--no-session-persistence", "--disable-slash-commands", "--max-budget-usd", fm["budget"],
              "--append-system-prompt", brief(fm, prompt, tool)]
@@ -769,17 +783,105 @@ def run_social(fm, dry):
     if r["notice"]:
         # the notice names each comment's entry, known once finish posted them
         at = [i for i, (_, _, _, c) in enumerate(r["comments"]) if not c["replied"]]
+        # due the next 09:00 in the captain's zone, with the alert CalDAV gives it
         notice = (SW.NOTICE_LIST, SW.notice_title(r["notice"]),
-                  lambda ids: SW.notice_body(r["notice"], [ids[i] if i < len(ids) else 0 for i in at]))
+                  lambda ids: SW.notice_body(r["notice"], [ids[i] if i < len(ids) else 0 for i in at]),
+                  SW.notice_fields(SW.now_utc(), T.TZ))
     if dry:
-        extra = [f"[would post {SW.notice_title(r['notice'])} to the social list]"] if notice else []
+        extra = [f"[would post {SW.notice_title(r['notice'])} to the social list, due "
+                 f"{T.local(notice[3]['start_date'])}]"] if notice else []
         return title, "\n".join([body] + extra), urgent
     readings = [(SW.COMMENT, t, None, c, {"done_bool": d}) for t, c, d, _ in r["comments"]] + r["readings"]
     patches = [(row, {"content": c, "done_bool": 1}) for row, c in r["patches"]]
     return title, body, urgent, {"readings": readings, "notice": notice, "patches": patches}
 
 
-SCRIPTS = {"ship": run_ship, "qa": run_qa, "measure": run_measure, "shares": run_shares, "social": run_social}
+def run_housekeeping(fm, dry):
+    """The box's housekeeping (scripts/housekeeping.py): the known, old
+    scratch deleted (none with --dry-run), the numbers measured after, one
+    entry a run; past a threshold, a notice for Number One ("no1"), sent by
+    finish once the entry it names is posted."""
+    import housekeeping as H
+    r = H.run(dry)
+    body = H.report(r)
+    if dry:
+        return H.title(r), body, None
+    extra = {"value_int": r["m"]["mem"].get("available_mb")}
+    if r["alarms"]:
+        extra["no1"] = "[housekeeping] The box is past a threshold: " + "; ".join(r["alarms"]) + "."
+    return H.title(r), body, None, extra
+
+
+# ---- gates: an agent role's check before claude ------------------------------
+#
+# `gate: <name>` in a role's front matter: a function run under the crew lock
+# before the seat is asked for or a model started, (go, why not, what it
+# read). Nothing to do is the run log's `nothing`, as a quiet script's is: an
+# hourly agent role costs nothing in the hours it has no work. The same name
+# takes the agent's answer after (the second function), with what the gate
+# read: the drafter's PATCHes are guarded by that read's stamps.
+
+def gate_social(fm):
+    """The social drafter: comments of status new with no draft yet."""
+    import social as SW
+    since = (T.now_local().date() - dt.timedelta(days=SW.SEEN_DAYS)).isoformat()
+    rows = SW.pending(T.entries_all(kind="crew_" + SW.COMMENT, since=since))
+    if not rows:
+        return False, "no comment waits for a draft", None
+    return True, "", rows
+
+
+def run_social_drafts(fm, result, rows, dry=False):
+    """The drafter's answer (`#<id>: <draft>` blocks) put under each
+    comment's "Suggested reply (draft, not posted):" line, status drafted,
+    by a PATCH guarded with the gate's read (`if_modified`: a 412 means the
+    captain edited it since, and the next run tries again). -> the run's
+    crew_social_drafts report: what was drafted, and what was not and why."""
+    import social as SW
+    drafts, by_id = SW.parse_drafts(result), {r["id"]: r for r in rows}
+    # the agent's own words before its first block (the voice page missing, a
+    # comment it could not read), its `# title` line dropped: the runner titles
+    lead = []
+    for ln in (result or "").split("\n"):
+        if SW.DRAFT_RE.match(ln.strip()):
+            break
+        lead.append(ln)
+    note = "\n".join(ln for ln in lead if not re.match(r"#+\s", ln)).strip()
+    out, done = [], 0
+    for rid, d in drafts.items():
+        r = by_id.get(rid)
+        if r is None:
+            out.append(f"- #{rid}: not written, not a comment this run was given")
+            continue
+        what = (r.get("title") or "").split(":", 1)[0]
+        if dry:
+            out.append(f"- #{rid} {what}: would draft: {d}")
+            continue
+        st, text = T.http("PATCH", f"/entries/{rid}", {"content": SW.with_draft(r.get("content"), d),
+                                                        "if_modified": r.get("last_modified_at_utc") or ""})
+        if 200 <= st < 300:
+            done += 1
+            said = "no reply suggested" if d.startswith(SW.NO_REPLY) else "drafted"
+            out.append(f"- #{rid} {what}: {said}: {SW.first_words(d, 100)}")
+        elif st == 412:
+            out.append(f"- #{rid} {what}: skipped, changed since it was read; the next run tries again")
+        else:
+            out.append(f"- #{rid} {what}: not written, HTTP {st} {text[:120]}")
+    for rid, r in by_id.items():
+        if rid not in drafts:
+            out.append(f"- #{rid} {(r.get('title') or '').split(':', 1)[0]}: no draft given; the next run tries again")
+    if not T.voice_page():
+        out.append(f"\nWritten without crew/{T.VOICE_PAGE} (not on the box yet): from the captain's own last replies.")
+    n = len(drafts) if dry else done
+    title = f"# Social drafts: {n} repl{'y' if n == 1 else 'ies'}"
+    return "\n\n".join(x for x in (title, note, "\n".join(out)) if x)
+
+
+GATES = {"social": (gate_social, run_social_drafts)}
+
+
+SCRIPTS = {"ship": run_ship, "qa": run_qa, "measure": run_measure, "shares": run_shares, "social": run_social,
+           "housekeeping": run_housekeeping}
 
 
 def with_pre(pre, title, body, urgent):
@@ -849,6 +951,9 @@ def run(name, dry=False, no_post=False):
         if fm["kind"] == "agent":
             if fm["pre"]:
                 info["pre"] = SCRIPTS[fm["pre"]](fm, True)
+            if fm["gate"]:
+                go, why, gated = GATES[fm["gate"]][0](fm)
+                info["gate"] = {"go": go, "why": why, "rows": [r.get("id") for r in gated or []]}
             argv = claude_argv(fm, prompt)
             info.update(claude=CLAUDE_BIN, claude_found=os.access(CLAUDE_BIN, os.X_OK),
                         argv=[a if len(a) < 300 else f"<{len(a)} chars>" for a in argv],
@@ -886,13 +991,18 @@ def run(name, dry=False, no_post=False):
         if not server_up():
             log_run(dict(rec, status="skipped", why="server down"))
             die(f"{name}: the server does not answer /health", 75)
+        gated = None
+        if fm["gate"]:
+            go, why, gated = GATES[fm["gate"]][0](fm)
+            if not go:
+                return finish(fm, rec, fm["title"], "", None, {"secs": 0}, no_post, {"nothing": why})
         with seat(name, float(fm["lock_wait"])) as (ok, why):
             if not ok:
                 log_run(dict(rec, status="skipped", why=why))
                 die(f"{name}: {why}", 75)
             with cores_for(fm, name):
                 pre = SCRIPTS[fm["pre"]](fm, False) if fm["pre"] else None
-                title, body, urgent, meta = agent_run(fm, prompt, day)
+                title, body, urgent, meta = agent_run(fm, prompt, day, gated)
         return finish(fm, rec, *with_pre(pre, title, body, urgent), meta, no_post)
     finally:
         lock.close()
@@ -925,13 +1035,16 @@ def cores_for(fm, role):
                    "crew:" + role)
 
 
-def agent_run(fm, prompt, day):
-    """claude -p for one role; (title, body, urgent, meta)."""
+def agent_run(fm, prompt, day, gated=None):
+    """claude -p for one role; (title, body, urgent, meta). A gated role's
+    answer goes through its gate's second half with what the gate read."""
     result, meta = claude_once(fm, claude_argv(fm, prompt), order(fm))
     if meta.get("failed"):
         body = f"The {fm['role']} run failed (exit {meta['rc']}).\n\n```\n{meta['failed']}\n```\n\n---\n" \
             + footer(fm, meta)
         return f"{fm['title']} · {day} · failed", body, None, meta
+    if fm["gate"]:
+        result = GATES[fm["gate"]][1](fm, result, gated or [])
     answer, lines = N.split_changes(result)
     listing, recs = scheduled_apply(fm, lines, lambda r: note_write_log(dict(r, role=fm["role"], run=day)))
     meta["changes"] = len(recs)
@@ -1068,6 +1181,8 @@ def finish(fm, rec, title, body, urgent, meta, no_post, extra=None):
             print(f"[would patch #{row['id']}]")
         if notice:
             print(f"[would post the {notice[0]} notice: {notice[1]}]")
+        if extra.get("no1"):
+            print(f"[would tell Number One: {extra['no1']}]")
         print(f"# {title}\n\n{body}" + (f"\n\n[would also post task_crew: {urgent}]" if urgent else ""))
         log_run(dict(rec, status="no-post"))
         return 0
@@ -1079,14 +1194,20 @@ def finish(fm, rec, title, body, urgent, meta, no_post, extra=None):
                                for r in readings]
         rec["entry"] = T.post(fm["posts"], title, body, value_int=extra.get("value_int"))
         if notice:
-            lst, n_title, n_body = notice
+            lst, n_title, n_body, *n_fields = notice
             rec["notice"] = T.post(fm["posts"], n_title, n_body(rec.get("readings") or [])
-                                   + f"\n\nFrom {fm['title']}'s report #{rec['entry']}.", notice=lst)
+                                   + f"\n\nFrom {fm['title']}'s report #{rec['entry']}.", notice=lst,
+                                   fields=n_fields[0] if n_fields else None)
         if urgent:
             rec["task"] = T.post(fm["posts"], urgent, f"From {fm['title']}'s report #{rec['entry']}.", urgent=True)
     except RuntimeError as e:
         log_run(dict(rec, status="post-failed", why=str(e)[:200]))
         die(str(e), 1)
+    if extra.get("no1"):
+        # Number One's inbox (engineer.py no1_send: a crew_inbox entry, typed
+        # to it in order); the journal down sends it to a retry unit
+        import engineer as E
+        rec["no1"] = E.no1_send(f"{extra['no1']} Report #{rec['entry']}.")
     for row, fields in patches:
         # a row the crew wrote, changed only as it was read: a 412 means the
         # captain edited it since, and that edit stands

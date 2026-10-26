@@ -1,0 +1,327 @@
+{
+ "rooms": {
+  "arboretum": {
+   "size": 1024,
+   "wire": 451057,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 119142
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 132779
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 165984
+   }
+  },
+  "bridge": {
+   "size": 1024,
+   "wire": 577166,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 119956
+   },
+   "norm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 56200
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 208142
+   }
+  },
+  "concourse": {
+   "size": 1024,
+   "wire": 435841,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 68389
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 88988
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 181016
+   }
+  },
+  "conference": {
+   "size": 1024,
+   "wire": 501906,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 87922
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 240562
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 145054
+   }
+  },
+  "corridor": {
+   "size": 1024,
+   "wire": 334295,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 68292
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 4404
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 181703
+   }
+  },
+  "engineering": {
+   "size": 1024,
+   "wire": 169589,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 32640
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 18609
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 96196
+   }
+  },
+  "hull": {
+   "size": 1024,
+   "wire": 188766,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 47497
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 2038
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 114551
+   }
+  },
+  "lab": {
+   "size": 1024,
+   "wire": 320102,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 55118
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 15243
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 166861
+   }
+  },
+  "lounge": {
+   "size": 1024,
+   "wire": 558976,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 103461
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 123003
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 204312
+   }
+  },
+  "mess": {
+   "size": 1024,
+   "wire": 430890,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 25960
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 260998
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 127928
+   }
+  },
+  "quarters": {
+   "size": 1024,
+   "wire": 513623,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 86304
+   },
+   "norm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 15053
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 198694
+   }
+  },
+  "readyroom": {
+   "size": 1024,
+   "wire": 587198,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 138317
+   },
+   "norm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 12239
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 224102
+   }
+  },
+  "school": {
+   "size": 1024,
+   "wire": 430951,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 26212
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 217516
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 158551
+   }
+  },
+  "sickbay": {
+   "size": 1024,
+   "wire": 381671,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 66429
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 25012
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 186462
+   }
+  },
+  "tenforward": {
+   "size": 2048,
+   "wire": 468040,
+   "base": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 75350
+   },
+   "norm": {
+    "codec": "uastc",
+    "size": 1024,
+    "bytes": 95141
+   },
+   "orm": {
+    "codec": "etc1s",
+    "size": 1024,
+    "bytes": 184329
+   }
+  }
+ },
+ "note": "Each room's atlas, and under maps the bridge's tiles and skylight, as KTX2 (scripts/deck-model-assets.mjs): the page loads these for what is listed here, its webp otherwise.",
+ "maps": {
+  "bridge_carpet_base": {
+   "codec": "etc1s",
+   "size": 512,
+   "bytes": 91103
+  },
+  "bridge_carpet_norm": {
+   "codec": "uastc",
+   "size": 256,
+   "bytes": 82952
+  },
+  "bridge_carpet_rough": {
+   "codec": "etc1s",
+   "size": 128,
+   "bytes": 4428
+  },
+  "bridge_skylight": {
+   "codec": "etc1s",
+   "size": 1024,
+   "bytes": 200605
+  },
+  "bridge_wall_base": {
+   "codec": "etc1s",
+   "size": 512,
+   "bytes": 27122
+  },
+  "bridge_wall_norm": {
+   "codec": "uastc",
+   "size": 512,
+   "bytes": 139047
+  },
+  "bridge_wall_rough": {
+   "codec": "etc1s",
+   "size": 128,
+   "bytes": 2432
+  }
+ }
+}

@@ -48,8 +48,8 @@ def owner(b, srv):
     print("the owner's login: the doors say what the server lacks")
     ctx, p, errs = page_for(b, srv, (F.USER, F.PASS))
     try:
-        check(p.evaluate("feat.map && feat.map.size") == 15 and p.evaluate("feat.err") == "",
-              "GET /features read: 15 features")
+        check(p.evaluate("feat.map && feat.map.size") == 18 and p.evaluate("feat.err") == "",
+              "GET /features read: 18 features")
         off = p.evaluate("featOffNames()")
         check(off == [n for n in F.ALL if n not in ("caldav", "number_one")],
               f"all off but CalDAV and Number One, whose login is given (got {off})")
@@ -76,15 +76,15 @@ def owner(b, srv):
         p.wait_for_selector("#c_srvl .featrow", timeout=3000)
         check(True, "Server settings opens Config")
         rows = p.eval_on_selector_all("#c_srvl .featrow", "els => els.map(e => [e.classList.contains('off'), e.textContent])")
-        check(len(rows) == 15 and sum(1 for o, _ in rows if o) == 13, f"the Server section: 15 rows, 13 off (got {len(rows)})")
+        check(len(rows) == 18 and sum(1 for o, _ in rows if o) == 16, f"the Server section: 18 rows, 16 off (got {len(rows)})")
         txt = p.inner_text("#c_srvl")
-        check("13 of 15 off" in txt and "LCARS_STRAVA_CLIENT_SECRET" in txt and "LOGSEQ_TOKEN" in txt,
+        check("16 of 18 off" in txt and "LCARS_STRAVA_CLIENT_SECRET" in txt and "LOGSEQ_TOKEN" in txt,
               "it counts and names the settings")
         check(p.is_visible("#c_vengoff .featoff[data-feat=transcription]"), "the recogniser's field: Deepgram is off")
         p.click("#c_srvr")
-        check(p.inner_text("#c_srvr") in ("reading…", "Read again"), "Read again answers at once")
+        check(p.text_content("#c_srvr").strip() in ("reading…", "Read again"), "Read again answers at once")
         p.wait_for_function("document.querySelector('#c_srvr').textContent === 'Read again'", timeout=5000)
-        check("13 of 15 off" in p.inner_text("#c_srvl"), "and reads it again")
+        check("16 of 18 off" in p.inner_text("#c_srvl"), "and reads it again")
         p.evaluate("closeOv()")
 
         p.evaluate("chatsUp(); chatsList()")
@@ -113,7 +113,7 @@ def owner(b, srv):
         p.evaluate("closeOv()")
         p.evaluate("vMatch(vWords('what is off'), 0).cmd.fn()")
         p.wait_for_selector("#dlg .featoff[data-feat=strava]", timeout=3000)
-        check(p.eval_on_selector_all("#dlg .featoff", "e => e.length") == 13, "'what is off': the 13, each with its note")
+        check(p.eval_on_selector_all("#dlg .featoff", "e => e.length") == 16, "'what is off': the 16, each with its note")
         check(errs == [], f"no page errors ({errs[:2]})")
     finally:
         ctx.close()

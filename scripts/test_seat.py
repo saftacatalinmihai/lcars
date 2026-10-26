@@ -737,7 +737,8 @@ class Engineer(unittest.TestCase):
         tp.join(5)
         self.assertEqual(res["r"][0], 3)
         self.assertEqual(res["r"][1]["seat"], {"holder": "ada", "queue": ["bob"], "waiting": [],
-                                                  "jobs": {"running": None, "queue": [], "recent": []}})
+                                                  "jobs": {"running": None, "runs": [], "queue": [], "recent": [],
+                                                  "line": "no job running"}})
         _, s = S.read()
         self.assertEqual((s["holder"]["name"], queued(s)), ("ada", ["bob"]))
 

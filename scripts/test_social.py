@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Unit tests for the social watch (scripts/social.py, crew.py run_social;
 docs/design/social-watch.md, section 4, items 1 to 7 for HN, GitHub and
-Cloudflare). No network: the adapters read recorded answers in
+Cloudflare, and item 8: the drafter's gate, crew_tool.py's `social` verb and
+run_social_drafts' guarded append; and the notice's 09:00 due time). No network: the adapters read recorded answers in
 scripts/testdata/social/ (the APIs' own shapes, trimmed to the fields read,
 the names made up so the public tree carries no one's), and whole runs post
 to a stand-in journal.
@@ -255,6 +256,41 @@ class Pure(unittest.TestCase):
         self.assertEqual(S.last_failures("x\n\nfailures: hn=1 github=3 bogus=2"), {"hn": 1, "github": 3})
         self.assertEqual(S.last_failures("failures: none"), {})
 
+    def test_the_notice_is_due_the_next_morning(self):
+        tz = T.TZ                                       # Europe/Helsinki: UTC+3 now, UTC+2 from the 25th
+        at = lambda *a: dt.datetime(*a, tzinfo=dt.timezone.utc)
+        self.assertEqual(S.notice_due(at(2026, 10, 21, 5, 59), tz), "2026-10-21 06:00:00")   # 08:59: today's
+        self.assertEqual(S.notice_due(at(2026, 10, 21, 6, 0), tz), "2026-10-22 06:00:00")    # 09:00: tomorrow's
+        self.assertEqual(S.notice_due(at(2026, 10, 21, 20, 30), tz), "2026-10-22 06:00:00")  # 23:30: never at night
+        # across the clocks going back: 01:00 on the 25th is before 09:00 EET, 07:00 UTC
+        self.assertEqual(S.notice_due(at(2026, 10, 24, 22, 0), tz), "2026-10-25 07:00:00")
+        self.assertEqual(S.notice_fields(at(2026, 10, 21, 9, 0), tz),
+                         {"start_date": "2026-10-22 06:00:00", "end_date": "2026-10-22 06:00:00"})
+
+    def test_a_drafted_comment_is_marked_replied_too(self):
+        c = S.comment("hn", "9002", "l", "on", "story", "alice", "2026-10-21T08:00:00Z", "Hi", replied=True)
+        row = {"id": 7, "content": "id: hn:9002\nstatus: drafted\n\nHi\n\n" + S.DRAFT_LINE + "\nThanks!\n"}
+        out = S.plan({"hn": [c]}, {"hn:9002": row}, {}, {}, {}, {}, DAY, AT)
+        self.assertEqual([(r["id"], t) for r, t in out["patches"]],
+                         [(7, row["content"].replace("status: drafted", "status: replied"))])
+
+    def test_the_drafts_answer(self):
+        text = ("# Social drafts\nNo voice page yet.\n#12: First paragraph.\n\nSecond one.\n"
+                "#13: No reply suggested: a thank-you.\n#12: a second block for 12 is ignored\n"
+                "#14:\n#15: last\n\n---\nfooter")
+        self.assertEqual(S.parse_drafts(text), {12: "First paragraph.\n\nSecond one.",
+                                                13: "No reply suggested: a thank-you.", 15: "last"})
+        body = "id: hn:1\nstatus: new\n\nHello there\n"
+        got = S.with_draft(body, "Hi!")
+        self.assertEqual(got, "id: hn:1\nstatus: drafted\n\nHello there\n\n" + S.DRAFT_LINE + "\nHi!\n")
+        self.assertEqual(S.with_draft(got, "Again."), got.replace("Hi!", "Again."))   # one draft, replaced
+        self.assertEqual(S.comment_text(got), "Hello there")
+        rows = [{"id": 3, "content": "status: new\n\nx", "created_at_utc": "2026-10-21 09:00:00"},
+                {"id": 2, "content": "status: new\n\nx", "created_at_utc": "2026-10-21 08:00:00"},
+                {"id": 4, "content": "status: replied\n\nx"}, {"id": 5, "content": "status: new\n\nx", "done_bool": 1},
+                {"id": 6, "content": "status: new\n\nx", "deleted": 1}, {"id": 8, "content": got.replace("drafted", "new")}]
+        self.assertEqual([r["id"] for r in S.pending(rows)], [2, 3])
+
 
 class Journal(http.server.BaseHTTPRequestHandler):
     """A stand-in journal: GET /entries by kind (newest first with
@@ -308,8 +344,8 @@ class Journal(http.server.BaseHTTPRequestHandler):
 SECRETS = (GH_TOKEN, CF_TOKEN, "pass with spaces")
 
 
-class Run(Base):
-    """Items 2, 3, 4, 5 and 7: whole runs against the stand-in journal."""
+class Stand(Base):
+    """The role and the recordings against the stand-in journal."""
 
     def setUp(self):
         super().setUp()
@@ -352,6 +388,11 @@ class Run(Base):
     def kinds(self, posts=None):
         return [p["kind"] for p in (Journal.posts if posts is None else posts)]
 
+
+
+class Run(Stand):
+    """Items 2, 3, 4, 5 and 7: whole runs against the stand-in journal."""
+
     def test_the_role_loads_as_a_script(self):
         fm, _ = C.load("social")
         self.assertEqual((fm["kind"], fm["script"], fm["posts"], fm["schedule"]),
@@ -366,6 +407,8 @@ class Run(Base):
                          ["crew_social_hn", "crew_social_github", "crew_social_cf"])
         n = Journal.posts[-1]
         self.assertEqual(n["title"], "6 new comments: HN 3, GitHub 3")  # the answered three are not in it
+        # due the next 09:00 in the captain's zone (12:00 there now: tomorrow's), a block of no length
+        self.assertEqual((n["start_date"], n["end_date"]), ("2026-10-22 06:00:00", "2026-10-22 06:00:00"))
         self.assertIn("alice on Software for One", n["content"])
         self.assertNotIn("bob", n["content"])
         ids = {r["id"] for r in Journal.rows if r["kind"] == "crew_social_comment"}
@@ -503,10 +546,140 @@ class Run(Base):
 
     def test_dry_run_and_no_post_write_nothing(self):
         self.assertEqual(self.go(True), 0)
-        self.assertIn("[would post 6 new comments: HN 3, GitHub 3 to the social list]", self.out)
+        self.assertIn("[would post 6 new comments: HN 3, GitHub 3 to the social list, due Thu 22 Oct 09:00]", self.out)
         self.assertEqual(self.go(False, True), 0)
         self.assertIn("[would post the social notice: 6 new comments: HN 3, GitHub 3]", self.out)
         self.assertEqual((Journal.posts, Journal.patches), ([], []))
+
+
+class Drafts(Stand):
+    """Item 8: crew/social-drafts.md's gate, the `social` verb, and
+    run_social_drafts on a stand-in claude answer, against the journal the
+    watch's own run filled."""
+
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(os.path.dirname(HERE), "crew", "social-drafts.md")) as f:
+            self.role("social-drafts", f.read().replace("lock_wait: 900", "lock_wait: 0\nmem_wait: 0\nmin_free_mb: 0"))
+        self.answer, self.calls = "", []
+
+        def claude(fm, argv, stdin):
+            self.calls.append(argv)
+            if self.during:
+                self.during()
+            return self.answer, {"secs": 1.0, "rc": 0, "usage": {"output_tokens": 9}, "num_turns": 3,
+                                 "total_cost_usd": 0.04}
+        self.during = None
+        for p in (mock.patch.object(C, "claude_once", claude), mock.patch.object(C, "server_up", lambda: True),
+                  mock.patch.dict(os.environ, {"LCARS_CREW_DIR": self.crew})):
+            p.start()
+            self.ps.append(p)
+
+    def drafts(self, *a):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            try:
+                rc = C.run("social-drafts", *a)
+            except SystemExit as e:
+                rc = e.code
+        self.out += out.getvalue()
+        return rc
+
+    def new_ids(self):
+        return [r["id"] for r in Journal.rows if r["kind"] == "crew_social_comment" and "status: new" in r["content"]]
+
+    def test_the_role_loads_gated(self):
+        fm, _ = C.load("social-drafts")
+        self.assertEqual((fm["kind"], fm["model"], fm["budget"], fm["gate"], fm["posts"], fm["schedule"]),
+                         ("agent", "sonnet", "0.20", "social", "social_drafts", "*-*-* *:35:00"))
+        argv = C.claude_argv(fm, "x", tool="/x/crew_tool.py")
+        allowed = argv[argv.index("--allowedTools") + 1: argv.index("--permission-mode")]
+        # strangers' words in, so its one verb is social: no get, nothing else of the journal
+        self.assertEqual(fm["verbs"].split(), ["social"])
+        self.assertEqual([x for x in allowed if x.startswith("Bash(")], ["Bash(/x/crew_tool.py social:*)"])
+
+    def test_nothing_new_starts_no_model(self):
+        self.assertEqual(self.drafts(), 0)
+        self.assertEqual((self.calls, Journal.posts), ([], []))
+        self.assertEqual(C.read_runs()[-1]["status"], "nothing")
+        self.assertEqual(C.read_runs()[-1]["why"], "no comment waits for a draft")
+
+    def test_the_verb_gives_the_comments_and_his_voice(self):
+        self.go()
+        out = io.StringIO()
+        with redirect_stdout(out):
+            T.main(["social"])
+        text = out.getvalue()
+        self.assertTrue(text.startswith("<journal-data>\n") and text.rstrip().endswith("</journal-data>"))
+        self.assertIn("No voice page yet", text)
+        self.assertIn("Comments wanting a drafted reply (6):", text)
+        alice = next(r for r in Journal.rows if "id: hn:9002" in r.get("content", ""))
+        self.assertIn(f"#{alice['id']} HN · alice", text)
+        self.assertIn("Nice write-up, how do you sync it?", text)
+        self.assertNotIn("· bob ·", text)                       # answered: no draft wanted
+        # his own last replies, from the HN reading the run kept
+        hn = json.loads(next(p for p in Journal.posts if p["kind"] == "crew_social_hn")["content"])
+        self.assertTrue(hn["own"])
+        self.assertIn(hn["own"][0]["text"], text)
+        with open(os.path.join(self.crew, T.VOICE_PAGE), "w") as f:
+            f.write("<!-- Jake's -->\nHe writes short.\n")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            T.main(["social"])
+        self.assertIn("He writes short.", out.getvalue())
+        self.assertNotIn("Jake's", out.getvalue())
+
+    def test_drafts_go_under_their_comments(self):
+        self.go()
+        ids = self.new_ids()
+        self.assertEqual(len(ids), 6)
+        a, b, c, d = ids[:4]
+        self.answer = (f"# Social drafts\nNo voice page yet.\n#{a}: It syncs over CalDAV.\n\nThe rest is SQLite.\n"
+                       f"#{b}: No reply suggested: a joke.\n#{c}: Thanks.\n#999: not one of them\n")
+        row_c = next(r for r in Journal.rows if r["id"] == c)
+
+        def edits():           # the captain edits one while claude runs
+            row_c["last_modified_at_utc"] = "2026-10-21 09:30:00"
+        self.during = edits
+        before = len(Journal.posts)
+        self.assertEqual(self.drafts(), 0)
+        self.assertEqual(len(self.calls), 1)
+        got = {r["id"]: r["content"] for r in Journal.rows}
+        self.assertTrue(got[a].endswith(f"\n\n{S.DRAFT_LINE}\nIt syncs over CalDAV.\n\nThe rest is SQLite.\n"))
+        self.assertIn("status: drafted", got[a])
+        self.assertIn(f"{S.DRAFT_LINE}\nNo reply suggested: a joke.", got[b])
+        self.assertNotIn(S.DRAFT_LINE, got[c])                  # the 412: his edit stands
+        self.assertIn("status: new", got[c])
+        self.assertEqual({i for i, p in Journal.patches if "if_modified" in p and S.DRAFT_LINE in p["content"]},
+                         {a, b, c})
+        self.assertTrue(all(p["if_modified"] == "2026-10-21 09:00:00" for i, p in Journal.patches if i in (a, b, c)))
+        rep = Journal.posts[before:]
+        self.assertEqual(self.kinds(rep), ["crew_social_drafts"])
+        self.assertTrue(rep[0]["title"].startswith("Social drafts: 2 replies · "))
+        body = rep[0]["content"]
+        self.assertIn(f"- #{a} HN · alice: drafted: It syncs over CalDAV.", body)
+        self.assertIn(f"- #{b} ", body)
+        self.assertIn("no reply suggested: No reply suggested: a joke.", body)
+        self.assertIn(f"- #{c} ", body)
+        self.assertIn("skipped, changed since it was read; the next run tries again", body)
+        self.assertIn("- #999: not written, not a comment this run was given", body)
+        self.assertIn(f"- #{d} ", body)
+        self.assertIn("no draft given; the next run tries again", body)
+        self.assertIn("No voice page yet.", body)
+        self.assertIn("Written without crew/social-voice.local.md", body)
+        # the next run's gate: the drafted two are done, the rest wait
+        self.during = None
+        self.answer = "# Social drafts\n"
+        self.drafts()
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(set(self.new_ids()), set(ids) - {a, b})
+
+    def test_dry_run_writes_nothing(self):
+        self.go()
+        posts = len(Journal.posts)
+        self.assertEqual(self.drafts(True), 0)
+        self.assertIn('"gate": {', self.out)
+        self.assertEqual((len(Journal.posts), self.calls), (posts, []))
 
 
 if __name__ == "__main__":

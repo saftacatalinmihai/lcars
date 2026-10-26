@@ -17,12 +17,18 @@ var REPORTS = null;
 // the route; a number answers that status (403, a limited login); else the
 // object it answers.
 var FEATURES = null;
+// POST /publish/<id> (lcars_publish.h): null answers 404; else a function
+// (id, body) giving {code, data}. PUBLISH_CARD: POST /publish/card's card,
+// null a 404.
+var PUBLISH = null, PUBLISH_CARD = null;
 // /entries/<id>/caldav: a task's kept iCalendar lines, keyed by id. CDAV_NEXT
 // is a one-shot status for the next PUT (412: Reminders wrote meanwhile).
 var CDAV = {}, CDAV_SEQ = 0, CDAV_NEXT = 0;
 // Kinds whose list was deleted in Reminders (hidden, not published).
 var CDAV_HIDDEN = {};
 var KINDS_CODE = 0;
+// PUT /theme (lcars_theme.h): the bodies written, and a status to answer instead
+var THEME_PUTS = [], THEME_CODE = 0;
 function kindsAnswer() {
   var live = {};
   DB.forEach(function (e) { if (!e.deleted) live[e.kind] = (live[e.kind] || 0) + 1; });
@@ -41,6 +47,9 @@ function route(method, path, qs, body) {
   DBLOG.push(method + " " + path + (body ? " " + JSON.stringify(body) : ""));
   var m = /^\/entries\/(\d+)$/.exec(path);
   // a listening key for Deepgram (lcars_say.h); TEST.sayToken: the status
+  // GET /say: the server's voice (lcars_say.h); TEST.sayProv names it, unset none
+  if (path === "/say" && method === "GET")
+    return TEST.sayProv ? { code: 200, data: { provider: TEST.sayProv } } : { code: 503, data: { error: "No voice", status: 503 } };
   if (path === "/say/token") {
     var ts = TEST.sayToken || 200;
     return ts === 200 ? { code: 200, data: { access_token: "aaaa.bbbb.cccc", expires_in: 30 } }
@@ -104,6 +113,30 @@ function route(method, path, qs, body) {
       });
     }
     return { code: 200, data: kindsAnswer() };
+  }
+  // GET/PUT /theme (lcars_theme.h): a PUT writes the settings entry titled
+  // theme, as the server does, so its arrival is the sync's as anywhere
+  if (path === "/theme" && (method === "GET" || method === "PUT")) {
+    if (THEME_CODE) return { code: THEME_CODE, data: { error: "the theme could not be written" } };
+    var tr = null;
+    DB.forEach(function (x) { if (x.kind === "settings" && x.title === "theme" && !x.deleted && (!tr || x.id < tr.id)) tr = x; });
+    if (method === "PUT") {
+      THEME_PUTS.push(body);
+      var tc = JSON.stringify({ v: 1, name: body.name, fmt: body.text ? "omarchy" : "builtin", text: body.text || "" });
+      if (tr) { tr.content = tc; tr.last_modified_at_utc = "2099-01-01 00:00:00"; }
+    }
+    var td = tr ? JSON.parse(tr.content) : { name: "lcars", fmt: "builtin", text: "" };
+    return { code: 200, data: { name: td.name, fmt: td.fmt, text: td.text, entry: tr ? tr.id : null, error: "" } };
+  }
+  var pbm = /^\/publish\/(\d+)$/.exec(path);
+  if (pbm && method === "POST") {
+    return PUBLISH ? PUBLISH(+pbm[1], typeof body === "string" ? JSON.parse(body) : body)
+      : { code: 404, data: { error: "No route for POST " + path } };
+  }
+  if (path === "/publish/card" && method === "POST") {
+    var cb = typeof body === "string" ? JSON.parse(body) : body;
+    if (!cb || typeof cb.url !== "string") return { code: 400, data: { error: "Body must be JSON: {\"url\": ...}" } };
+    return PUBLISH_CARD ? { code: 200, data: { card: PUBLISH_CARD } } : { code: 404, data: { error: "no route" } };
   }
   if (path === "/features" && method === "GET") {
     return typeof FEATURES === "number" ? { code: FEATURES, data: { error: "the owner's login only" } }
@@ -172,6 +205,8 @@ function route(method, path, qs, body) {
     if (qs.get("limit") || qs.get("offset")) return { code: 400, data: { error: "no limit/offset" } };
     var dq = new URLSearchParams(qs.toString());
     dq.set("limit", "1000");
+    // a report's body is its first line here unless asked for (lcars_http.h)
+    dq.set("report_body", qs.get("report_body") || "0");
     var dall = [];
     for (var doff = 0; ; doff += 1000) {
       dq.set("offset", String(doff));
@@ -207,6 +242,11 @@ function route(method, path, qs, body) {
     // the two the mirror's sync asks with (lcars_http.h's BuildEntryFilter)
     var mn = qs.get("min_id");
     if (mn) list = list.filter(function (r) { return r.id >= +mn; });
+    // kind (exact, as BuildEntryFilter's) and done, which the Rooms page asks by
+    var kd = qs.get("kind");
+    if (kd) list = list.filter(function (r) { return r.kind === kd; });
+    var dn = qs.get("done");
+    if (dn === "0" || dn === "1") list = list.filter(function (r) { return (r.done_bool ? "1" : "0") === dn; });
     var ms = qs.get("modified_since");
     if (ms) list = list.filter(function (r) { return (r.last_modified_at_utc || "") >= ms; });
     var key = qs.get("order") || "id";
@@ -227,6 +267,18 @@ function route(method, path, qs, body) {
         return o;
       });
     }
+    // report_body=0: a report's content cut to its first line, content_length
+    // still the whole row's (AppendEntryJSONAs in lcars_http.h)
+    if (qs.get("report_body") === "0") {
+      page = page.map(function (r) {
+        var nl = r.kind === "report" && typeof r.content === "string" ? r.content.indexOf("\n") : -1;
+        if (nl < 0) return r;
+        var o = {};
+        for (var k in r) o[k] = r[k];
+        o.content = r.content.slice(0, r.content.charAt(nl - 1) === "\r" ? nl - 1 : nl);
+        return o;
+      });
+    }
     return { code: 200, data: page };
   }
   return { code: 404, data: { error: "not found" } };
@@ -243,6 +295,13 @@ function fetch(url, init) {
   var qi = u.indexOf("?");
   var path = qi < 0 ? u : u.slice(0, qi);
   var qs = new URLSearchParams(qi < 0 ? "" : u.slice(qi + 1));
+  // the shipped themes, as the server serves lcars-ui/themes/ (gen.py)
+  var thm = /^(?:\.\/)?themes\/([^/]+)\.theme$/.exec(path);
+  if (thm) {
+    var tt = THEME_FILES[decodeURIComponent(thm[1])];
+    return Promise.resolve({ ok: tt !== undefined, status: tt !== undefined ? 200 : 404, statusText: "",
+                             text: function () { return Promise.resolve(tt === undefined ? "" : tt); } });
+  }
   var res;
   try {
     res = route((init && init.method) || "GET", path, qs,

@@ -194,6 +194,34 @@ static void FeatureLogin(Feature *f, const LimitedLogin *l) {
   }
 }
 
+// A network the publisher posts to: its credential set (never read
+// further: its shape is publish.py's to judge, and the answer must not say
+// anything about the value), the crew login its records are written with,
+// and the script and a python3 to run it, as lcars_publish.h finds them.
+static void FeaturePublish(Feature *f, const char *var) {
+  assert(f != NULL && var != NULL);
+  if (!FeatureSet(var)) {
+    FeatureNeed(f, var);
+  }
+  FeatureLogin(f, &g_login_crew);
+  char script[1024];
+  const char *s = getenv("LCARS_PUBLISH_SCRIPT");
+  if (s != NULL && s[0] != '\0') {
+    snprintf(script, sizeof(script), "%s", s);
+  } else if (getcwd(script, sizeof(script) - 32) != NULL) {
+    strcat(script, "/scripts/publish.py");
+  } else {
+    script[0] = '\0';
+  }
+  if (script[0] == '\0' || access(script, R_OK) != 0) {
+    FeatureNeed(f, "LCARS_PUBLISH_SCRIPT");
+  }
+  char python[1024];
+  if (!EngineerPython(python, sizeof(python))) {
+    FeatureNeed(f, "python3");
+  }
+}
+
 static void FeatureAppend(JSONBuf *b, const Feature *f, bool first) {
   assert(b != NULL && f != NULL && f->name != NULL && f->note != NULL);
   assert(f->n_needs >= 0 && f->n_needs <= FEATURES_NEEDS_MAX);
@@ -311,6 +339,28 @@ static int HandleFeatures(int client_fd, Arena *arena) {
        "folder.",
        {0},
        0},
+      {"publish_mastodon",
+       "Posting to Mastodon from the Share sheet needs "
+       "LCARS_PUB_MASTODON=<instance host>:<access token> in ~/.env (an "
+       "application with write:statuses, write:media and profile), the "
+       "crew's login "
+       "for the records, scripts/publish.py (LCARS_PUBLISH_SCRIPT) and "
+       "python3, and a restart. Without it Mastodon is the hand route: Open.",
+       {0},
+       0},
+      {"publish_bluesky",
+       "Posting to Bluesky from the Share sheet needs "
+       "LCARS_PUB_BLUESKY=<handle>:<app password> in ~/.env (an app "
+       "password made without direct messages), the crew's login for the "
+       "records, scripts/publish.py (LCARS_PUBLISH_SCRIPT) and python3, and "
+       "a restart. Without it Bluesky is the hand route: Open.",
+       {0},
+       0},
+      {"publish_live",
+       "Posts are dry runs, built and never sent, until LCARS_PUB_DRY=0 is "
+       "in ~/.env and the server restarted.",
+       {0},
+       0},
   };
   enum { N_FEATURES = sizeof(fs) / sizeof(fs[0]) };
 
@@ -362,6 +412,16 @@ static int HandleFeatures(int client_fd, Arena *arena) {
       }
     } else if (strcmp(n, "engineers") == 0) {
       FeatureEngineers(f);
+    } else if (strcmp(n, "publish_mastodon") == 0) {
+      FeaturePublish(f, "LCARS_PUB_MASTODON");
+    } else if (strcmp(n, "publish_bluesky") == 0) {
+      FeaturePublish(f, "LCARS_PUB_BLUESKY");
+    } else if (strcmp(n, "publish_live") == 0) {
+      // dry unless it says 0, as publish.py reads it (is_dry)
+      const char *dry = getenv("LCARS_PUB_DRY");
+      if (dry == NULL || strcmp(dry, "0") != 0) {
+        FeatureNeed(f, "LCARS_PUB_DRY");
+      }
     } else if (strcmp(n, "number_one") == 0) {
       FeatureLogin(f, &g_login_no1);
     } else if (strcmp(n, "crew") == 0) {

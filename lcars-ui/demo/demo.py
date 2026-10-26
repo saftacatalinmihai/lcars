@@ -692,10 +692,12 @@ def sc_stats(d):
 
 
 def sc_daypage(d):
-    d.cap("One page that links everything you logged today, grouped by kind.",
+    d.cap("Today: the day's entries by time, and a page that links them all.",
           "09-530", "orange", hold=0.4)
     d.click("#bDayPage", settle=1.3)
-    d.hold(3.0)
+    d.hold(1.6)
+    d.click("#daypage", settle=1.0)
+    d.hold(2.0)
     d.cap_out()
     d.esc()
     d.cursor_off()

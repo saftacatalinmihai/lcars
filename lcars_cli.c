@@ -65,6 +65,11 @@ static void PrintUsage(FILE *out) {
           "                       `roles set <role> <kind> [--name N]`,\n"
           "                       `roles reset <role>` (back to the\n"
           "                       default); --json for the server's answer\n"
+          "  theme                The console's theme: `theme set <name>`\n"
+          "                       (a built-in), `theme load <file>\n"
+          "                       [--name N]` (a btop *.theme or an\n"
+          "                       omarchy colors.toml; '-' is stdin),\n"
+          "                       `theme reset` (lcars); --json\n"
           "  stats                Totals; takes the same filters as list\n"
           "  logseq <sub>         Sync with a Logseq graph "
           "(`logseq --help`)\n"
@@ -923,6 +928,198 @@ static int CmdRoles(Arena *arena, CliOptions *opts, int argc, char **argv,
     }
   }
   PrintRoles(arena, opts, body);
+  return 0;
+}
+
+// GET or PUT /theme (lcars_theme.h); false with err set unless a 200 with
+// the answer's shape
+static bool CliThemeRequest(Arena *arena, const CliOptions *opts,
+                            const char *method, const char *body, JsonSpan *out,
+                            char *err, size_t err_size) {
+  assert(arena_valid(arena) && opts != NULL && out != NULL);
+  long status = 0;
+  if (!CliHttpRequest(arena, opts, method, "/theme", body, out, &status, err,
+                      err_size)) {
+    return false;
+  }
+  if (status == 404) {
+    return CliFail(err, err_size,
+                   "this server has no /theme (it is older than the "
+                   "theme's journal entry)");
+  }
+  if (status != 200) {
+    return CliHttpStatusError(arena, *out, status, err, err_size);
+  }
+  JsonSpan v;
+  if (out->len == 0 || out->data[0] != '{' || !json_member(*out, "name", &v)) {
+    return CliFail(err, err_size, "expected {\"name\":...}, got: %.*s",
+                   (int)(out->len < 120 ? out->len : 120), out->data);
+  }
+  return true;
+}
+
+// The name a file is loaded under when --name is not given: its own name
+// less the extension, or for omarchy's colors.toml and btop.theme (the
+// same name in every theme) the directory it is in
+static const char *CliThemeNameOf(Arena *arena, const char *path) {
+  assert(arena_valid(arena) && path != NULL);
+  if (strcmp(path, "-") == 0) {
+    return "custom";
+  }
+  size_t n = strlen(path);
+  while (n > 1 && path[n - 1] == '/') {
+    n--;
+  }
+  size_t b = n;
+  while (b > 0 && path[b - 1] != '/') {
+    b--;
+  }
+  const char *base = path + b;
+  size_t blen = n - b;
+  if ((blen == 11 && strncmp(base, "colors.toml", 11) == 0) ||
+      (blen == 10 && strncmp(base, "btop.theme", 10) == 0)) {
+    size_t e = b > 0 ? b - 1 : 0;
+    size_t s = e;
+    while (s > 0 && path[s - 1] != '/') {
+      s--;
+    }
+    if (e > s) {
+      base = path + s;
+      blen = e - s;
+    }
+  } else {
+    const char *dot = memchr(base, '.', blen);
+    for (const char *d = dot; d && d < base + blen;
+         d = memchr(d + 1, '.', (size_t)(base + blen - d - 1))) {
+      dot = d; // the last dot
+    }
+    if (dot && dot > base) {
+      blen = (size_t)(dot - base);
+    }
+  }
+  if (blen == 0) {
+    return "custom";
+  }
+  char *out = (char *)arena_alloc(arena, blen + 1);
+  memcpy(out, base, blen);
+  out[blen] = '\0';
+  return out;
+}
+
+static void PrintTheme(Arena *arena, const CliOptions *opts, JsonSpan body) {
+  assert(arena_valid(arena) && opts != NULL);
+  if (opts->json) {
+    printf("%.*s\n", (int)body.len, body.data);
+    return;
+  }
+  JsonSpan v;
+  const char *name =
+      json_member(body, "name", &v) ? json_span_string(arena, v) : "";
+  const char *fmt =
+      json_member(body, "fmt", &v) ? json_span_string(arena, v) : "";
+  const char *text =
+      json_member(body, "text", &v) ? json_span_string(arena, v) : "";
+  if (strcmp(fmt, "builtin") == 0) {
+    printf("%s%s\n", name, strcmp(name, "lcars") == 0 ? " (the default)" : "");
+  } else {
+    printf("%s (%s, %zu bytes)\n", name, fmt, strlen(text));
+  }
+  if (json_member(body, "entry", &v) && v.data[0] != 'n') {
+    printf("in the journal's settings entry #%ld\n", json_span_long(v));
+  }
+  const char *error =
+      json_member(body, "error", &v) ? json_span_string(arena, v) : "";
+  if (error[0] != '\0') {
+    fprintf(stderr, "lcars-cli: %s\n", error);
+  }
+}
+
+// theme [show] | theme set <name> | theme load <file> [--name N] | theme reset
+static int CmdTheme(Arena *arena, CliOptions *opts, int argc, char **argv,
+                    int start) {
+  assert(arena_valid(arena));
+  assert(opts != NULL);
+
+  const char *words[3] = {0};
+  int n_words = 0;
+  const char *name = NULL;
+  char err[CLI_ERR_SIZE] = {0};
+  for (int i = start; i < argc; i++) {
+    if (strcmp(argv[i], "--name") == 0) {
+      if (i + 1 >= argc) {
+        Die("--name needs a value");
+        return 2;
+      }
+      name = argv[++i];
+      continue;
+    }
+    // "-" is stdin's name for load, not a flag
+    if (argv[i][0] != '-' || strcmp(argv[i], "-") == 0) {
+      if (n_words == 3) {
+        CliFail(err, sizeof(err), "unexpected argument '%s'", argv[i]);
+        Die(err);
+        return 2;
+      }
+      words[n_words++] = argv[i];
+      continue;
+    }
+    int rc = ParseGlobalFlag(argc, argv, &i, opts, err, sizeof(err));
+    if (rc < 0) {
+      Die(err);
+      return 2;
+    }
+    if (rc == 0) {
+      DieUnknown(argv[i]);
+      return 2;
+    }
+  }
+  const char *sub = n_words > 0 ? words[0] : "show";
+  bool show = strcmp(sub, "show") == 0 && n_words <= 1;
+  bool set = strcmp(sub, "set") == 0 && n_words == 2;
+  bool load = strcmp(sub, "load") == 0 && n_words == 2;
+  bool reset = strcmp(sub, "reset") == 0 && n_words == 1;
+  if (!show && !set && !load && !reset) {
+    Die("usage: theme [show] | theme set <name> | theme load <file> "
+        "[--name N] | theme reset");
+    return 2;
+  }
+  if (name != NULL && !load) {
+    Die("--name goes with `theme load`");
+    return 2;
+  }
+
+  WarnIncompleteCredentials(opts);
+  JsonSpan body;
+  if (show) {
+    if (!CliThemeRequest(arena, opts, "GET", NULL, &body, err, sizeof(err))) {
+      Die(err);
+      return 1;
+    }
+    PrintTheme(arena, opts, body);
+    return 0;
+  }
+  JSONBuf req;
+  jsonbuf_init_strict(&req, arena);
+  jsonbuf_append(&req, "{\"name\":");
+  if (load) {
+    const char *text = CliReadFile(arena, words[1], err, sizeof(err));
+    if (text == NULL) {
+      Die(err);
+      return 1;
+    }
+    jsonbuf_append_json_string(&req,
+                               name ? name : CliThemeNameOf(arena, words[1]));
+    jsonbuf_append(&req, ",\"text\":");
+    jsonbuf_append_json_string(&req, text);
+  } else {
+    jsonbuf_append_json_string(&req, reset ? "lcars" : words[1]);
+  }
+  jsonbuf_append(&req, "}");
+  if (!CliThemeRequest(arena, opts, "PUT", req.data, &body, err, sizeof(err))) {
+    Die(err);
+    return 1;
+  }
+  PrintTheme(arena, opts, body);
   return 0;
 }
 
@@ -2416,6 +2613,8 @@ int main(int argc, char **argv) {
     status = CmdKinds(&arena, &opts, argc, argv, start);
   } else if (strcmp(command, "roles") == 0) {
     status = CmdRoles(&arena, &opts, argc, argv, start);
+  } else if (strcmp(command, "theme") == 0) {
+    status = CmdTheme(&arena, &opts, argc, argv, start);
   } else if (strcmp(command, "stats") == 0) {
     status = CmdStats(&arena, &opts, argc, argv, start);
   } else if (strcmp(command, "logseq") == 0) {

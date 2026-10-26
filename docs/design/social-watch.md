@@ -4,7 +4,10 @@ This deployment's own names (the accounts, the hosts, the server's
 address for the OAuth page) are in `social-watch.local.md`, kept out of
 the public tree.
 
-Status: design (2026-10-21), nothing built. Asked by Number One for the
+Status: slices 1 and 2 built (0.288.0, 0.288.2: the hourly watch, the
+notice in the console and on the deck), slice 3 built (the drafts, and the
+notice due at 09:00); slice 5 not wanted (the captain, ask 9695: LinkedIn
+by hand); 4, 6 and 7 open. Designed 2026-10-21. Asked by Number One for the
 captain (thread social-login): the ship watches the captain's social
 accounts for new comments and stats and tells him, for what can be done;
 for what cannot, it says so and what he can do instead.
@@ -199,7 +202,7 @@ model:
   user id. One adapter per platform, each skipped (and said so in the run's
   entry) when its variable is unset, each failing alone.
 - **`crew/social-drafts.md`, an agent role**, `model: sonnet`,
-  `budget: 0.20`, schedule `*-*-* *:35:00`, `verbs: social get`, `web:
+  `budget: 0.20`, schedule `*-*-* *:35:00`, `verbs: social` (no `get`: it reads strangers' words), `web:
   <the blog's host> news.ycombinator.com github.com`. It drafts the
   replies (2.4). New in crew.py: **`gate: social`**, a function run before
   claude; when it says there is nothing to do the run is logged
@@ -476,7 +479,7 @@ platform; a live check is the captain's first real run, read in the
 
 Each is one engineer's order, built, tested and deployed on its own.
 
-1. **The watch, with what needs no new credential** (~30 min): `crew/social.md`,
+1. **The watch, with what needs no new credential** (built, 0.288.0): `crew/social.md`,
    `scripts/social.py` (HN, GitHub with gh's token, Cloudflare with both
    sites and bots excluded), `run_social` in crew.py, the kinds of 2.2,
    seen-in-the-journal, the daily readings, the `task_crew_social` notice
@@ -484,11 +487,11 @@ Each is one engineer's order, built, tested and deployed on its own.
    items 1-7 for these three. ARCHITECTURE.md's crew section and the role
    list. After it, HN and GitHub comments reach Open questions and
    Reminders.
-2. **The notice on the deck and in the console** (~20 min): deck.html's
+2. **The notice on the deck and in the console** (built, 0.288.2): deck.html's
    flash, the Open questions card for `task_crew_social` (comments, Open,
    Copy reply, Dismiss), the two voice orders, Stats and the crew list
    leaving the kinds out; tests.js and deckboot.js; the full run.sh.
-3. **The drafts** (~25 min): `gate:` in crew.py, `crew/social-drafts.md`,
+3. **The drafts** (built, with the notice's 09:00 due time): `gate:` in crew.py, `crew/social-drafts.md`,
    the `social` verb in crew_tool.py, `run_social_drafts`'s guarded append,
    `crew/social-voice.local.md` written from his blog posts and comments
    (the writer's part: Jake), test items 8; test_crew.py.
@@ -496,7 +499,7 @@ Each is one engineer's order, built, tested and deployed on its own.
    against recordings): `/ui/oauth.html`, `social.py consent` (reddit
    first), the adapter (inbox, his posts' scores), test items 5, 6 and 9
    for reddit; shares.py reading `LCARS_SOCIAL_REDDIT`.
-5. **Mail, for LinkedIn and reddit's notices** (~25 min): the Gmail
+5. **Mail, for LinkedIn and reddit's notices** (not wanted: LinkedIn by hand, ask 9695): the Gmail
    adapter and its consent, the LinkedIn and reddit mail parsers (subject
    and snippet), test items 1 and 5 for Gmail. A comment from mail is
    linked to its post; its text is what the mail gives.
@@ -506,6 +509,26 @@ Each is one engineer's order, built, tested and deployed on its own.
    the rotating token file, the adapter, a run counter with a monthly
    read budget in the front matter (the run stops reading X when spent).
 
-Open for the captain: whether to file Reddit's request; whether to pay
-for X's API; whether a social reminder should carry a due time (so the
-phone alerts on it) or wait silently in the list.
+Slice 5 is **not wanted**: the captain reads LinkedIn by hand (ask 9695,
+Q1 B), so no Gmail consent and no mail reader.
+
+The captain's answers (ask 9695, 2026-10-23):
+
+- **The drafts: yes** (Q3). The watch drafts a reply to each new comment in
+  his voice, never posted: he copies, edits and posts it himself. Built in
+  slice 3 (2.4).
+- **A due time: yes** (Q2 A). A `task_crew_social` reminder is due the next
+  09:00 in `LCARS_TZ` (today's when the run is before 09:00, else
+  tomorrow's), its start and end alike, so CalDAV gives it its alert and
+  the phone tells him in the morning, never at night (`notice_due` in
+  social.py).
+- **LinkedIn by hand** (Q1 B): slice 5 dropped.
+
+Still open (ask 9357): whether to file Reddit's request (slice 4), and
+whether to pay for X's API (slice 7).
+
+As built in slice 3: the gate is `gate: social` (crew.py `GATES`), run under
+the crew lock before the seat or a model; it takes up to eight `status:
+new` comments with no draft a run. His own last replies come from the
+daily readings' `own` list (six a platform, from what the poll read
+anyway). A drafted comment he answers is marked replied like a new one.

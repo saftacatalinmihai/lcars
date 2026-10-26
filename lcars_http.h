@@ -1506,8 +1506,20 @@ static bool OpenHTTPDB(int client_fd, sqlite3 **out_db) {
   "end_date, ifnull(classification, 0), ifnull(sealed, ''), "                  \
   "length(ifnull(sealed, ''))"
 
-static void AppendEntryJSON(JSONBuf *b, sqlite3_stmt *stmt,
-                            bool include_content) {
+// A report's entry (docs/design/reports-as-entries.md) is its first line,
+// `report:: <type> <rel>`, then up to ~520 KB of the file's text - pictures
+// inlined in base64, which gzip cannot shrink. The cold load (/dump) and the
+// page's paged sweep ask for every body, so 111 of them took the 4000-row
+// journal's /dump from 85 KB gzipped to 2 MB. With `report_head` such a row
+// carries its content's first line alone (no newline): the marker, all the
+// list and the Reports page read. content_length stays the whole row's, so a
+// client tells a cut body (no newline, shorter than content_length) from a
+// report that is the link alone, and fetches GET /entries/<id> - always
+// whole - to read it.
+static const char HTTP_REPORT_KIND[] = "report";
+
+static void AppendEntryJSONAs(JSONBuf *b, sqlite3_stmt *stmt,
+                              bool include_content, bool report_head) {
   assert(b != NULL);
   assert(stmt != NULL);
 
@@ -1535,7 +1547,28 @@ static void AppendEntryJSON(JSONBuf *b, sqlite3_stmt *stmt,
   jsonbuf_append_json_string(b, title);
   if (include_content) {
     jsonbuf_append(b, ",\"content\":");
-    jsonbuf_append_json_string(b, content);
+    const char *nl = report_head && content && kind &&
+                             strcmp(kind, HTTP_REPORT_KIND) == 0
+                         ? strchr(content, '\n')
+                         : NULL;
+    if (nl) {
+      // the marker alone; a CR before the newline goes with the rest
+      size_t n = (size_t)(nl - content);
+      if (n > 0 && content[n - 1] == '\r') {
+        n--;
+      }
+      // escaped in place: a copy in the arena would end the buffer's run as
+      // its last allocation, and its next growth would copy it whole
+      char u[7];
+      jsonbuf_append_len(b, "\"", 1);
+      for (size_t i = 0; i < n; i++) {
+        const char *esc = json_escape_byte((unsigned char)content[i], u);
+        jsonbuf_append_len(b, esc ? esc : content + i, esc ? strlen(esc) : 1);
+      }
+      jsonbuf_append_len(b, "\"", 1);
+    } else {
+      jsonbuf_append_json_string(b, content);
+    }
   }
   jsonbuf_appendf(b,
                   ",\"content_length\":%d,\"value_int\":%d,\"value_float\":%f,"
@@ -1559,6 +1592,27 @@ static void AppendEntryJSON(JSONBuf *b, sqlite3_stmt *stmt,
     jsonbuf_append_json_string(b, sealed);
   }
   jsonbuf_append(b, "}");
+}
+
+static void AppendEntryJSON(JSONBuf *b, sqlite3_stmt *stmt,
+                            bool include_content) {
+  AppendEntryJSONAs(b, stmt, include_content, false);
+}
+
+// `report_body` on GET /entries and /dump: 1 sends a report's whole body, 0
+// its first line (AppendEntryJSONAs). /dump's default is 0, as it is the
+// cold load's; /entries' is 1, as the CLI and the crew read reports through
+// it, and the page's paged sweep asks for 0. False with a 400 sent on a bad
+// value.
+static bool QueryReportHead(int client_fd, const char *query, bool dflt_head,
+                            bool *out_head) {
+  bool ok = true, body = !dflt_head;
+  if (!query_get_bool(query, "report_body", &body, &ok) && !ok) {
+    SendJSONError(client_fd, 400, "Invalid 'report_body' value (0 or 1)");
+    return false;
+  }
+  *out_head = !body;
+  return true;
 }
 
 // Classified entries: the vault and the envelope rules (lcars_vault.h). Here,
@@ -2156,6 +2210,10 @@ static int HandleGetEntries(int client_fd, Arena *arena, const char *query) {
   if (!query_get_bool(query, "content", &include_content, &ok) && !ok) {
     return SendJSONError(client_fd, 400, "Invalid 'content' value (0 or 1)");
   }
+  bool report_head = false;
+  if (!QueryReportHead(client_fd, query, false, &report_head)) {
+    return 400;
+  }
 
   sqlite3 *db;
   if (!OpenHTTPDB(client_fd, &db)) {
@@ -2194,7 +2252,7 @@ static int HandleGetEntries(int client_fd, Arena *arena, const char *query) {
       jsonbuf_append(&out, ",");
     }
     first = false;
-    AppendEntryJSON(&out, stmt, include_content);
+    AppendEntryJSONAs(&out, stmt, include_content, report_head);
   }
   jsonbuf_append(&out, "]");
 
@@ -2207,7 +2265,8 @@ static int HandleGetEntries(int client_fd, Arena *arena, const char *query) {
 // `dir` and `content=0`, every matching row in one streamed response. It is
 // what the web UI's cold load asks for - the whole journal, bodies included,
 // in one round trip instead of ~30 pages - and it is gzipped whenever the
-// client offers gzip, which a browser always does.
+// client offers gzip, which a browser always does. A report's body is its
+// first line unless `report_body=1` (AppendEntryJSONAs).
 //
 // /entries has a row cap because its answer is built in the 1MB connection
 // arena; this one never holds more than one row there. Each row's JSON is
@@ -2241,6 +2300,10 @@ static int HandleDump(int client_fd, Arena *arena, const char *query) {
   bool include_content = true;
   if (!query_get_bool(query, "content", &include_content, &ok) && !ok) {
     return SendJSONError(client_fd, 400, "Invalid 'content' value (0 or 1)");
+  }
+  bool report_head = true;
+  if (!QueryReportHead(client_fd, query, true, &report_head)) {
+    return 400;
   }
 
   sqlite3 *db;
@@ -2279,7 +2342,7 @@ static int HandleDump(int client_fd, Arena *arena, const char *query) {
       jsonbuf_append(&row, ",");
     }
     first = false;
-    AppendEntryJSON(&row, stmt, include_content);
+    AppendEntryJSONAs(&row, stmt, include_content, report_head);
     if (row.overflow) {
       // One row bigger than the whole connection arena. The 200 is already
       // out, so the only honest answer left is a truncated transfer.
@@ -3648,6 +3711,12 @@ static int HandleIndex(int client_fd) {
       "body {question (300 bytes), context (4 KB of lines)}, answers "
       "{text,ms} or {pass:true,ms}; haiku, no tools, one at a time (429), "
       "8 s (504). The owner's login only\"},"
+      "{\"method\":\"POST\",\"path\":\"/publish/{id}\","
+      "\"description\":\"post a social_post (the Share sheet's drafts) "
+      "with scripts/publish.py: body {networks:[mastodon], dry_run?}, "
+      "answers {results:[{network,status,url?,error?}],dry}; POST "
+      "/publish/card {url} a link's og: card. The owner's login from the "
+      "pages only (X-LCARS-Client)\"},"
       "{\"method\":\"GET\",\"path\":\"/maps\","
       "\"description\":\"the web UI's map settings for plotting a "
       "course: {mapy_key} from $LCARS_MAPY_KEY, or null\"},"
@@ -3657,7 +3726,8 @@ static int HandleIndex(int client_fd) {
       "values). The owner login only\"},"
       "{\"method\":\"GET\",\"path\":\"/dump\","
       "\"description\":\"every entry matching the /entries filters in one "
-      "streamed (gzip if accepted) response; no limit/offset\"},"
+      "streamed (gzip if accepted) response; no limit/offset; a report "
+      "entry is its first line unless report_body=1\"},"
       "{\"method\":\"GET\",\"path\":\"/metrics\","
       "\"description\":\"Prometheus text: lcars_reading{kind}, its "
       "_timestamp_seconds, lcars_entries_total{kind}. No auth from "
@@ -3668,6 +3738,10 @@ static int HandleIndex(int client_fd) {
       "\"description\":\"the kind each feature's role writes: {roles:[{role,"
       "what,kind,kinds,default,list,set,name,rows}],entry,error}; PUT "
       "{<role>:{kind,name}|null}, the owner's login only\"},"
+      "{\"method\":\"GET|PUT\",\"path\":\"/theme\","
+      "\"description\":\"the console's theme: {name,fmt,text,entry,error}; "
+      "PUT {name} (a built-in) or {name,text}, or a btop/omarchy file as "
+      "text/plain with ?name=; 64 KB; the owner's login only\"},"
       "{\"method\":\"GET\",\"path\":\"/stats\","
       "\"description\":\"totals, accepts the same filters as /entries\"},"
       "{\"method\":\"PROPFIND|REPORT|PUT|DELETE|MOVE|MKCALENDAR|PROPPATCH\","
@@ -3734,6 +3808,11 @@ static int HandleMaps(int client_fd) {
 #define LCARS_UI_FILES_IMPLEMENTATION
 #include "lcars_ui_files.h"
 
+// GET/PUT /theme - the console's theme, a settings entry (lcars_theme.h).
+// After lcars_ui_files.h: a built-in is a file the UI serves.
+#define LCARS_THEME_IMPLEMENTATION
+#include "lcars_theme.h"
+
 // Every entry as a vector, for the web UI's star chart and "related". A
 // module for the same reason; it also runs the indexer thread.
 #define LCARS_EMBED_IMPLEMENTATION
@@ -3743,6 +3822,10 @@ static int HandleMaps(int client_fd) {
 // scripts/engineer.py. After lcars_media.h, whose loopback test it uses.
 #define LCARS_ENGINEER_IMPLEMENTATION
 #include "lcars_engineer.h"
+// The Share sheet's Post: scripts/publish.py behind the owner's login and
+// the pages' header. After lcars_engineer.h, whose script runner it uses.
+#define LCARS_PUBLISH_IMPLEMENTATION
+#include "lcars_publish.h"
 #define LCARS_LOGINS_IMPLEMENTATION
 #include "lcars_logins.h"
 
@@ -4257,7 +4340,8 @@ static bool ServeHTTPRequest(int client_fd, Arena *arena, char *req_buf,
   }
 
   // The web UI, by the same rule: loopback (tailscale serve) is let in, the
-  // public port wants the password. Any page path answers with the app.
+  // public port wants the password. Any page path answers with the app;
+  // /manual is the user manual's short link (UIRedirectFor).
   if ((strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0) &&
       UIIsPath(path)) {
     if (!MediaPeerIsLoopback(client_fd) && !CheckHTTPAuth(client_fd, req_buf)) {
@@ -4469,6 +4553,9 @@ static bool ServeHTTPRequest(int client_fd, Arena *arena, char *req_buf,
   } else if (IsEngineerPath(path)) {
     status_code =
         HandleEngineer(client_fd, arena, method, path, query, req_buf, body);
+  } else if (IsPublishPath(path)) {
+    status_code = HandlePublish(client_fd, arena, method, path, req_buf, body,
+                                content_type);
   } else if (PathIs(path, "/embeddings")) {
     status_code =
         strcmp(method, "GET") == 0
@@ -4503,6 +4590,9 @@ static bool ServeHTTPRequest(int client_fd, Arena *arena, char *req_buf,
                                       "Method %s not allowed on /dump", method);
   } else if (PathIs(path, "/kinds/roles")) {
     status_code = HandleKindRoles(client_fd, arena, method, body);
+  } else if (PathIs(path, "/theme")) {
+    status_code =
+        HandleTheme(client_fd, arena, method, query, body, content_type);
   } else if (PathIs(path, "/kinds")) {
     status_code =
         strcmp(method, "GET") == 0

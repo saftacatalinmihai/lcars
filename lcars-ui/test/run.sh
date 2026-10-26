@@ -18,7 +18,7 @@ T=test
 # --changed: test/changed.py sets SEL_* from the diff against main
 # (CHANGED_BASE: another ref, the deploy's live branch); the full
 # run leaves them all on. A stage left out says so where it would have run.
-SEL_DECK=1 SEL_AUDIT=1 SEL_BEHAVIOUR=1 SEL_KB=1 SEL_PERF=1 SEL_PERF_ONLY=
+SEL_DECK=1 SEL_AUDIT=1 SEL_BEHAVIOUR=1 SEL_KB=1 SEL_SCREENS=1 SEL_PERF=1 SEL_PERF_ONLY=
 if [ "${1:-}" = --changed ]; then
   echo "== what the change needs (--changed, against main) =="
   eval "$(python3 "$T/changed.py" --shell --base "${CHANGED_BASE:-main}")"
@@ -38,6 +38,8 @@ rm -f "$T/page.js"
 
 echo "== structure (ids, balance, markup) =="
 python3 "$T/check.py" index.html
+# its AutoFill Contact rule, on made-up pages (a second)
+python3 "$T/test_check_contact.py"
 
 # the selector itself, on sample diffs (a second)
 echo "== --changed picks the stages (test/test_changed.py) =="
@@ -48,7 +50,7 @@ else
   exit 1
 fi
 
-# The three slow stages below (deck boot, behaviour, keyboard) need nothing
+# The four slow stages below (deck boot, behaviour, keyboard, screens) need nothing
 # from each other, so they start together, each into a file of its own, and
 # are printed in this order as each one finishes: the same lines as running
 # them one after another, in about the time of the slowest. A stage that
@@ -90,7 +92,7 @@ behaviour() {
   "$T/qjs" "$T/run.js" > "$tmp/qjs.out" 2>&1 || rc=$?
   # the bundle embeds real journal rows as a fixture; it is rebuilt every run
   rm -f "$T/run.js"
-  grep -E "^(section|TOTAL|RESULT|  FAIL|SUITE|TIMED)" "$tmp/qjs.out" || :
+  grep -E "^(section|TOTAL|RESULT|  FAIL|  xfail|SUITE|TIMED)" "$tmp/qjs.out" || :
   [ $rc = 0 ] || { echo "   FAIL: qjs exited $rc"; tail -5 "$tmp/qjs.out"; return 1; }
   grep -q "^RESULT: PASS" "$tmp/qjs.out" || { echo "   FAIL: no RESULT: PASS line"; return 1; }
   ! grep -qE "^(  FAIL|SUITE .* THREW|TIMED)" "$tmp/qjs.out"
@@ -115,6 +117,40 @@ keyboard() {
   fi
 }
 
+# Every view at a phone's size, as a finger and a screen reader meet it:
+# test/targets.py (the 44px hit areas, the rendered rules, 320px reflow) and
+# test/axe.py (axe-core, WCAG 2.2 AA, the desk's views too), the two at once
+# against perf.py's fake API. SCREENS=0 skips them while iterating.
+screens() {
+  if [ "$SEL_SCREENS" = 0 ]; then
+    off
+  elif [ "${SCREENS:-1}" = 0 ]; then
+    echo "   skipped (SCREENS=0)"
+  elif ! python3 -c "import playwright" 2>/dev/null; then
+    echo "   skipped: playwright is not installed"
+  else
+    # each one's own exit status is the verdict
+    python3 "$T/targets.py" > "$tmp/targets.out" 2>&1 & tp=$!
+    python3 "$T/axe.py" > "$tmp/axe.out" 2>&1 & ap=$!
+    rt=0; ra=0
+    wait $tp || rt=$?
+    wait $ap || ra=$?
+    grep -E "^(FAIL|xfail|targets:)" "$tmp/targets.out" | cut -c1-200 || :
+    [ $rt = 0 ] || grep -E "^       " "$tmp/targets.out" | head -12
+    grep -E "^(FAIL|       |axe:)" "$tmp/axe.out" | head -30 || :
+    # a crash (a traceback, Chromium not starting) prints no FAIL line: its
+    # last lines are the only word of it
+    for x in targets:$rt axe:$ra; do
+      n=${x%%:*} r=${x#*:}
+      if [ "$r" != 0 ] && ! grep -q "^FAIL" "$tmp/$n.out"; then
+        echo "   FAIL: $n.py exited $r with no failed check; its last lines:"
+        tail -n 15 "$tmp/$n.out"
+      fi
+    done
+    [ $rt = 0 ] && [ $ra = 0 ]
+  fi
+}
+
 # A fresh clone has no journal: the behaviour suite then runs on a synthetic
 # one (test/synth.py, which it must pass on too), made for this run, unless
 # $LCARS_TEST_DB names a copy.
@@ -127,19 +163,21 @@ fi
 start deck deck
 start behaviour behaviour
 start keyboard keyboard
+start screens screens
 
 echo "== deck.html starts (top level, demo boot, frames) =="
 finish deck
 
 # CHANGELOG.md is the version's home; the page carries a copy to show it
+# (test/version.py: numbered, or placeholders the deploy numbers)
 echo "== version matches CHANGELOG.md =="
-log=$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+' ../CHANGELOG.md | cut -c4-)
-page=$(grep -m1 -oE 'const APP_VERSION = "[^"]+"' index.html | cut -d'"' -f2)
-if [ -z "$log" ] || [ "$log" != "$page" ]; then
-  echo "   FAIL: CHANGELOG.md says ${log:-nothing}, index.html APP_VERSION says ${page:-nothing}"
-  exit 1
-fi
-echo "   ok ($page)"
+python3 "$T/version.py" --base "${CHANGED_BASE:-main}" || exit 1
+
+# the user manual (site/manual/, docs/design/manual.md): its landing build
+# current, and every order, key and marked label it names still in the page
+# (a second; every run, as a change to the page is what can break it)
+echo "== the manual matches the console (site/manual/test/manual.py) =="
+python3 ../site/manual/test/manual.py || exit 1
 
 # audit.py's exit status is the verdict (it was once piped to tail, whose
 # status hid a failing check for a release)
@@ -154,11 +192,28 @@ else
   exit 1
 fi
 
+# docs/design/ui-rules.md's rules a static read can hold, each line tagged
+# with its rule; a rule a later slice fixes is an xfail until it holds
+echo "== ui rules (docs/design/ui-rules.md, test/rules.py) =="
+if [ "$SEL_AUDIT" = 0 ]; then
+  off
+elif out=$(python3 "$T/rules.py"); then
+  echo "$out" | grep "^  xfail" || :
+  echo "$out" | tail -1
+else
+  echo "$out" | grep "FAIL"
+  echo "$out" | tail -1
+  exit 1
+fi
+
 echo "== behaviour =="
 finish behaviour
 
 echo "== text fields on a phone: no zoom, focus kept =="
 finish keyboard
+
+echo "== every view: 44px targets, rendered rules, axe (targets.py, axe.py) =="
+finish screens
 
 # The frame budget: 60 fps at p99, in headless Chromium against a synthetic
 # journal the size of the real one (see test/perf.py for what is measured and

@@ -1,5 +1,11 @@
 # Number One's threads: several conversations, one session
 
+**Superseded in full by docs/design/rooms.md** (the captain's decisions
+of 2026-10-23: rooms, a header line per message, every message a journal
+row), section 13 included, as of rooms slice 4 (0.309.x): `[thread <id>]`
+is read as `room:: <id>` for a release and no longer written, and `no1.py
+thread` is the old name of `no1.py room`. This document is history.
+
 **Superseded in 0.285.0 by section 13, "Threads v2: tags, not sessions"**
 (the captain's decision of 2026-10-21): a thread is a label on the
 messages of one conversation, not a Claude Code session. Sections 1 to 9
@@ -654,6 +660,10 @@ One):
   queued only in the session that sent it (the inbox row is the record).
 
 ## 13. Threads v2: tags, not sessions (0.285.0)
+
+**Superseded in full by docs/design/rooms.md** (slices 1-4): the tag is
+the `room::` header, the labels are rooms (`no1.py room`), and every
+message is a `crew_msg` row.
 
 The captain's decision of 2026-10-21. A thread as a Claude Code session
 blocked the others: a report for a thread not open waited, held, until

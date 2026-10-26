@@ -149,6 +149,22 @@ def substitute(path, data, repo):
     return data
 
 
+def numbered(src):
+    """Refuse a tree whose CHANGELOG has a placeholder (`## next patch`): a
+    belt to the deploy's check, main being always numbered
+    (docs/design/version-at-deploy.md)."""
+    log = src / "CHANGELOG.md"
+    text = log.read_text(encoding="utf-8") if log.is_file() else ""
+    m = re.search(r"^## (next\s.*)$", text, re.M)
+    if m:
+        sys.exit(f"export: CHANGELOG.md has a placeholder (## {m.group(1)}): export main, which the deploy numbers")
+    # a fragment (changelog.d/, the placeholder's successor) is unnumbered too
+    frags = sorted(p.name for p in (src / "changelog.d").glob("*.md")
+                   if re.fullmatch(r"[a-z0-9][a-z0-9._-]*\.md", p.name))
+    if frags:
+        sys.exit(f"export: changelog.d/{frags[0]} is a fragment the deploy has not numbered: export main")
+
+
 def app_version(src):
     m = re.search(r'const APP_VERSION = "(\d+\.\d+\.\d+)"', (src / "lcars-ui/index.html").read_text(encoding="utf-8"))
     if not m:
@@ -201,6 +217,17 @@ def load_patterns(path):
     return rules
 
 
+def applies(globs, path):
+    """Whether a rule with these globs reads path: none means every file;
+    a "!glob" leaves its files out (a short acronym's rule out of the
+    compressed textures, whose random bytes spell one now and then), and
+    the plain ones, if any, are the only files it reads."""
+    keep = [g for g in globs if not g.startswith("!")]
+    if any(fnmatch.fnmatchcase(path, g[1:]) for g in globs if g.startswith("!")):
+        return False
+    return not keep or any(fnmatch.fnmatchcase(path, g) for g in keep)
+
+
 def audit(files, rules):
     """[(name, path, line, text)] for every line of every file that a rule
     matches. Binary files are read too (a path baked into a glb still
@@ -212,7 +239,7 @@ def audit(files, rules):
             text = data.decode("utf-8")
         except UnicodeDecodeError:
             text = data.decode("latin-1")
-        mine = [(name, rx) for name, rx, globs in rules if not globs or any(fnmatch.fnmatchcase(path, g) for g in globs)]
+        mine = [(name, rx) for name, rx, globs in rules if applies(globs, path)]
         for i, line in enumerate(text.splitlines(), 1):
             for name, rx in mine:
                 if rx.search(line):
@@ -336,7 +363,8 @@ def main(argv=None):
         return 1 if hits else 0
 
     if a.dest is None:
-        ap.error("DEST is needed (or --audit-only)")
+        ap.error("DEST is needed (or --audit-only, which a branch's placeholder does not stop)")
+    numbered(src)
     if git(src, "status", "--porcelain").strip():
         sys.exit("export: the tree is dirty: commit or set aside the changes first (the release is a commit's)")
     dest = a.dest.resolve()

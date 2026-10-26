@@ -96,6 +96,16 @@ out.write("var KINDMAP = " + json.dumps(kmap) + ";\n")
 # is a copy, and its counters are checked on the file's cases
 out.write("var SOC_LIMITS_FILE = " + open(os.path.join(os.path.dirname(UI), "scripts", "publish_net", "limits.json"),
                                           encoding="utf-8").read() + ";\n")
+# the shipped themes (docs/design/theming.md): the fake fetch answers
+# themes/<name>.theme with them, and the suite parses every one; the design
+# note's appendix is what the contrast sweep must find
+TH = os.path.join(UI, "themes")
+out.write("var THEME_FILES = " + json.dumps({f[:-6]: open(os.path.join(TH, f), encoding="utf-8").read()
+                                            for f in sorted(os.listdir(TH)) if f.endswith(".theme")}) + ";\n")
+root = re.search(r":root\{(.*?)\n\}", src, re.S).group(1)
+out.write("var ROOT_TOKENS = " + json.dumps(re.findall(r"(--[\w-]+)\s*:", re.sub(r"/\*.*?\*/", "", root, flags=re.S))) + ";\n")
+out.write("var THEME_NOTE = " + json.dumps(open(os.path.join(os.path.dirname(UI), "docs", "design", "theming.md"),
+                                                encoding="utf-8").read()) + ";\n")
 out.write(open(os.path.join(T, "api.js"), encoding="utf-8").read())
 out.write("\n/* ===== page markup ===== */\n")
 out.write("document.body.innerHTML = " + json.dumps(body) + ";\n")

@@ -120,7 +120,22 @@ CHECK_JS = """([i]) => {
   const under = document.elementFromPoint(px, py);
   if (!under || !(under === el || el.contains(under) || under.contains(el) && under.tagName === 'LABEL')) return { gone: true };
   el.focus();
-  return { font: parseFloat(getComputedStyle(el).fontSize), focused: document.activeElement === el };
+  // rule:focus (ui-rules.md, "A focused field is never covered", WCAG
+  // 2.4.11): once focused, the field's visible middle is inside the visual
+  // viewport and nothing of the page's own (the foot, the toast, the tape
+  // deck, a bar) lies on it
+  const vv = window.visualViewport || { offsetTop: 0, offsetLeft: 0, height: innerHeight, width: innerWidth };
+  const f = el.getBoundingClientRect();
+  const top = Math.max(f.top, vv.offsetTop), bot = Math.min(f.bottom, vv.offsetTop + vv.height);
+  let covered = null;
+  if (bot - top < Math.min(f.height, 16)) covered = 'outside the visual viewport';
+  else {
+    const mx = Math.min(Math.max(f.left + Math.min(f.width / 2, 40), vv.offsetLeft + 1), vv.offsetLeft + vv.width - 2);
+    const top2 = document.elementFromPoint(mx, (top + bot) / 2);
+    if (top2 && !(top2 === el || el.contains(top2) || top2.contains(el)))
+      covered = 'under ' + (top2.id ? '#' + top2.id : top2.tagName.toLowerCase() + '.' + top2.className).slice(0, 40);
+  }
+  return { font: parseFloat(getComputedStyle(el).fontSize), focused: document.activeElement === el, covered };
 }"""
 
 
@@ -240,6 +255,8 @@ def run(shard, nshards):
                         fail([f["name"], "font"], f"{where}: {f['name']} is {r['font']:g}px, so iOS zooms in when it is tapped")
                     if not r["focused"]:
                         fail([f["name"], "focus"], f"{where}: {f['name']} does not take the focus")
+                    elif r.get("covered"):
+                        fail([f["name"], "covered"], f"{where}: {f['name']} is focused {r['covered']}")
                     page.evaluate("() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }")
 
             def the_list():
@@ -318,6 +335,43 @@ def run(shard, nshards):
                 page.evaluate("chatSheet('thread', {id: 'deck'})")
                 calm(300)
                 sweep("a thread's sheet (rename)")
+
+            # the Rooms page (rooms.md 6): New room's fields behind +, a
+            # room's box, and a project room's Rename behind its ⋯
+            def the_rooms():
+                home()
+                page.evaluate("openRooms()")
+                calm(500)
+                page.evaluate("document.querySelector('#rmplus').click()")
+                calm(300)
+                if not page.evaluate("!!document.querySelector('#rmnewhead') && !document.querySelector('#rmnew').hidden"):
+                    fail(["rmnew", "missing"], "the Rooms page: + shows no New room fields")
+                sweep("the Rooms page, New room")
+                page.evaluate("""() => {
+                  const top = st.all.reduce((m, e) => Math.max(m, e.id), 0) + 1, at = st.all[0].created_at_utc;
+                  const r = { id: top, kind: 'crew_room', title: 'Deck redesign', content: 'id:: deck\\nby:: captain', done_bool: 0,
+                              created_at_utc: at, last_modified_at_utc: at, deleted: 0 };
+                  st.all.unshift(r); st.byId.set(r.id, r); rm.gen++;
+                  rmShow('deck'); document.querySelector('#rmmore').click(); }""")
+                calm(300)
+                if not page.evaluate("!!document.querySelector('#rmbox') && !!document.querySelector('#rmren')"):
+                    fail(["rmroom", "missing"], "a room: no box, or its ⋯ shows no Rename field")
+                sweep("a room, its box and Rename")
+
+            # Tasks' filters, folded to one line on a phone (the review's
+            # finding 7): the search is behind the line's button
+            def the_task_filters():
+                home()
+                page.evaluate("taskFiltersOpen = false; openTasks()")
+                calm(300)
+                if page.evaluate("!!document.querySelector('#tkq').getClientRects().length"):
+                    fail(["tkq", "unfolded"], "Tasks: the search is on screen before the filters are unfolded")
+                page.evaluate("document.querySelector('#tkfold').click()")
+                calm(300)
+                if not page.evaluate("!!document.querySelector('#tkq').getClientRects().length"):
+                    fail(["tkq", "missing"], "Tasks: the filters' button shows no search")
+                sweep("Tasks, the filters unfolded")
+                page.evaluate("taskFiltersOpen = false")
 
             # the navigator: the one chat's pane in the course sheet
             def the_navigator():
@@ -409,7 +463,7 @@ def run(shard, nshards):
             labels = page.evaluate("paletteRows().map(r => r.label)")
             jobs = [the_list, the_editor, the_reader]
             jobs += [lambda n=n: a_page(n) for n in routes]
-            jobs += [an_engineer, no1_threads, a_long_thread, the_navigator, a_crew_note, the_share_sheet]
+            jobs += [an_engineer, no1_threads, the_rooms, the_task_filters, a_long_thread, the_navigator, a_crew_note, the_share_sheet]
             jobs += [lambda n=n: the_race(n) for n in routes + ["engineer"]]
             jobs += [lambda l=l: a_row(l) for l in labels if not any(s in l.lower() for s in SKIP_ROWS)]
             for i, job in enumerate(jobs):

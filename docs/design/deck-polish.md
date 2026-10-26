@@ -161,6 +161,7 @@ slice's rooms; deckboot and `run.sh --changed`; an HTML report.
    in the windows' sky material, framed. +1 call a room for the frame
    material where it is not already there. Looks: deck 7 quarters,
    observation 7-A, deck 10 gym, deck 2 conference, deck 10 school.
+   **Done** (section 5).
 6. **Pond**: `pondMat` gets an `envMap` of its own, a small PMREM of a
    night-sky gradient (deep blue to black, a few stars), so the water
    mirrors the glass roof's sky, not a studio. One PMREM at boot (~5 ms).
@@ -175,8 +176,9 @@ slice's rooms; deckboot and `run.sh --changed`; an HTML report.
    **Done, 0.298.1** (section 5).
 8. **Turbolift**: the car's light from `LH - 0.5` to `LH - 0.9`, a little
    dimmer, after a reshoot from inside to confirm the cause. Looks: the
-   car's three. **Reshot in 0.291.4, not built** (section 5): the cause
-   is not the light.
+   car's three. **Reshot in 0.291.4** (section 5): the cause is not the
+   light. **Done** (section 5): the hull's drum round the bridge ran
+   through the bridge's two cars; it is open there now.
 
 Slices 1, 2, 6 and 8 are fixes of a line or two each. Slices 3, 4, 5 and
 7 are an hour's evening each at most. None needs a model rebuild
@@ -319,13 +321,60 @@ Slices 1, 2, 6 and 8 are fixes of a line or two each. Slices 3, 4, 5 and
   same 9,748, textures 171, 172, 173. So the texture creep is main's, not
   the slices'. deckboot and `run.sh --changed` pass. The report:
   <https://<server>/media/reports/2026/10/deck-polish-slice-7-carpets-and-mats-3de94910.html>.
-- **Slice 8, the turbolift: reshot, not built.** From the car's middle,
-  the back wall is fine (the survey's look stood by the door). The white
-  look is the one facing the door, the way a rider faces: a framed white
-  field in the door's opening, the same at low and high, from the middle
-  and from the back. So it is not the car's light. The view is the open
-  doorway with the car's front wall round it, and something past it is
-  white: a ride has the door shut and the ride's fade over it, which a
-  `setView` look does not. It wants a look taken during a ride
-  (`__deck` riding, the door closed) before any change. Left for after
-  slices 2-7.
+- **Slice 5, the bare walls (2026-10-22).** `wallFrame(mat, fm, w, h, x, y,
+  z, rotY)` hangs a plane in a shared material inside four plain box
+  strips (50 triangles, where a rounded frame is 300), the strips in
+  `M.rail` (a picture) or `M.console` (a display, a viewport), which
+  every wall's rail and kick plate already draw. The picture is
+  `paintMat()`, `painting()`'s material split out, made once; a display
+  is `panelMat(seed)`, the desks' pool; the viewport is `viewMat`,
+  cartoMat's depth-writing form of the windows' sky with skyMat's own
+  uniforms (skyMat draws at the far plane, behind a solid wall), kept
+  DoubleSide as cartoMat is, since the side is in three's program key.
+  Quarters: a hull cabin's picture over the window chairs, an inner
+  one's viewport on its far wall, and a plaque by every door; an inner
+  observation lounge's big viewport across from its sofas, a hull one's
+  picture; the gym's display facing the mirror; the conference room's
+  picture and small display at the table; the classroom's display.
+  Measured (deckshots, 390x844 at 2x, low, main 0.298.1 against this,
+  the plan's five rooms, four looks each): +0 to +2 calls a look, the
+  two +2s (quarters 0, conference 3) likely the merged meshes' bounds
+  and the walking crew; +48 to +196 triangles. `deckmem.py --check` at
+  low passes on both, main 0.299.3 and this: each loop's end the same
+  267 geometries, 169 textures and 484.6 MB, all three times; this slice
+  holds a flat +1 program (60, from the arrival on deck 12) and +1 live
+  object (9,749), neither growing: likely `viewMat` compiled under a key
+  of its own and a viewport mesh (it merges with nothing) in a room
+  still built at the concourse. deckboot and `run.sh --changed` pass.
+  The report:
+  <https://<server>/media/reports/2026/10/deck-polish-slice-5-the-bare-walls-da5deab9.html>.
+- **Slice 8, the turbolift: the hull's drum open at the bridge's cars.**
+  A look from each car's middle facing the door, as a rider faces, in
+  all seven cars on main: only the bridge's two show the white field;
+  the concourse's four and deck 12's look out on their corridors. The
+  cause is outside the car, not its light: deck 8's outer hull round the
+  bridge is a drum (`deck8Shell`, a cone from `BR + 0.35` at its top to
+  `BR + 1.2` at `Y0`, open only at the corridor), and the bridge's cars
+  stand outside the bridge's wall, x ±9.94 to ±12.54, so the drum ran
+  through both at x ≈ ±10.48, half a metre before the rider's face. Rays
+  from the eye hit its hull material first (0.96 m), its outside lit by
+  the hull's sun. The fix: the drum is three arcs round the bridge, open
+  over each car's width (`lg = asin(1.35 / (BR + 0.35))`) from the floor
+  to the deck's height, with two open-ended pieces in each gap below the
+  floor and above the car; the cone's radius by height (`dR`) makes the
+  pieces meet. 68 segments round the arcs and 2 a gap piece: 288
+  triangles, the whole drum's before, in the same merged hull mesh.
+  Looks, main beside this at low and high: in both cars, from the middle
+  and 0.9 m back, the bridge through the door where main had the white
+  field. From Ten Forward's forward windows (deck 8's only ones facing
+  the bridge's sides; the shell is hidden off deck 8 and on the map) the
+  four views match main: the car's own walls close the gap. Counts
+  (deckshots, low, the bridge and four views at and facing the cars):
+  calls and triangles equal in five of seven; the bridge's first view
+  -1 call and -72 triangles and the view facing the port car +1 and +72,
+  likely the walking crew (the drum is in one merged mesh, its count
+  unchanged).
+  `deckmem.py --check` at low passes: each loop's end 267 geometries, 169
+  textures, 484.6 MB, live3d 9,749, as slice 5's. deckboot and `run.sh
+  --changed` pass. The report:
+  <https://<server>/media/reports/2026/10/deck-polish-slice-8-the-turbolift-1b86ddf7.html>.

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Unit tests for the scratch reaper in scripts/engineer.py (reap_scratch):
-ended Claude sessions' scratch is deleted, a running one's never. Real
+ended Claude sessions' scratch is deleted, a running one's never; a
+/cleared one's when known cleared, unnamed by a job, old and unheld; and
+Claude Code's bash-edit-diff/ by age. Real
 processes stand in for Claude Code (sleep, run as "claude" so its comm is
 claude), in a temp directory; nothing outside it is touched. Linux only.
 
@@ -28,7 +30,9 @@ DAY = 86400
 IDS = ["0b8e3c2a-1d4f-4e5a-9b6c-%012d" % i for i in range(10)]
 
 
-class Reap(unittest.TestCase):
+class Scratch(unittest.TestCase):
+    """A temp CLAUDE_TMP and sessions dir, and stand-in claudes."""
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="reap-test-")
         self.root = os.path.join(self.tmp, "claude-tmp")
@@ -41,6 +45,13 @@ class Reap(unittest.TestCase):
         self.procs = []
         self.ps = [mock.patch.object(E, "CLAUDE_TMP", self.root), mock.patch.object(E, "CLAUDE_SESSIONS", self.sessions),
                    mock.patch.object(E, "SCRATCH_KEEP_H", 6.0)]
+        # the engineers' state and the job line: none, and empty, unless a
+        # test writes them
+        self.state = os.path.join(self.tmp, "state")
+        os.makedirs(os.path.join(self.state, "jobs"))
+        self.jobs = []
+        self.ps += [mock.patch.object(E, "STATE", self.state),
+                    mock.patch.object(E, "job_texts", side_effect=lambda: self.jobs)]
         for p in self.ps:
             p.start()
 
@@ -87,6 +98,14 @@ class Reap(unittest.TestCase):
                 json.dump(rec, f)
         return p
 
+
+    def engineer(self, name, session, past=()):
+        with open(os.path.join(self.state, name + ".json"), "w") as f:
+            json.dump({"name": name, "session": session,
+                       "past": [{"name": "before", "session": x, "at": 1} for x in past]}, f)
+
+
+class Reap(Scratch):
     def test_an_ended_session_is_deleted(self):
         w = self.project("w")
         d = self.pad(w, IDS[0])
@@ -215,12 +234,329 @@ class Reap(unittest.TestCase):
         self.assertEqual(E.reap_scratch(), ([], 0))
         self.assertTrue(os.path.isdir(d))
 
+    def test_an_idle_engineers_current_session_is_kept(self):
+        # its claude stopped between turns: no process names it
+        d = self.pad(self.project("w"), IDS[0])
+        self.engineer("kim-c1", IDS[0], past=[IDS[1]])
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(d))
+
+    def test_a_queued_jobs_scratch_is_kept(self):
+        w = self.project("w")
+        d, other = self.pad(w, IDS[0]), self.pad(w, IDS[1])
+        self.engineer("kim-c1", IDS[2], past=[IDS[0], IDS[1]])
+        self.jobs = [json.dumps({"name": "kim-c1", "cmd": os.path.join(d, "scratchpad", "vjob.sh")})]
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(d))
+        self.assertFalse(os.path.exists(other))
+
+    def test_an_unreadable_seat_takes_no_session_but_old_diffs_go(self):
+        d = self.pad(self.project("w"), IDS[0])
+        diff = os.path.join(self.root, "bash-edit-diff", "1-2-old")
+        os.makedirs(diff)
+        os.utime(diff, (0, 0))
+        self.jobs = None
+        gone, _ = E.reap_scratch()
+        self.assertEqual(gone, ["bash-edit-diff/1-2-old"])
+        self.assertTrue(os.path.isdir(d))
+
+    def test_unreadable_state_takes_no_session(self):
+        d = self.pad(self.project("w"), IDS[0])
+        with open(os.path.join(self.state, "kim-c1.json"), "w") as f:
+            f.write("{half")
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(d))
+        os.remove(os.path.join(self.state, "kim-c1.json"))
+        os.rmdir(os.path.join(self.state, "jobs"))
+        os.rmdir(self.state)
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(d))
+
     def test_unreadable_proc_keeps_everything(self):
         d = self.pad(self.project("w"), IDS[0])
         with mock.patch.object(E, "live_sessions", return_value=None):
             self.assertEqual(E.reap_scratch(), ([], 0))
         self.assertTrue(os.path.isdir(d))
 
+
+
+class Cleared(Scratch):
+    """A /cleared conversation's scratch: its id lives on in the process's
+    CLAUDE_CODE_SESSION_ID, and it goes only when known cleared (an
+    engineer's past, no one's session), named by no job, old and unheld."""
+
+    def cleared(self, name="geordi-c1", age=2 * DAY):
+        """A claude started on IDS[0] and /cleared to IDS[1]: the record
+        names IDS[1], its environment still IDS[0]."""
+        w = self.project(name)
+        old, new = self.pad(w, IDS[0], age), self.pad(w, IDS[1])
+        self.spawn(w, env=dict(os.environ, CLAUDE_CODE_SESSION_ID=IDS[0]), record=IDS[1])
+        return w, old, new
+
+    def test_a_cleared_sessions_scratch_goes(self):
+        w, old, new = self.cleared()
+        self.engineer("geordi-c1", IDS[1], past=[IDS[0]])
+        gone, _ = E.reap_scratch()
+        self.assertEqual(gone, [f"{E.claude_slug(w)}/{IDS[0]}"])
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.isdir(new))
+
+    def test_the_dry_run_names_it_and_keeps_it(self):
+        w, old, _ = self.cleared()
+        self.engineer("geordi-c1", IDS[1], past=[IDS[0]])
+        gone, freed = E.reap_scratch(dry=True)
+        self.assertEqual(gone, [f"{E.claude_slug(w)}/{IDS[0]}"])
+        self.assertGreater(freed, 0)
+        self.assertTrue(os.path.isdir(old))
+
+    def test_an_id_in_no_past_is_kept(self):
+        _, old, _ = self.cleared()
+        self.engineer("geordi-c1", IDS[1])
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(old))
+
+    def test_someones_current_session_is_kept(self):
+        _, old, _ = self.cleared()
+        self.engineer("geordi-c1", IDS[1], past=[IDS[0]])
+        self.engineer("sato-c2", IDS[0])
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(old))
+
+    def test_number_ones_past_is_kept(self):
+        _, old, _ = self.cleared(E.NO1)
+        self.engineer(E.NO1, IDS[1], past=[IDS[0]])
+        self.engineer("geordi-c1", IDS[2], past=[IDS[0]])
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(old))
+
+    def test_a_job_naming_it_keeps_it(self):
+        _, old, _ = self.cleared()
+        self.engineer("geordi-c1", IDS[1], past=[IDS[0]])
+        self.jobs = [json.dumps({"name": "geordi-c1", "cmd": os.path.join(old, "scratchpad", "job.sh")})]
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(old))
+
+    def test_a_started_jobs_spec_keeps_it_until_its_result(self):
+        _, old, _ = self.cleared()
+        self.engineer("geordi-c1", IDS[1], past=[IDS[0]])
+        spec = os.path.join(self.state, "jobs", "geordi-c1-1.spec")
+        with open(spec, "w") as f:
+            json.dump({"cmd": os.path.join(old, "scratchpad", "job.sh")}, f)
+        self.ps[-1].stop()            # the real job_texts, on a seat that cannot be read
+        self.ps.pop()
+        with mock.patch.object(E, "seat_mod") as S:
+            S.return_value.read.return_value = (1, {"jobs": {}})
+            E.reap_scratch()
+            self.assertTrue(os.path.isdir(old))
+            with open(spec[:-5] + ".result", "w") as f:
+                f.write("{}")
+            E.reap_scratch()
+            self.assertFalse(os.path.exists(old))
+
+    def test_an_unreadable_seat_keeps_it(self):
+        _, old, _ = self.cleared()
+        self.engineer("geordi-c1", IDS[1], past=[IDS[0]])
+        self.jobs = None
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(old))
+
+    def test_a_recent_write_keeps_it(self):
+        _, old, _ = self.cleared(age=3600)
+        self.engineer("geordi-c1", IDS[1], past=[IDS[0]])
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(old))
+
+    def test_a_held_file_keeps_it(self):
+        w = self.project("geordi-c1")
+        old, _ = self.pad(w, IDS[0]), self.pad(w, IDS[1])
+        self.engineer("geordi-c1", IDS[1], past=[IDS[0]])
+        fd = os.open(os.path.join(old, "scratchpad"), os.O_RDONLY)
+        try:
+            p = subprocess.Popen([self.claude, "300"], cwd=w, pass_fds=(fd,),
+                                 env=dict(os.environ, CLAUDE_CODE_SESSION_ID=IDS[0]))
+            self.procs.append(p)
+            time.sleep(0.05)
+        finally:
+            os.close(fd)
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(old))
+
+
+class Salvage(Scratch):
+    """What a taken session leaves: the regenerable deleted, the rest moved
+    to its owner's research folder; an idle engineer's current session
+    taken after SCRATCH_IDLE_H, its scratchpad kept with a note."""
+
+    def setUp(self):
+        super().setUp()
+        self.ps.append(mock.patch.object(E, "ROOT", self.tmp))
+        self.ps[-1].start()
+
+    def mixed(self, name, sid, age=2 * DAY):
+        """A session's scratch of shots, a log, a binary, a cache, a link
+        and the work: a note, a script, a mock, a database copy."""
+        w = self.project(name)
+        d = os.path.join(self.root, E.claude_slug(w), sid)
+        pad = os.path.join(d, "scratchpad")
+        files = {"shots/a.png": b"x" * 9000, "shots/b.webp": b"x", "run.log": b"x", "tasks.output": b"x",
+                 "fonts/f.woff2": b"x", "lcars": b"\x7fELF" + b"x" * 100, "m/__pycache__/m.py": b"x",
+                 "notes.md": b"# plan", "probe.py": b"print(1)", "mock/page.html": b"<p>", "synth.db": b"db"}
+        for rel, body in files.items():
+            os.makedirs(os.path.dirname(os.path.join(pad, rel)), exist_ok=True)
+            with open(os.path.join(pad, rel), "wb") as f:
+                f.write(body)
+        outside = os.path.join(self.tmp, "outside.txt")
+        with open(outside, "w") as f:
+            f.write("keep")
+        os.symlink(outside, os.path.join(pad, "link.txt"))
+        t = time.time() - age
+        for top, dirs, fs in os.walk(d):
+            for n in dirs + fs:
+                os.utime(os.path.join(top, n), (t, t), follow_symlinks=False)
+        os.utime(d, (t, t))
+        return w, d, outside
+
+    def dest(self, name, sid):
+        return os.path.join(self.state, "research", name, "scratch-" + time.strftime("%Y-%m-%d"), sid, "scratchpad")
+
+    WORK = ["mock/page.html", "notes.md", "probe.py", "synth.db"]
+
+    def moved_files(self, root):
+        return sorted(os.path.relpath(os.path.join(t, f), root) for t, _, fs in os.walk(root) for f in fs)
+
+    def test_an_ended_session_keeps_its_work_in_research(self):
+        w, d, outside = self.mixed("geordi-c1", IDS[0])
+        moved = []
+        gone, freed = E.reap_scratch(moved=moved)
+        self.assertEqual(gone, [f"{E.claude_slug(w)}/{IDS[0]}"])
+        self.assertFalse(os.path.exists(d))
+        self.assertEqual(self.moved_files(self.dest("geordi-c1", IDS[0])), self.WORK)
+        self.assertEqual(len(moved), 4)
+        self.assertGreater(freed, 9000)
+        with open(os.path.join(self.dest("geordi-c1", IDS[0]), "notes.md")) as f:
+            self.assertEqual(f.read(), "# plan")
+        with open(outside) as f:   # the link went, never what it named
+            self.assertEqual(f.read(), "keep")
+
+    def test_not_an_engineers_project_goes_to_other(self):
+        self.mixed("Not_A_Worktree", IDS[0])
+        E.reap_scratch()
+        self.assertEqual(self.moved_files(self.dest("other", IDS[0])), self.WORK)
+
+    def test_the_dry_run_touches_nothing(self):
+        w, d, _ = self.mixed("geordi-c1", IDS[0])
+        self.engineer("geordi-c1", IDS[0])
+        moved, why = [], {}
+        gone, _ = E.reap_scratch(dry=True, moved=moved, why=why)
+        self.assertEqual(gone, [f"{E.claude_slug(w)}/{IDS[0]}"])
+        self.assertEqual(sorted(os.path.relpath(m[0], os.path.join(d, "scratchpad")) for m in moved), self.WORK)
+        self.assertIn("geordi-c1's current session, idle 48h", why[gone[0]])
+        self.assertTrue(os.path.isfile(os.path.join(d, "scratchpad", "shots", "a.png")))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "research")))
+
+    def test_an_idle_engineers_current_session_is_taken_with_a_note(self):
+        w, d, _ = self.mixed("geordi-c1", IDS[0])
+        self.engineer("geordi-c1", IDS[0])
+        gone, _ = E.reap_scratch()
+        self.assertEqual(gone, [f"{E.claude_slug(w)}/{IDS[0]}"])
+        self.assertEqual(os.listdir(d), ["scratchpad"])
+        self.assertEqual(os.listdir(os.path.join(d, "scratchpad")), [E.SCRATCH_NOTE])
+        with open(os.path.join(d, "scratchpad", E.SCRATCH_NOTE)) as f:
+            self.assertIn(self.dest("geordi-c1", IDS[0])[:-len("/scratchpad")], f.read())
+        self.assertEqual(self.moved_files(self.dest("geordi-c1", IDS[0])), self.WORK)
+        # the note alone is nothing to take, however old
+        t = time.time() - 3 * DAY
+        os.utime(os.path.join(d, "scratchpad", E.SCRATCH_NOTE), (t, t))
+        self.assertEqual(E.reap_scratch(), ([], 0))
+
+    def test_a_second_take_does_not_overwrite_the_first(self):
+        _, d, _ = self.mixed("geordi-c1", IDS[0])
+        self.engineer("geordi-c1", IDS[0])
+        E.reap_scratch()
+        # resumed, it writes notes.md again, and is idle again the same day
+        pad = os.path.join(d, "scratchpad")
+        with open(os.path.join(pad, "notes.md"), "w") as f:
+            f.write("later")
+        t = time.time() - 2 * DAY
+        for f in (os.path.join(pad, "notes.md"), os.path.join(pad, E.SCRATCH_NOTE), pad, d):
+            os.utime(f, (t, t))
+        E.reap_scratch()
+        dest = self.dest("geordi-c1", IDS[0])
+        for n, body in (("notes.md", "# plan"), ("notes.md~", "later")):
+            with open(os.path.join(dest, n)) as f:
+                self.assertEqual(f.read(), body)
+        with open(os.path.join(pad, E.SCRATCH_NOTE)) as f:
+            self.assertEqual(len(f.read().splitlines()), 2)
+
+    def test_a_recent_current_session_is_kept(self):
+        _, d, _ = self.mixed("geordi-c1", IDS[0], age=20 * 3600)
+        self.engineer("geordi-c1", IDS[0])
+        why = {}
+        self.assertEqual(E.reap_scratch(why=why), ([], 0))
+        self.assertTrue(os.path.isfile(os.path.join(d, "scratchpad", "shots", "a.png")))
+        self.assertIn("under 24h", list(why.values())[0])
+
+    def test_a_running_current_session_is_kept(self):
+        w, d, _ = self.mixed("geordi-c1", IDS[0])
+        self.engineer("geordi-c1", IDS[0])
+        self.spawn(w, record=IDS[0])
+        E.reap_scratch()
+        self.assertTrue(os.path.isfile(os.path.join(d, "scratchpad", "shots", "a.png")))
+
+    def test_a_current_session_a_job_names_is_kept(self):
+        _, d, _ = self.mixed("geordi-c1", IDS[0])
+        self.engineer("geordi-c1", IDS[0])
+        self.jobs = [json.dumps({"cmd": os.path.join(d, "scratchpad", "probe.py")})]
+        E.reap_scratch()
+        self.assertTrue(os.path.isfile(os.path.join(d, "scratchpad", "shots", "a.png")))
+
+    def test_number_ones_current_session_is_kept(self):
+        _, d, _ = self.mixed(E.NO1, IDS[0], age=9 * DAY)
+        self.engineer(E.NO1, IDS[0])
+        E.reap_scratch()
+        self.assertTrue(os.path.isfile(os.path.join(d, "scratchpad", "shots", "a.png")))
+
+    def test_a_file_that_cannot_move_stays(self):
+        w, d, _ = self.mixed("geordi-c1", IDS[0])
+        with mock.patch.object(E.shutil, "move", side_effect=OSError("disk full")):
+            E.reap_scratch()
+        self.assertTrue(os.path.isfile(os.path.join(d, "scratchpad", "notes.md")))
+        self.assertFalse(os.path.exists(os.path.join(d, "scratchpad", "shots", "a.png")))
+
+
+class BashEditDiff(Scratch):
+    """Claude Code's bash-edit-diff/: a directory untouched for a day goes."""
+
+    def test_old_ones_go_new_ones_and_the_rest_stay(self):
+        top = os.path.join(self.root, "bash-edit-diff")
+        old, new = os.path.join(top, "1-2-old"), os.path.join(top, "1-2-new")
+        for d in (old, new):
+            os.makedirs(os.path.join(d, "a"))
+            with open(os.path.join(d, "a", "f"), "w") as f:
+                f.write("x" * 5000)
+        with open(os.path.join(top, "stray"), "w") as f:   # a file is left alone
+            f.write("x")
+        t = time.time() - 2 * DAY
+        for p in (os.path.join(old, "a", "f"), os.path.join(old, "a"), old, os.path.join(top, "stray")):
+            os.utime(p, (t, t))
+        os.symlink(old, os.path.join(top, "link"))
+        gone, freed = E.reap_scratch(dry=True)
+        self.assertEqual(gone, ["bash-edit-diff/1-2-old"])
+        self.assertTrue(os.path.isdir(old))
+        gone, freed = E.reap_scratch()
+        self.assertEqual(gone, ["bash-edit-diff/1-2-old"])
+        self.assertGreater(freed, 0)
+        self.assertFalse(os.path.exists(old))
+        for n in ("1-2-new", "stray", "link"):
+            self.assertTrue(os.path.lexists(os.path.join(top, n)), n)
+
+    def test_a_link_for_the_whole_is_not_followed(self):
+        real = os.path.join(self.tmp, "real")
+        os.makedirs(os.path.join(real, "x"))
+        os.utime(os.path.join(real, "x"), (0, 0))
+        os.symlink(real, os.path.join(self.root, "bash-edit-diff"))
+        E.reap_scratch()
+        self.assertTrue(os.path.isdir(os.path.join(real, "x")))
 
 
 class TestTmp(unittest.TestCase):

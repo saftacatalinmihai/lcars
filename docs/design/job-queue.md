@@ -35,6 +35,8 @@ job at a time, and the seat and the job overlap instead.
    running job (`"inline": true`) so the views show it and nothing else
    takes the cores under it. Someone arriving mid-run waits, as today: the
    turn is never cut, and the stuck rule cannot fire (it is working).
+   Since 2026-10-25 the run itself is detached, as a queued one's is (see
+   "As built: the watchdog"): it outlives the turn and the session.
 4. **Otherwise it queues and the turn ends.** The verb prints the job's
    place and "end your turn now: the result will be typed to you"; it marks
    the holder yielded, as `yield` does, so the Stop hook passes the seat.
@@ -102,7 +104,7 @@ stage, one functional test file under ~30 s (`offline.py`, `back.py`,
 `speech.py`, every `scripts/test_*.py`), git, reads.
 
 Heavy, always through `engineer.py job`: `lcars-ui/test/run.sh` (full or
-`PERF=0`, and `--changed` when it picks QuickJS, keyboard or perf),
+`PERF=0`, and `--changed` when it picks QuickJS, keyboard, screens or perf),
 `perf.py`, `buttons.py`, `qa_chat.py`, `keyboard.py` and its shards,
 `dates.sh`, `architect.py`, `deckvoice.py`, `editor.py`, `classified.py`,
 `deckshots.py`, `deckmem.py`, `shots.py`, `scripts/deck-models/build.sh` (the rooms),
@@ -211,6 +213,8 @@ from `jobs_dir()` at call time):
 |---|---|
 | `STATE/jobs/<id>.spec` | the job as launched; `job-run` reads it (not the journal) |
 | `STATE/jobs/<id>.lock` | flock held by `job-run` / `job_inline` for the job's life; free with no result = died |
+| `STATE/jobs/<id>.waiter` | flock held by an inline job's waiter (`job_inline`) while it follows the run; free = the waiter is gone, and the dispatcher tells the engineer |
+| `STATE/watchdog.json` | the watchdog's findings already said to Number One, by key, for two days |
 | `STATE/jobs/<id>.pid` | the command's process group leader (`job_kill`, cancel) |
 | `STATE/jobs/<id>.result` | `{outcome: passed|failed|timeout|refused|died|cancelled, exit, secs, head, why}`, written once (`open(..., "x")`: first writer wins), before the journal is touched |
 | `STATE/logs/job-<id>.log` | the command's output (the unit's stdout too) |
@@ -494,8 +498,8 @@ against 12.2 ms alone).
 
    | class | jobs | weight (cores) | peak, its unit's MemoryHigh/Max |
    |---|---|---:|---|
-   | **exclusive** (measures time, or fills the box) | `perf.py`; `run.sh` without `PERF=0`, and `--changed` when changed.py picks perf; `deckshots.py`, `shots.py`, `deckmem.py`; `video/explainer/render.sh`; `deck-models/build.sh`, `dates.sh` (not measured yet: exclusive until they are); **any command it cannot class** | 4 | as now, 3G / 4G; the explainer 3.5G / 4.5G |
-   | shared, parallel | `run.sh` with `PERF=0`, or `--changed` without perf; `keyboard.py` | 2 | 1.8 GB; 2.5G / 3G |
+   | **exclusive** (measures time, or fills the box) | `perf.py`; `run.sh` without `PERF=0`, and `--changed` when changed.py picks perf; `deckshots.py`, `shots.py`, `deckmem.py`; `video/explainer/render.sh`; `deck-models/build.sh`, `dates.sh` (not measured yet: exclusive until they are); **any command it cannot class** | 4 | as now, 3G / 4G (3.5G / 4G since 2026-10-24); the explainer 3.5G / 4.5G |
+   | shared, parallel | `run.sh` with `PERF=0`, or `--changed` without perf; `keyboard.py` | 2 | 1.8 GB; 2.5G / 3G (3.0 GB; 3.5G / 4G since 2026-10-24: "run.sh's memory, again") |
    | shared, one browser | `buttons.py`, `qa_chat.py`, `editor.py`, `architect.py`, `deckvoice.py`, `classified.py` | 1 | 0.7 GB; 1G / 1.5G |
    | shared, a build | `make lcars-release`, `lcars-one`, `lcars-embed` | 1 | 0.3 GB; 1G / 1.5G |
 
@@ -680,3 +684,294 @@ Number One's order (on the design's review). It deferred herdr's 500.
   llama-server and the server last (200). Worth it only if the box ever
   runs short with the gate in place; the gate (slices 1-2) is the real
   defence.
+
+## As built: the jobs (0.298.6)
+
+The captain's answer (ask 9775, through Number One): parallel heavy jobs,
+not more Claude Code sessions. The seat stays one; its slice 1 (holders,
+`N`) is dropped. This is the design's slice 2, the views (slice 3) next.
+
+- **The block.** `jobs.running` is a list (`seat.normal` reads the old
+  single job into it); `jobs.limit` = `{n, max, why, good_since, at}`.
+  A job carries `cls`, set at submit by `engineer.py`'s `job_class`; one
+  without (submitted before) is exclusive.
+- **Classes** (`seat.JOB_CLASSES`: weight, peak MB): exclusive (4, 3000),
+  explainer (4, 3500), parallel (2, 1800; 3000 since 2026-10-24), browser (1, 700), build (1,
+  300). `job_class` reads the command as `heavy_command` does (both use
+  `cmd_parts`), the strictest part wins, and a command with no part it
+  knows is exclusive. `run.sh` is parallel with `PERF=0` (in its own
+  words or an earlier `PERF=0`/`export PERF=0`), exclusive without;
+  `--changed` asks `test/changed.py --json` at submit whether it picks
+  perf (and is exclusive when it cannot tell). `make lcars-static` (Alpine,
+  docker) is not a build here: exclusive.
+- **`job_limit(s, r, now, jobs_max)`**, pure: the limit opens at the
+  ceiling; a bad reading (MemAvailable < 1000 MB, memory PSI > 5%,
+  swap-in > 2048 kB/s, CPU PSI > 40%) drops it by one, never below 1, and
+  kills nothing; it rises by one after `JOB_REOPEN` (300 s) of readings
+  that are none bad and CPU PSI < 25%, the clock restarting on any that
+  is not. Readings are taken only at the moves (no daemon), so "5 minutes"
+  means the first move after five minutes of good moves.
+- **`job_next(s, facts, now, deploying, mem_ok, r)`**: the head is the
+  first job not held (a held one does not block). Nothing while a deploy
+  is queued or running. With nothing running, the head starts on
+  today's rule alone (`mem_ok`: `MIN_FREE_MB`). Beside running jobs:
+  fewer than `limit.n`, the head and every running one shared, weights
+  ≤ `JOB_CORES` (4), MemAvailable less the head's peak, and less the peaks
+  of jobs started under `JOB_FRESH` (90 s) ago (not in the reading yet), ≥
+  1500 MB, CPU PSI < 25%. An unknown reading keeps it waiting. An
+  exclusive head waits, and holds everything behind it.
+- **The readings** (`engineer.py`'s `box_readings`): MemAvailable,
+  `/proc/pressure/{cpu,memory}` some avg60, and swap-in from
+  `/proc/vmstat`'s `pswpin`, averaged since `STATE/vmstat.json` (renewed
+  once a minute old; with none from the last 15 minutes, a one-second
+  sample). Taken outside the seat lock, and only with a job in the line.
+- **`job_dispatch`** settles every running job that ended, then starts
+  heads while `job_next` allows (two at most at `max` 2).
+- **`cores.lock`**: `cores(on_wait, who, shared)`. A job takes `LOCK_SH`
+  if its class is shared, else `LOCK_EX`; a deploy's suite and rebuild
+  and a `heavy: true` crew run, `LOCK_EX` as before. Only an exclusive
+  holder writes its name in the file. Order unchanged: `deploy.lock`, then
+  `cores.lock`.
+- **Units**: `JOB_UNIT_PROPS[cls]`: MemoryHigh/Max exclusive 3G/4G,
+  explainer 3.5G/4.5G, parallel 2.5G/3G (exclusive and parallel both
+  3.5G/4G since 2026-10-24), browser and build 1G/1.5G;
+  `OOMScoreAdjust=900` on all.
+- **The switch**: `LCARS_JOBS_MAX` (the environment, then `~/.env`,
+  default 2). `LCARS_JOBS_MAX=1` in `~/.env` is the line exactly as
+  before; it is read at each dispatch, so no restart is needed.
+- **The views until slice B**: `jobs_brief`'s `running` is still the
+  first running job (the console and `crew list` show one), and `runs`
+  lists them all with each one's class; `limit` gives `n`, `max`, `why`.
+
+
+## As built: carrying jobs over an upgrade (0.299.2)
+
+What 0.298.6's own deploy did to the jobs in flight: a process of the
+code before it (an old `job-run`, or the deploy's) wrote the block back
+its own way, which read the new `running` list as no job, so La Forge's
+running deckmem dropped out of the block. Its run went on, holding
+cores.lock; the line, seeing nothing running, started O'Brien's
+demo_static and Zimmerman's all5.sh, whose units waited on that lock
+with their wait counted against `RuntimeMaxSec` (O'Brien's died at
+~1650 s); and La Forge's result was never reported. Now:
+
+- **The job files are the truth of a job in flight.** `job_dispatch`
+  first carries over (`job_strays`, seat.py's `job_adopt`, logged
+  "carried over") a launched job (a `.spec`, under 6 h old) that the
+  block has lost, not yet reported (no `.told`, which `job_finish`
+  writes), whose run holds its lock, or whose result was written after
+  this code first looked (`.adopt-since`: older results were reported by
+  the code of their day). It is settled and reported as any other.
+- **A job-run's next step is the code on disk**: it runs `engineer.py
+  job-next` as a fresh process, never its own `job_dispatch`, so a run
+  that outlives a deploy hands its result to the new code.
+- **Waiting for the cores is not run time.** The job's own timer starts
+  once it has the cores (as before); the unit's `RuntimeMaxSec` is now
+  timeout + 300 + `JOB_CORES_WAIT` (3600 s, `LCARS_JOB_CORES_WAIT`), and
+  the wait itself gives up after that long: `died`, "it waited 60m for
+  the cores, held by <holder>".
+- **The short functional tests share the box.** A new class, `test`
+  (1 core, a 900 MB peak, the unit 1.5/2 GB), for the tests CLAUDE.md
+  lists at about two minutes or less (demo_static, recording, reports,
+  offline, … deckboot.js) and `scripts/test_*.py`: each on a scratch
+  server of its own and at most one Chromium, nothing timed against a
+  frame budget. A `bash -c '…'` wrapper's script is read through its
+  quote. Before this, those classed exclusive (unknown), so no two jobs
+  had ever run together. `run.sh --changed` was already right: parallel
+  unless changed.py picks perf.
+
+## As built: the views (slice B)
+
+- **The Queue view's Jobs block** lists every job in `runs` (a server
+  before 0.298.6 sends only `running`, which is then the one), each with
+  how long it has run and its own Cancel, asked in its row as before. Its
+  heading wears a chip from `limit`: "cores 1/2" (running, of `max`), or,
+  when `n` is under `max`, "held at 1: <why>" in amber; no chip when the
+  server sends no limit. The Queue row's preview names every running one.
+- **"Computer, show the cores"** (and a palette row) opens the block and
+  says the chip with what runs and waits; "show the jobs" stays. The
+  seats' half of the design (holders, "show the seats") was dropped with
+  the seat's slice 1.
+- **`jobs.line`** (engineer.py's `jobs_line`) is the chip in words, for
+  `crew list` and `crew poll`: "cores 2/2: bob run.sh 4m, cy buttons.py
+  1m; 1 waiting (dee)", "held at 1 of 2 (memory pressure 7%): ...", "no
+  job running (cores 0/2)". The engineers' and Number One's briefs say two
+  may run when both share the cores and the box has room.
+- **Tests**: the QuickJS suite (two runs listed with their Cancels, the
+  chip, held and why, the preview, the order) and test_jobs.py's
+  `test_the_views_line`.
+
+
+## As built: run.sh's memory, again (2026-10-24)
+
+Since UI research slice G (0.327.3), run.sh's screens stage runs
+`targets.py` and `axe.py`, two more Chromiums, beside keyboard's shards.
+Mendez measured a `PERF=0` run once at **2757 MB** of PSS across 61
+processes, 35 s in. Measured again through the job line (alone, the
+whole process tree sampled four times a second, a synthetic journal):
+
+| run | wall | peak PSS, when | processes (Chromium's) | /tmp grown | box MemAvailable, start → lowest |
+|---|---:|---:|---:|---:|---:|
+| `run.sh`, `PERF=0` | 85 s | **2707 MB**, 34 s | 61 (43) | 219-227 MB | 5393 → 2672 MB |
+| `run.sh`, full | 212 s | **2764 MB**, 36 s | 61 (43) | 219 MB | 5385 → 2656 MB |
+
+The peak is the screens stage beside keyboard and QuickJS, not perf
+(which comes later, alone), so the full run peaks no higher. /tmp is a
+tmpfs, so what the run writes there is RAM as well, outside its PSS: a
+run.sh takes ~2.9-3.0 GB of the box, against the 1.8 GB its class said.
+
+- **`parallel` is (2, 3000)**: weight 2 as before, peak 3000 MB. The gate
+  (MemAvailable less the head's peak ≥ the 1.5 GB reserve) then wants
+  4.5 GB free beside running jobs: a `PERF=0` run.sh still starts beside
+  a build or a one-test job on a box at rest (~5.4 GB free), and never
+  beside another run.sh (~2.7 GB free with one going). Two at once would
+  have needed ~6 GB of the 7.9 GB box with the Claude Codes, the server
+  and llama-server beside them: past its memory, as Number One feared.
+  Not made exclusive: the gate already keeps two apart, and sharing with
+  a build or a short test is still safe.
+- **The units**: parallel 3.5G / 4G (was 2.5G / 3G, which a 2.6 GB
+  cgroup would hit: reclaimed and slowed at MemoryHigh, killed at Max),
+  and exclusive, the full run.sh's class, 3.5G / 4G (was 3G / 4G, the
+  same margin gone).
+- `keyboard.py` alone shares the class and so is over-reserved now (it
+  was never measured alone); `--changed` without perf too when it runs
+  only the behaviour stage. Both err on the safe side; a class of their
+  own, if the line ever waits on them, wants a measurement first.
+
+
+## As built: the watchdog, and inline jobs that outlive the turn (2026-10-25)
+
+**What happened.** Mendez ran `dates.sh` on the synthetic journal inline
+(nobody waiting), twice, as a background command of her session: Claude
+Code's Bash stops waiting at 10 minutes and moves a command to the
+background, and a background command ends with its session.
+`mendez-c35-20261025-072022` hit its own `--timeout 25` at 11:45 UTC
+while her session was still up, and Claude Code's task notice brought the
+result back to her (it did wake her). `mendez-c35-20261025-083040`
+(`--timeout 40`) was submitted at 12:30:37 UTC; her turn ended at 12:31;
+reap's idle rule (`IDLE_MINUTES`, 20) closed her tab at 12:54, Claude Code
+stopped both background shells ("didn't finish before the previous session
+ended"), and the run went with them, 24 minutes in. Its log is empty
+because an inline run's output went to her shell (`tee`) and a run killed
+with it flushed nothing. The next dispatch found the lock free and wrote
+`died`, "its process is gone"; `job_finish` told nobody, because an inline
+job's end was by design her own turn's to say. She sat off until Number
+One looked at 14:21. Not the line's limit (40 minutes, 24 used), not the
+memory: the box's `oom_kill` counter is 1 since its boot on 10-16, and the
+only `oom-kill` the user journal holds is a Chromium scope on 10-23 (the
+kernel log itself needs the `adm` group, which the crew's user lacks).
+
+**`dates.sh`'s time on the synthetic journal** is past CLAUDE.md's 6-15
+minutes: 15 minutes for a run that failed early (`070507`), the 25-minute
+timeout hit (`072022`), and 24 minutes not yet done (`083040`). The line's
+default `--timeout` is 20 (`JOB_TIMEOUT_MIN`), so a bare `job -- dates.sh`
+would be killed by it. Proposed, not changed: a default of 45 minutes for
+`dates.sh` (the class's own, or the line's `--timeout` hint in the deny
+text), once a full run's time on the 4-core VPS is measured.
+
+**Inline jobs are detached.** With the seat, `job_inline` starts the job
+in its own unit exactly as a queued job starts (`job_launch`: the spec,
+`job-run`, its lock, the cores, its timeout, its result) and only follows
+its log to stdout, holding `<id>.waiter`; at the end it records the result
+(`job_finish`, `waited`: nothing typed, its turn has it) and exits with the
+command's code. The waiter killed - its session ended - the run goes on;
+the dispatcher skips an inline job while its waiter holds the lock, and
+once the lock is free settles it like any job and types the `[job]` result
+to its engineer, which brings them back. Detaching was chosen over
+refusing long inline runs (no one knows a command's length before it runs,
+and the box was free) and over "inline ends with your turn" (the brief
+would have to teach every engineer the 10-minute rule; the code can keep
+the promise instead). With the seat off (`LCARS_ENG_SEAT=0`) inline runs
+in-process as before. Each `recent` record now says how its engineer was
+told: `told` = `inbox` (a `[job]` message), `turn` (the waiter), `no`
+(cancelled).
+
+**The watchdog** (`watch`, `engineer.py watch [--dry-run]`) runs at the
+end of every `reap` (`lcars-eng-reap.timer`, every five minutes), after
+reap's own seat move and dispatch - so a finding is what those did not
+fix. It finds and acts on:
+
+- a running job whose process is gone (lock free, past the grace):
+  settled `died` and its engineer told (job_dispatch does this too; the
+  watchdog makes sure it is said);
+- a running job past its whole limit (its timeout, the wait for the cores
+  if its log says it waited, five minutes of the unit's margin, five
+  more) whose run still holds its lock: killed, `timeout`, told;
+- a job that died or timed out in the last hour: said to Number One with
+  how its engineer was told;
+- a result only an inline waiter had (`told: turn`) whose engineer is off
+  and has written nothing since it ended, five minutes on: typed to them
+  as a `[job]` message and queued at the head (`told` becomes `inbox`);
+- an order (a `crew_inbox` slip) five minutes old for an engineer who is
+  off, not seated and not in the line, not dismissed: queued, the seat
+  moved;
+- the seat free with its line waiting five minutes: moved;
+- the one seated silent (`stuck`) or at a question for the 30-minute
+  slice plus ten minutes with someone waiting: the rule did not fire;
+  moved again, and said.
+
+Every finding goes to Number One once (keyed in `STATE/watchdog.json`, two
+days), one `[watchdog]` note per run with a line each - who, what hung,
+since when (UTC), what the watchdog did - into the main room, as a crew
+message from the ship. `LCARS_WATCH_IDLE_MIN` (5) sets the waits. Tests:
+`test_jobs.py`'s `Watchdog` (a dead job, one past its limit and one within
+it, an untold result and one seen in a later turn, a stuck order and a
+fresh one, the seat free, a silent holder, a dry run) and `Runner`'s
+inline cases (a waiter that dies, a waiter left to report).
+
+
+## As built: the scratchpads (2026-10-25)
+
+**What happened.** Housekeeping's run of 16:01 found swap 79% full (774
+of 975MB), 630MB of it tmpfs, and 737MB of /tmp in `/tmp/claude-1000`,
+Claude Code's per-session scratch. Memory was not short (4.8GB
+available). reap already deleted an ended session's scratch after six
+hours (`SCRATCH_KEEP_H`), but kept an engineer's *current* session
+however long untouched, because an engineer's claude is stopped between
+turns and resumed on the same session: laforge-c34 (307MB), jake-c38
+(192MB) and okafor-c30 (105MB), each idle two days, held 604MB that way
+- shots, `before`/`after` frame trees, a fetched site, textures. And the
+ended sessions it did take were deleted whole: notes, mocks and drafts
+went with the shots.
+
+**The rule** (`reap_scratch`, `salvage` in engineer.py; every five
+minutes from reap, and from housekeeping's sweep):
+
+- a session's scratch is *split*, never deleted whole: what can be made
+  again (`REGEN_EXT`: pictures, video and sound, fonts, models and
+  textures, PDFs, archives, logs and test output, `.pyc`, objects and
+  ELF executables; anything under `__pycache__`, `node_modules`,
+  `.cache`; a symlink, never what it names) is deleted, and everything
+  else - notes, scripts, mocks, HTML drafts and reports, JSON, database
+  copies - moved to the owner's research folder,
+  `~/.local/state/lcars-eng/research/<engineer>/scratch-<date>/<session>/`,
+  with its path in the scratch kept (`other/` for a project that is not
+  an engineer's worktree). A name taken there gets a `~`; a file that
+  cannot be moved stays where it is.
+- an ended session (no process holds it, no job names it, no one's
+  current one): after `SCRATCH_KEEP_H` (6) hours, as before; the emptied
+  directory goes.
+- an engineer's current session: after `SCRATCH_IDLE_H`
+  (`LCARS_SCRATCH_IDLE_H`, 24) hours untouched, and only while no
+  process holds it and no job names it. Its `scratchpad/` stays, with
+  `MOVED.txt` saying where the files went, for the engineer when
+  resumed; a scratchpad holding only that note is not taken again.
+- Number One's sessions, current and past, are never taken (it is
+  always on); nor a project a claude with no session record runs in, nor
+  anything when the state or the seat cannot be read.
+
+**Seeing it first.** `engineer.py scratch` lists every session's scratch
+with its size and what reap does with it (kept and why, or taken, and
+how many files would move where), touching nothing; `--apply` does it
+now. housekeeping (`--dry-run` too) reports the taken directories and a
+"Moved N files" line naming the research folders; its own guard is not
+applied to these, since it can only delete whole trees: reap_scratch's
+rules are the guard.
+
+**The first pass** (by hand, this branch's `scratch --apply`,
+2026-10-25 16:22 UTC): five idle engineers' current sessions taken
+(laforge-c34, jake-c38, okafor-c30, kim-c32, torres-c37), 618MB off the
+tmpfs, 381 files (38MB) moved to their research folders; number-one,
+mendez-c35 and zimmerman-c39 kept. `/tmp/claude-1000` 738MB to 119MB,
+/tmp 741MB to 123MB, swap 772MB to 160MB of 975.
+

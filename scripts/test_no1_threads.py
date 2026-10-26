@@ -51,20 +51,31 @@ class Journal:
         if self.down:
             raise seat.Down("down")
         if method == "POST" and path == "/entries":
-            r = dict(body, id=len(self.rows) + 1, done_bool=0, deleted=0, created_at_utc=utc())
+            r = dict({"done_bool": 0}, **body, id=len(self.rows) + 1, deleted=0, created_at_utc=utc())
             self.rows.append(r)
             return {"id": r["id"]}
         if method == "PUT" and path.startswith("/entries/"):
             r = next(x for x in self.rows if x["id"] == int(path.split("/")[2]))
             r.update(body)
             return r
+        if method == "GET" and path.startswith("/entries/") and path[9:].isdigit():
+            r = next((x for x in self.rows if x["id"] == int(path[9:])), None)
+            if r is None:
+                raise RuntimeError(f"GET /entries/{path[9:]}: 404 no such entry")  # as seat._http
+            return dict(r)
         if method == "GET" and path.startswith("/entries?"):
             q = dict(x.split("=", 1) for x in path.split("?", 1)[1].split("&"))
-            return [dict(r) for r in self.rows if r["kind"] == q["kind"] and r["done_bool"] == int(q["done"])]
+            rows = [dict(r) for r in self.rows if r["kind"] == q["kind"] and r["id"] > int(q.get("min_id", 0))
+                    and ("done" not in q or r.get("done_bool", 0) == int(q["done"]))]
+            rows.sort(key=lambda r: r["id"], reverse=q.get("dir") == "desc")
+            return rows[:int(q.get("limit", 1000))]
         raise AssertionError("unexpected " + method + " " + path)
 
     def inbox(self):
         return [r for r in self.rows if r["kind"] == "crew_inbox" and not r["done_bool"]]
+
+    def msgs(self):
+        return [r for r in self.rows if r["kind"] == "crew_msg"]
 
     def titles(self):
         return [r["title"] for r in self.inbox()]
@@ -234,7 +245,7 @@ class Marks(Base):
     """Which thread each event is in."""
 
     def marks(self, evs, cur="main"):
-        return [(e["th"], e["r"], e["t"]) for e in E.thread_marks(evs, cur)[0]]
+        return [(e["room"], e["r"], e["t"]) for e in E.room_marks(evs, cur)[0]]
 
     def test_a_message_s_tag_and_the_reply_after_it(self):
         evs = [{"r": "me", "t": "[thread deck]\n[crew] obrien finished"}, {"r": "them", "t": "Reviewed."},
@@ -260,17 +271,17 @@ class Marks(Base):
 
     def test_thread_at_reads_back_to_the_last_message_or_override(self):
         path = self.transcript(self.main)
-        self.assertEqual(E.thread_at(path, 0), "main")
+        self.assertEqual(E.room_at(path, 0), "main")
         self.write(me("[thread deck]\nlook at the chairs"), them("On it."), tool())
         at = os.path.getsize(path)
         self.write(me("hello"), them("Hi.\n\n[thread web]\nAnd the site: done."), tool(), them("x"))
-        self.assertEqual(E.thread_at(path, at), "deck")
-        self.assertEqual(E.thread_at(path, os.path.getsize(path)), "web")
-        self.assertEqual(E.thread_now(), "web")
+        self.assertEqual(E.room_at(path, at), "deck")
+        self.assertEqual(E.room_at(path, os.path.getsize(path)), "web")
+        self.assertEqual(E.room_now(), "web")
         self.write(me("next"))
-        self.assertEqual(E.thread_now(), "main")
+        self.assertEqual(E.room_now(), "main")
         with mock.patch.object(E, "THREAD_SCAN_BYTES", 10):
-            self.assertEqual(E.thread_at(path, at), "main", "nothing found in reach: main")
+            self.assertEqual(E.room_at(path, at), "main", "nothing found in reach: main")
 
 
 class Delivery(Base):
@@ -281,15 +292,15 @@ class Delivery(Base):
         self.j.held("deploy failed#web", "[deploy failed] torres: x", ago=900)
         code, r = self.call(E.cmd_no1_flush)
         self.assertEqual((code, r["sent"], r["left"]), (0, 4, 0), r)
-        self.assertEqual(self.p.typed[:3], ["[thread deck]\n[crew] obrien finished", "[seat] a note", "[crew] kim finished"])
-        self.assertRegex(self.p.typed[3], r"^\[thread web\]\n\(held since .* off duty\) \[deploy failed\] torres: x$")
+        self.assertEqual(self.p.typed[:3], ["room:: deck\n[crew] obrien finished", "[seat] a note", "[crew] kim finished"])
+        self.assertRegex(self.p.typed[3], r"^room:: web\n\(held since .* off duty\) \[deploy failed\] torres: x$")
         self.assertNotIn("held", r)
 
     def test_a_say_with_a_thread_is_tagged(self):
         self.thread("new", "deck", "Deck")
         code, r = self.call(E.cmd_say, E.NO1, False, False, "deck", stdin="How is the bridge?")
         self.assertEqual(code, 0, r)
-        self.assertEqual(self.p.typed[-1], "[thread deck]\nHow is the bridge?")
+        self.assertEqual(self.p.typed[-1], "room:: deck\nHow is the bridge?")
         self.call(E.cmd_say, E.NO1, False, True, None, stdin=json.dumps({"message": "Main's.", "thread": "main"}))
         self.assertEqual(self.p.typed[-1], "Main's.")
         self.thread("close", "deck")
@@ -298,7 +309,10 @@ class Delivery(Base):
         self.assertEqual(self.call(E.cmd_say, E.NO1, False, True, None,
                                    stdin=json.dumps({"message": "x", "thread": "nope"}))[0], 4)
         self.assertEqual(self.call(E.cmd_say, E.NO1, False, False, "Bad!", stdin="x")[0], 2)
-        self.assertEqual(self.call(E.cmd_say, "obrien", False, False, "deck", stdin="x")[0], 2)
+        # an engineer told in a project room (rooms slice 2, test_rooms.py):
+        # past the room check, here refused only for being off duty
+        self.assertEqual(self.call(E.cmd_say, "obrien", False, False, "deck", stdin="x")[0], 3)
+        self.assertEqual(self.call(E.cmd_say, "obrien", False, False, "nope", stdin="x")[0], 4)
 
     def test_the_turn_s_thread_routes_what_it_causes(self):
         self.thread("new", "deck", "Deck")
@@ -306,7 +320,7 @@ class Delivery(Base):
         # an order
         E.save("obrien", {"name": "obrien", "session": "s"})
         self.assertIsNone(E.thread_take("obrien"))
-        self.assertEqual(E.load("obrien")["no1_thread"], "deck")
+        self.assertEqual(E.load("obrien")["room"], "deck")
         E.notify_no1("obrien", "[crew] obrien finished a turn")
         self.assertEqual(self.j.titles()[-1], "number-one ← crew#deck: [crew] obrien finished a turn")
         # an ask
@@ -316,11 +330,11 @@ class Delivery(Base):
         ok = mock.Mock(returncode=0, stdout="", stderr="")
         with mock.patch.object(E, "run", return_value=ok), mock.patch.dict(os.environ, {"LCARS_THREAD_BY": "no1"}):
             self.call(E.detach, "deploy", "obrien")
-        self.assertEqual(E.read_deploy()["by_thread"], "deck")
+        self.assertEqual(E.read_deploy()["by_room"], "deck")
         # a refresh
         with mock.patch.object(E, "launched_bare", return_value=False):
             self.call(E.cmd_refresh, E.NO1)
-        self.assertEqual(self.st()["refresh"]["thread"], "deck")
+        self.assertEqual(self.st()["refresh"]["room"], "deck")
         # an order from main while they work for deck: a warning
         self.write(me("Now main"))
         with mock.patch.object(E, "agent_info", lambda n: {"agent_status": "working"} if n == "obrien" else None):
@@ -330,7 +344,7 @@ class Delivery(Base):
 
     def test_no1_send_s_retry_keeps_the_thread(self):
         self.j.down = True
-        E.no1_send("[crew] x", thread="deck")
+        E.no1_send("[crew] x", room="deck")
         self.assertEqual(self.spawned[-1], ("no1-send", "--thread", "deck", "[crew] x"))
         self.j.down = False
         self.call(E.cmd_no1_send, "--thread", "deck", "[crew]", "x")
@@ -370,23 +384,24 @@ class Poll(Base):
         self.write(them("And pushed.\n\n[thread web]\nThe site too."))
         code, r = self.poll("-1", None, None, None)
         self.assertEqual(code, 0, r)
-        self.assertEqual(r["threads"], [{"id": "main", "name": "Main"}, {"id": "deck", "name": "Deck"}])
+        self.assertEqual(r["rooms"], [{"id": "main", "name": "Main"}, {"id": "deck", "name": "Deck"}])
+        self.assertNotIn("threads", r, "written under the new name only (rooms.md 8)")
         self.assertNotIn("thread", r)
         # the server's clock, for the page's stale rule (voice-live-narration.md 2.2)
         self.assertLess(abs(r["now"] - time.time()), 5)
         self.assertEqual(len({e["k"] for e in r["events"]}), len(r["events"]))
-        self.assertEqual([(e["th"], e["t"]) for e in r["events"] if e["r"] != "tool"],
+        self.assertEqual([(e["room"], e["t"]) for e in r["events"] if e["r"] != "tool"],
                          [("main", "Status?"), ("main", "Quiet."), ("deck", "The chairs?"), ("deck", "Done."),
                           ("deck", "And pushed."), ("web", "The site too.")])
         # from an offset in the middle of deck's turn
         code, r = self.poll(str(mid), None, None, None)
-        self.assertEqual([(e["th"], e["t"]) for e in r["events"]], [("deck", "And pushed."), ("web", "The site too.")])
+        self.assertEqual([(e["room"], e["t"]) for e in r["events"]], [("deck", "And pushed."), ("web", "The site too.")])
         # an earlier page ending there
         code, r = self.poll("-1", str(mid), None, None)
-        self.assertEqual([e["th"] for e in r["events"]], ["main", "main", "deck", "deck", "deck"])
+        self.assertEqual([e["room"] for e in r["events"]], ["main", "main", "deck", "deck", "deck"])
         # the filter: a closed thread's too
         code, r = self.poll("-1", None, None, "deck")
-        self.assertEqual((r["thread"], {e["th"] for e in r["events"]}), ("deck", {"deck"}))
+        self.assertEqual((r["thread"], {e["room"] for e in r["events"]}), ("deck", {"deck"}))
         self.assertEqual([e["t"] for e in self.poll("-1", None, None, "web")[1]["events"]], ["The site too."])
         self.assertEqual(self.poll("-1", None, None, "nope")[0], 4)
         self.assertEqual(self.call(E.cmd_poll, "obrien", "-1", None, None, "deck")[0], 2)
@@ -416,10 +431,13 @@ class No1Verbs(Base):
 
     def test_the_brief_says_tags_not_switches(self):
         b = E.brief_no1(E.NO1, self.st())
-        self.assertIn("[thread <id>]", b)
-        self.assertIn("the thread of the message that started your turn", b)
-        for gone in ("switch", "held, while", "resume"):
-            self.assertNotIn(gone, b.split("Threads:", 1)[1].split("\n\n", 1)[0])
+        para = b.split("\nRooms: ", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("`room:: <id>`", para)
+        self.assertIn("[thread <id>]", para, "the older form named, the same, never written")
+        self.assertIn("never write it", para)
+        self.assertIn("room of the message that started your turn", para)
+        for gone in ("switch", "held, while", "resume", "thread list"):
+            self.assertNotIn(gone, para)
 
     def test_the_brief_has_the_computers_rule(self):
         """voice-quick-answer.md 9: told what the computer said aloud, not

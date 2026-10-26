@@ -16,6 +16,7 @@ way a finger would, and traces it.
     python3 test/perf.py --jobs 1     # one scenario at a time
     python3 test/perf.py --base HEAD  # compare what is over with the last commit
     python3 test/perf.py --fresh      # measure the baseline again, kept numbers or not
+    python3 test/perf.py coldload     # the cold load with 111 reports against none
 
 What is measured, and why not frames per second. The budget is 16.7ms of the
 renderer's main thread per frame: script, style, layout and paint — everything
@@ -39,6 +40,16 @@ below). A scenario over budget that the change cannot reach (test/changed.py)
 is not run again, and the baseline's numbers are reused where this box has
 measured them (see "the comparison's cost"); the output says which. --once
 judges one run by the budget alone.
+
+The cold load (`coldload`, run with every scenario or by name; not a frame
+scenario): the page booted through GET /dump against the journal and against
+it with REPORTS report entries (docs/design/reports-as-entries.md, ~4 MB of
+HTML with inlined pictures), alternating, COLD_RUNS boots of each. The
+server sends a report's first line alone in /dump and the page's sweep
+(lcars_http.h, report_body), and the page reads it whole only on opening;
+the boot with the reports must stay within COLD_SLOWER (and COLD_SLOWER_MS)
+of the boot without them, by the median of first list paint and of the load's
+end. Before the cut, 111 reports took the first paint from ~690 ms to 1.0-1.5 s.
 
 Nothing here touches the real journal: every request is answered by serve().
 """
@@ -108,10 +119,63 @@ def embeddings(rows, dim=384, topics=24):
             "rows": out, "mark": "2026-09-25 14:00:00"}
 
 
+# ---------- report entries (the cold load) ----------
+# What scripts/report.py writes: "report:: html <rel>", a blank line, the
+# page's text. Sizes spread 5 KB..500 KB, most small, ~3.9 MB in all - the
+# NAS's 111 text reports as imported on 2026-10-24 (Sato's measure).
+REPORTS = 111
+REPORT_HTML = ("<!doctype html><html><head><style>body{font:14px sans-serif}</style></head>"
+               "<body><h1>Report</h1>")
+
+
+def report_page(size, i):
+    import random
+    rnd = random.Random(i)
+    parts, n = [REPORT_HTML], len(REPORT_HTML)
+    while n < size:
+        p = (f"<p>Finding {rnd.randint(0, 10**6)}: the arena sizing and the garden, measured "
+             f"{rnd.random():.4f} against <b>{rnd.choice(['warp', 'impulse', 'shields'])}</b>.</p>"
+             f"<img src=\"data:image/png;base64,"
+             f"{''.join(rnd.choice('ABCDEFGHabcdefgh0123456789+/') for _ in range(300))}\">")
+        parts.append(p)
+        n += len(p)
+    return "".join(parts)[:size] + "</body></html>"
+
+
+def with_reports(rows, n=REPORTS):
+    """rows and n report entries above them, newest first, dated among the
+    newest rows' days."""
+    import random
+    top = max(r["id"] for r in rows)
+    sz = [int(5000 * 100 ** (((i + 0.5) / n) ** 4.2)) for i in range(n)]
+    random.Random(3).shuffle(sz)
+    out = list(rows)
+    for i, size in enumerate(sz):
+        c = f"report:: html media/reports/2026/10/r-{i:08x}.html\n\n" + report_page(size, i)
+        r = dict(rows[(i * 30) % len(rows)])
+        r.update(id=top + 1 + i, kind="report", title=f"Report {i}", content=c,
+                 content_length=len(c))
+        out.append(r)
+    out.sort(key=lambda r: -r["id"])
+    return out
+
+
+def report_cut(r):
+    """A row as lcars_http.h sends it with report_body=0: a report's content
+    its first line alone, content_length still the whole. PERF_COLD_WHOLE=1
+    sends it whole, as a server before the cut did: the "before" figure."""
+    c = r.get("content")
+    if os.environ.get("PERF_COLD_WHOLE") == "1":
+        return r
+    if r.get("kind") != "report" or not isinstance(c, str) or "\n" not in c:
+        return r
+    return dict(r, content=c.split("\n", 1)[0].rstrip("\r"))
+
+
 _FIXTURES = {}
 
 
-def serve(rows):
+def serve(rows, dump=False):
     # built once per journal, not once per scenario: the vectors alone are
     # 1.5M random draws, most of a second each time
     key = (len(rows), rows[0]["id"] if rows else 0)
@@ -140,8 +204,19 @@ def serve(rows):
             q = dict(p.split("=", 1) for p in url.split("?", 1)[1].split("&") if "=" in p)
             off, lim = int(q.get("offset", 0)), int(q.get("limit", 1000))
             src = meta if q.get("content") == "0" else rows
-            return route.fulfill(json=src[off:off + lim])
-        # no /dump, no /kinds: the paged sweep an older server gets
+            page = src[off:off + lim]
+            if q.get("report_body") == "0":
+                page = [report_cut(r) for r in page]
+            return route.fulfill(json=page)
+        if dump and "/dump" in url:
+            # every row, a report's first line alone unless report_body=1,
+            # as lcars_http.h's HandleDump; the JSON built once a journal
+            if "report_body=1" in url:
+                return route.fulfill(body=json.dumps(rows), content_type="application/json")
+            if (key, "dump") not in _FIXTURES:
+                _FIXTURES[(key, "dump")] = json.dumps([report_cut(r) for r in rows])
+            return route.fulfill(body=_FIXTURES[(key, "dump")], content_type="application/json")
+        # no /dump (unless asked), no /kinds: the paged sweep an older server gets
         return route.fulfill(status=404, json={"error": "not found"})
     return handle
 
@@ -574,6 +649,62 @@ def s_eng_thread(page):
     })""")
 
 
+def s_rooms_room(page):
+    # the Rooms page (docs/design/rooms.md 6): a room of 2000 crew_msg rows,
+    # a third of them long reports folded at 12 lines, opened and scrolled
+    # through and back; then a poll's rows landing every few frames, and
+    # Earlier pressed twice (main's page has no rooms: there it only waits)
+    if not page.evaluate("typeof openRooms === 'function'"):
+        page.wait_for_timeout(4000)
+        return
+    page.evaluate("""async () => {
+      localStorage.setItem('lcars.deck.engkey', JSON.stringify('k'));
+      if (typeof feat !== 'undefined' && feat.map) feat.map.set('engineers', { on: true, needs: [] });
+      const top = st.all.reduce((m, e) => Math.max(m, e.id), 0), at = '2026-10-20 10:00:00', rows = [];
+      rows.push({ id: top + 1, kind: 'crew_room', title: 'Deck redesign', content: 'id:: deck\\nby:: captain', done_bool: 0,
+                  deleted: 0, created_at_utc: at, last_modified_at_utc: at });
+      const who = ['captain', 'no1', 'perf-a1b', 'ship'];
+      for (let i = 0; i < 2000; i++) {
+        const f = who[i % 4], to = f === 'no1' ? 'perf-a1b' : f === 'captain' ? 'no1' : '';
+        const body = f === 'perf-a1b' && i % 3 === 2
+          ? 'Report: change ' + i + ' is in.\\n\\n' + Array.from({ length: 30 }, (_, k) => '- **step ' + k + '** of it, `run.sh` passed').join('\\n')
+          : f === 'ship' ? '[deploy finished] perf-a1b: deployed as 0.1.' + i : 'Message ' + i + ' about the **chairs**, and the table.';
+        rows.push({ id: top + 2 + i, kind: 'crew_msg', title: f + ' → ' + (to ? to + ' ' : '') + '#deck: ' + body.split('\\n')[0].slice(0, 90),
+                    content: (to && to !== 'no1' ? 'to:: ' + to : 'room:: deck') + '\\n' + body, done_bool: i > 1990 ? 0 : 1,
+                    deleted: 0, created_at_utc: at, last_modified_at_utc: at });
+      }
+      for (const r of rows) st.byId.set(r.id, r);
+      st.all = rows.slice().reverse().concat(st.all);
+      rm.gen++;
+      await openRooms('deck');
+      rmStop();           // no server here: the frames below are the poll's
+    }""")
+    page.wait_for_timeout(800)
+    page.evaluate("__perf.start()")
+    page.evaluate("""() => new Promise(done => {
+      const l = document.querySelector('#rmlog'); l.scrollTop = 0; let n = 0;
+      const step = () => {
+        if (n++ < 240) { l.scrollTop += n <= 120 ? 160 : -160; requestAnimationFrame(step); } else done();
+      };
+      requestAnimationFrame(step);
+    })""")
+    page.evaluate("""() => new Promise(done => {
+      const l = document.querySelector('#rmlog'); l.scrollTop = l.scrollHeight; let n = 0, id = st.all[0].id;
+      const step = () => {
+        if (n++ < 200) {
+          if (n % 10 === 0) {
+            rmLand([{ id: ++id, kind: 'crew_msg', title: 'perf-a1b → #deck: a line ' + n, content: 'room:: deck\\na line ' + n,
+                      done_bool: 1, deleted: 0, created_at_utc: '2026-10-20 10:00:00', last_modified_at_utc: '2026-10-20 10:00:00' }]);
+            rmPaint();
+          }
+          if (n === 80 || n === 140) { const b = document.querySelector('[data-rmearlier]'); if (b) b.click(); }
+          requestAnimationFrame(step);
+        } else done();
+      };
+      requestAnimationFrame(step);
+    })""")
+
+
 # the chat dock (docs/design/chat-dock.md 1.11): three windows up at a desk -
 # two computer threads of 200 messages and an engineer's 200-message
 # transcript. deb's page before the dock has none: there only the page part runs.
@@ -682,6 +813,7 @@ SCENARIOS = [
     ("course-turn", s_course_turn, PHONE),
     ("chat-thread", s_chat_thread, PHONE),
     ("eng-thread", s_eng_thread, PHONE),
+    ("rooms-room", s_rooms_room, PHONE),
     ("dock-stream", s_dock_stream, DESKTOP),
     ("dock-scroll", s_dock_scroll, DESKTOP),
 ]
@@ -735,6 +867,60 @@ def run(p, name, fn, viewport, rows, throttle, profile=False, url=PAGE):
         return r
     finally:
         browser.close()
+
+
+# ---------- the cold load ----------
+COLD_RUNS = 3
+COLD_SLOWER = 1.3      # the boot's own spread on the VPS, run to run, is ~15%
+COLD_SLOWER_MS = 150
+COLD_TIMER = """
+window.__load = { first: 0 };
+new MutationObserver((m, o) => {
+  if (document.querySelector('#list .item')) { __load.first = performance.now(); o.disconnect(); }
+}).observe(document, { childList: true, subtree: true });
+"""
+
+
+def boot(p, rows, url=PAGE):
+    """One cold boot through /dump at a phone's size: (first list paint, the
+    load's end) in ms from navigation."""
+    browser = p.chromium.launch(headless=True)
+    try:
+        ctx = browser.new_context(viewport=PHONE, has_touch=True, is_mobile=True)
+        ctx.route(BASE + "/**", serve(rows, dump=True))
+        ctx.add_init_script(
+            "localStorage.setItem('lcars.cfg', JSON.stringify({base:'%s',user:'u',pass:'p'}));" % BASE
+            + COLD_TIMER)
+        page = ctx.new_page()
+        page.goto(url)
+        page.wait_for_function("st.all.length >= %d && !st.loading && !st.bodies" % len(rows),
+                               timeout=120000)
+        done = page.evaluate("performance.now()")
+        return page.evaluate("__load.first"), done
+    finally:
+        browser.close()
+
+
+def coldload(nrows, url=PAGE):
+    """The boot with REPORTS reports against the boot without, alternating.
+    Returns (passed, the line to print)."""
+    import gzip
+    plain = journal(nrows)
+    reps = with_reports(plain)
+    cut = json.dumps([report_cut(r) for r in reps]).encode()
+    whole = json.dumps(reps).encode()
+    res = {"none": [], "reports": []}
+    with sync_playwright() as p:
+        for k in range(COLD_RUNS):
+            for which in (("none", "reports") if k % 2 == 0 else ("reports", "none")):
+                res[which].append(boot(p, plain if which == "none" else reps, url))
+    med = {w: (median([f for f, _ in r]), median([d for _, d in r])) for w, r in res.items()}
+    (f0, d0), (f1, d1) = med["none"], med["reports"]
+    ok = f1 <= f0 * COLD_SLOWER + COLD_SLOWER_MS and d1 <= d0 * COLD_SLOWER + COLD_SLOWER_MS
+    kb = lambda b: f"{len(gzip.compress(b, 6)) // 1024} KB"
+    return ok, (f"{'ok' if ok else 'OVER':4s} {'coldload':15s} first paint {f0:.0f} -> {f1:.0f}ms, "
+                f"loaded {d0:.0f} -> {d1:.0f}ms with {REPORTS} reports (medians of {COLD_RUNS}); "
+                f"/dump gzipped {kb(cut)} (whole bodies: {kb(whole)})")
 
 
 def one(job):
@@ -931,6 +1117,11 @@ def main():
     rows = journal(a.rows)
     picked = [s for s in SCENARIOS if not a.only or s[0] in a.only]
     out, over, excused, unreached = {}, [], [], []
+    if not a.only or "coldload" in a.only:
+        cold_ok, cold_line = coldload(a.rows)
+        print(cold_line, flush=True)
+        if not cold_ok:
+            over.append("coldload")
 
     def measure(jobs, profile=False):
         """[(scenario, page url)] -> their results, in that order."""

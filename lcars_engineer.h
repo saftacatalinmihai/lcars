@@ -34,6 +34,11 @@
 //                                   design/no1-threads.md, 13). Number One's
 //                                   events each carry `th`, its answer the
 //                                   open `threads` (id, name)
+//   GET  /engineer/<name>/image?k=<session>:<offset>:<index>
+//                                   a picture the session saw, as the poll's
+//                                   "img" event keys it: its own type, 8 MB
+//                                   at most (a 413), cached privately for a
+//                                   year; a key naming none a 404
 //   GET  /engineer/<role>/brief     a scheduled role's brief, crew/<role>.md
 //                                   (read-only; the console's chat as that
 //                                   role)
@@ -42,9 +47,12 @@
 //                                   into their session; attachments as POST
 //                                   /chat takes them (lcars_chat.h), one line
 //                                   each with the file's path and URL.
-//                                   `thread`, Number One's: typed under that
-//                                   thread's tag line; an unknown one a 404,
-//                                   a closed one reopened
+//                                   `thread`, a room (docs/design/rooms.md):
+//                                   to Number One typed under its header; to
+//                                   an engineer a project room's, filed
+//                                   there to:: them (the Rooms page's To
+//                                   chip); an unknown one a 404, a closed
+//                                   one reopened
 //   POST /engineer/number-one/thread
 //                                   {op, id, name?}: new, rename, close -
 //                                   labels only, the list in the answer
@@ -241,10 +249,19 @@ static bool EngineerPython(char *out, size_t out_size) {
   return false;
 }
 
+static int ScriptExec(int client_fd, Arena *arena, const char *label,
+                      const char *script, const char *const *args,
+                      const char *input, size_t input_len, int timeout_s,
+                      char **env, char **out, size_t *out_len, int *code);
+
 // Runs scripts/engineer.py with argv[] (after the script's path) and `input`
-// on stdin, and answers the client with what it printed.
-static int EngineerRun(int client_fd, Arena *arena, const char *const *args,
-                       const char *input, size_t input_len) {
+// on stdin. Returns 0 with what it printed (*out, *out_len, trailing
+// whitespace off) and its exit status (*code); otherwise it has answered the
+// client itself (no script, a timeout, nothing usable) and returns that
+// status.
+static int EngineerExec(int client_fd, Arena *arena, const char *const *args,
+                        const char *input, size_t input_len, char **out,
+                        size_t *out_len, int *code) {
   assert(arena_valid(arena));
   assert(args != NULL);
   assert(input_len <= ENGINEER_MAX_INPUT);
@@ -263,6 +280,26 @@ static int EngineerRun(int client_fd, Arena *arena, const char *const *args,
     return SendJSONError(client_fd, 503, "%s is missing", script);
   }
 
+  return ScriptExec(client_fd, arena, "engineer.py", script, args, input,
+                    input_len, ENGINEER_TIMEOUT_SECONDS, EngineerEnv(arena),
+                    out, out_len, code);
+}
+
+// Runs `python3 <script> args...` (argv only, no shell) with `input` on
+// stdin and `env` as its environment, in a process group of its own so a
+// timeout kills all of it. Returns 0 with what it printed (*out, *out_len,
+// trailing whitespace off) and its exit status (*code); otherwise it has
+// answered the client itself (no python3, a timeout, nothing usable) and
+// returns that status. `label` names the script in those answers. The
+// engineers' routes and POST /publish (lcars_publish.h) both run this way.
+static int ScriptExec(int client_fd, Arena *arena, const char *label,
+                      const char *script, const char *const *args,
+                      const char *input, size_t input_len, int timeout_s,
+                      char **env, char **out, size_t *out_len, int *code) {
+  assert(arena_valid(arena));
+  assert(label != NULL && script != NULL && args != NULL && env != NULL);
+  assert(input_len <= ENGINEER_MAX_INPUT);
+  assert(timeout_s > 0);
   char python[1024];
   if (!EngineerPython(python, sizeof(python))) {
     return SendJSONError(client_fd, 503, "no python3 ($PATH or $LCARS_PYTHON)");
@@ -297,8 +334,7 @@ static int EngineerRun(int client_fd, Arena *arena, const char *const *args,
   posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
   posix_spawnattr_setpgroup(&attr, 0);
   pid_t pid = -1;
-  int rc = posix_spawn(&pid, argv[0], &fa, &attr, (char *const *)argv,
-                       EngineerEnv(arena));
+  int rc = posix_spawn(&pid, argv[0], &fa, &attr, (char *const *)argv, env);
   posix_spawn_file_actions_destroy(&fa);
   posix_spawnattr_destroy(&attr);
   close(in_pipe[0]);
@@ -312,14 +348,14 @@ static int EngineerRun(int client_fd, Arena *arena, const char *const *args,
   // Below the 64KB a pipe buffers, so this cannot block on a child that has
   // not started reading.
   if (input_len > 0 && write(in_pipe[1], input, input_len) < 0) {
-    printf("HTTP engineer: stdin write failed: %s\n", strerror(errno));
+    printf("HTTP %s: stdin write failed: %s\n", label, strerror(errno));
   }
   close(in_pipe[1]);
 
   char *buf = (char *)arena_alloc(arena, ENGINEER_MAX_OUTPUT + 1);
   size_t len = 0;
   bool timed_out = false;
-  time_t deadline = time(NULL) + ENGINEER_TIMEOUT_SECONDS;
+  time_t deadline = time(NULL) + timeout_s;
   for (;;) {
     int left = (int)(deadline - time(NULL));
     if (left <= 0) {
@@ -366,19 +402,126 @@ static int EngineerRun(int client_fd, Arena *arena, const char *const *args,
   }
 
   if (timed_out) {
-    return SendJSONError(client_fd, 504, "engineer.py took over %ds",
-                         ENGINEER_TIMEOUT_SECONDS);
+    return SendJSONError(client_fd, 504, "%s took over %ds", label, timeout_s);
   }
   if (len == 0 || buf[0] != '{') {
-    return SendJSONError(client_fd, 500, "engineer.py answered nothing usable");
+    return SendJSONError(client_fd, 500, "%s answered nothing usable", label);
   }
-  int code = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : 1;
-  int status = code == 0   ? 200
-               : code == 2 ? 400
-               : code == 3 ? 409
-               : code == 4 ? 404
-                           : 500;
-  return SendJSON(client_fd, status, buf, len);
+  *out = buf;
+  *out_len = len;
+  *code = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : 1;
+  return 0;
+}
+
+// The script's exit status as the HTTP one (see the top).
+static int EngineerStatus(int code) {
+  return code == 0   ? 200
+         : code == 2 ? 400
+         : code == 3 ? 409
+         : code == 4 ? 404
+         : code == 5 ? 413
+                     : 500;
+}
+
+// EngineerExec, and the client answered with what the script printed.
+static int EngineerRun(int client_fd, Arena *arena, const char *const *args,
+                       const char *input, size_t input_len) {
+  char *buf = NULL;
+  size_t len = 0;
+  int code = 0;
+  int sent =
+      EngineerExec(client_fd, arena, args, input, input_len, &buf, &len, &code);
+  if (sent != 0) {
+    return sent;
+  }
+  return SendJSON(client_fd, EngineerStatus(code), buf, len);
+}
+
+// A picture the session saw is ENGINEER_IMG_MAX at most; engineer.py's
+// IMG_MAX is the same, and refuses a bigger one first (exit 5, a 413).
+#define ENGINEER_IMG_MAX (8 * 1024 * 1024)
+
+// The image key's shape, <session>:<offset>:<index> ([0-9a-f-]{1,8},
+// digits, digits): an argv element, so checked here as well as there.
+static bool EngineerImageKey(const char *k) {
+  const char *p = k;
+  size_t n = 0;
+  while (*p && *p != ':') {
+    if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || *p == '-')) {
+      return false;
+    }
+    p++, n++;
+  }
+  if (n == 0 || n > 8 || *p++ != ':') {
+    return false;
+  }
+  for (int part = 0; part < 2; part++) {
+    size_t d = 0;
+    while (*p >= '0' && *p <= '9') {
+      p++, d++;
+    }
+    if (d == 0 || d > (part == 0 ? 12u : 3u) ||
+        *p != (part == 0 ? ':' : '\0')) {
+      return false;
+    }
+    if (part == 0) {
+      p++;
+    }
+  }
+  return true;
+}
+
+// GET /engineer/<name>/image?k=<key>: a picture from their transcript
+// (engineer.py's image verb writes it to its cache and names the file).
+// The client names a key, never a path; the file named back must be one of
+// the four types, a regular file, not a link, and under the cap. Its bytes
+// never change for a key (a transcript's lines are not rewritten): cached
+// for a year, privately - the engineer key guards it, no shared cache may
+// keep it.
+static int EngineerImage(int client_fd, Arena *arena, const char *method,
+                         const char *name, const char *query,
+                         const char *req_buf) {
+  char k[48] = "";
+  if (query == NULL || !query_get(query, "k", k, sizeof(k)) ||
+      !EngineerImageKey(k)) {
+    return SendJSONError(client_fd, 400,
+                         "k must be an image key, <session>:<offset>:<index>");
+  }
+  const char *args[] = {"image", name, k, NULL};
+  char *buf = NULL;
+  size_t len = 0;
+  int code = 0;
+  int sent = EngineerExec(client_fd, arena, args, NULL, 0, &buf, &len, &code);
+  if (sent != 0) {
+    return sent;
+  }
+  if (code != 0) {
+    return SendJSON(client_fd, EngineerStatus(code), buf, len);
+  }
+  char file[1024] = "", mime[32] = "";
+  json_get_string(buf, "file", file, sizeof(file));
+  json_get_string(buf, "mime", mime, sizeof(mime));
+  if (file[0] != '/' || strstr(file, "/../") != NULL ||
+      !(strcmp(mime, "image/png") == 0 || strcmp(mime, "image/jpeg") == 0 ||
+        strcmp(mime, "image/webp") == 0 || strcmp(mime, "image/gif") == 0)) {
+    return SendJSONError(client_fd, 500, "engineer.py named no picture");
+  }
+  int fd = open(file, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  struct stat st;
+  if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+    if (fd >= 0) {
+      close(fd);
+    }
+    return SendJSONError(client_fd, 404, "the picture went from the cache");
+  }
+  if (st.st_size > ENGINEER_IMG_MAX) {
+    close(fd);
+    return SendJSONError(client_fd, 413, "the picture is over %d MB",
+                         ENGINEER_IMG_MAX / (1024 * 1024));
+  }
+  return MediaSendOpenFile(client_fd, arena, method, req_buf, fd, &st, mime,
+                           "Cache-Control: private, max-age=31536000, "
+                           "immutable\r\n");
 }
 
 // "/engineer/<name>[/<verb>]" -> name and verb (verb "" when absent). The
@@ -552,6 +695,12 @@ static int HandleEngineer(int client_fd, Arena *arena, const char *method,
   }
   // not an engineer's: <name> is a scheduled role, which the script checks
   // names a file in crew/ (the slug is all this passes on)
+  if (strcmp(verb, "image") == 0) {
+    return get || strcmp(method, "HEAD") == 0
+               ? EngineerImage(client_fd, arena, method, name, query, req_buf)
+               : SendJSONError(client_fd, 405,
+                               "GET /engineer/<name>/image?k=<key>");
+  }
   if (strcmp(verb, "brief") == 0) {
     const char *args[] = {"brief", name, NULL};
     return get ? EngineerRun(client_fd, arena, args, NULL, 0)
@@ -589,7 +738,8 @@ static int HandleEngineer(int client_fd, Arena *arena, const char *method,
       return SendJSONError(client_fd, 413, "message over %d bytes",
                            ENGINEER_MAX_INPUT);
     }
-    // Number One's thread: an argv element after --thread, or nothing
+    // the room (a thread, Number One's old word): an argv element after
+    // --thread, or nothing
     char thread[32] = "";
     if (json_get_string(json, "thread", thread, sizeof(thread)) &&
         thread[0] != '\0' && !EngineerThreadId(thread)) {

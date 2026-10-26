@@ -67,8 +67,11 @@ autosaveMs = 0;
     return { id: cwTop + n, kind: kind, title: "zebracrew " + kind, content: "zebracrew\n\n- TODO zebracrew " + kind,
              created_at_utc: at, last_modified_at_utc: at, deleted: 0, done_bool: 0, content_length: 30 };
   };
+  var cwRep = cwMk(8, "report"), cwRel = cwMk(9, "release");
+  cwRep.content = "report:: md media/reports/2026/10/zebracrew-00000001.md\n\nzebracrew findings";
+  cwRel.title = "9.9.9"; cwRel.content = "release:: 9.9.9 2026-10-24\n\n- **web** zebracrew";
   var cwRows = [cwMk(1, "crew_ops"), cwMk(2, "crew_inbox"), cwMk(3, "no1_log"), cwMk(4, "task_no1"),
-                cwMk(5, "task_crew"), cwMk(6, "crew_some_future_role")];
+                cwMk(5, "task_crew"), cwMk(6, "crew_some_future_role"), cwRep, cwRel];
   var cwOwn = cwMk(7, "personal_log");
   cwRows.concat([cwOwn]).forEach(function (r) { st.all.unshift(r); st.byId.set(r.id, r); });
   var cwIn = function (r) { return st.view.indexOf(r) >= 0; };
@@ -77,9 +80,12 @@ autosaveMs = 0;
   ok(!crewShown(), "a fresh device hides the crew's entries");
   eq($("#bCrewShow").textContent, "crew entries hidden", "the Filters view says so");
   eq($("#bCrewShow").getAttribute("aria-pressed"), "false", "and its button is not pressed");
-  ok(["crew_x", "no1_log", "task_no1", "task_crew", "task_crew_ops"].every(crewWritten) &&
-     !["personal_log", "task", "task_personal", "crewmate", "no1"].some(crewWritten),
-     "crew_*, no1_*, task_crew* and task_no1 are the crew's; nothing else is");
+  ok(["crew_x", "no1_log", "task_no1", "task_crew", "task_crew_ops", "report", "release", "deck_patch", "ui_patch",
+       kindOf("work_log")].every(crewWritten) &&
+     !["personal_log", "task", "task_personal", "page", kindOf("log"), kindOf("task"), kindOf("page"), kindOf("sleep"),
+       kindOf("trip"), "crewmate", "no1", "reports", "release_notes", ""].some(crewWritten),
+     "crew_*, no1_*, task_crew*, task_no1, report, release, the patches and the architect's log are the crew's; " +
+     "the captain's own kinds are not");
   refresh();
   ok(cwNone() && cwIn(cwOwn), "the list holds the captain's own entry and none of the crew's");
   $("#q").value = "zebracrew"; refresh();
@@ -92,13 +98,18 @@ autosaveMs = 0;
   var cwStat = statScopeFor(false).src || st.all;
   ok(cwStat.indexOf(cwOwn) >= 0 && cwRows.every(function (r) { return cwStat.indexOf(r) < 0; }),
      "and the statistics of the whole journal");
+  ok(reportEntries().indexOf(cwRep) >= 0, "a report hidden from the list is still on the Reports page");
+  ok(releaseEntries().indexOf(cwRel) >= 0 && releaseFor("9.9.9") === cwRel,
+     "and a release still in What's new, the version line and the queue's shipped items");
   setKinds(["crew_ops"]); refresh();
   ok(cwIn(cwRows[0]), "a crew kind picked by name is shown: asking for it means it");
+  setKinds(["report", "release"]); refresh();
+  ok(cwIn(cwRep) && cwIn(cwRel), "and so are reports and releases");
   setKinds([]); refresh();
   ok(crewReports().get("crew_ops").indexOf(cwRows[0]) >= 0 &&
      crewReports().get("crew_inbox").indexOf(cwRows[1]) >= 0, "the crew reports view still lists them");
   chatBadge();
-  has($("#bChat").textContent, "\u00b7", "and No.1's open question is still counted on the Chats button");
+  ok(/\d/.test($("#bChat").textContent), "and No.1's open question is still counted on the Chats button");
   click($("#bCrewShow")); await settle(2);
   ok(crewShown() && cwAll() && cwIn(cwOwn), "one tap shows every crew entry");
   eq($("#bCrewShow").getAttribute("aria-pressed"), "true", "the button says it is on");
@@ -111,6 +122,8 @@ autosaveMs = 0;
   ok(!crewShown() && cwNone() && lsGetStr(CREW_SHOW_KEY) === "", "a second tap hides them again, and that is kept");
   eq(vMatch(vWords("show crew entries"), 0).cmd.say, "show crew entries", "\u201cshow crew entries\u201d is an order");
   eq(vMatch(vWords("only my entries"), 0).cmd.say, "hide crew entries", "\u201conly my entries\u201d hides them");
+  // the Today button's own word, for a page apart from "map of today" (slice G)
+  eq(vMatch(vWords("today's page"), 0).cmd.say, "day page", "\u201ctoday\u2019s page\u201d opens the Today button's Day view");
   vMatch(vWords("show crew entries"), 0).cmd.fn(); await settle(2);
   ok(crewShown(), "the order shows them");
   vMatch(vWords("hide crew entries"), 0).cmd.fn(); await settle(2);
@@ -122,7 +135,9 @@ autosaveMs = 0;
   /* ---------- 1.2 kind colours ---------- */
   console.log("-- kind colour --");
   eq(kindColor("personal_log"), kindColor("personal_log"), "kind colour is stable");
-  ok(KIND_COLORS.indexOf(kindColor("anything")) >= 0, "colour comes from the palette");
+  ok(KIND_COLORS.map(t => `var(${t})`).indexOf(kindColor("anything")) >= 0, "colour comes from the palette");
+  eq(kindHex("personal_log"), KIND_HEX[KIND_COLORS.map(t => `var(${t})`).indexOf(kindColor("personal_log"))],
+     "a kind's colour for a canvas is its token's value");
   var row = $("#list").querySelector(".item");
   ok(row.style.getPropertyValue("--k"), "row carries its kind colour");
 
@@ -137,7 +152,27 @@ autosaveMs = 0;
   var yUtc = yD.toISOString().slice(0, 19).replace("T", " ");
   has(relStamp(yUtc), "yesterday", "yesterday reads as yesterday");
   var oldUtc = "2020-03-04 10:11:12";
-  eq(relStamp(oldUtc), localOf(oldUtc), "anything old keeps the absolute form");
+  // rule:words (the design pass): older, the day in words, never ISO
+  var oldD = dayDate(localOf(oldUtc).slice(0, 10));
+  eq(relStamp(oldUtc), WD[oldD.getDay()] + " " + oldD.getDate() + " " + MO[oldD.getMonth()] + " " + oldD.getFullYear() +
+     ", " + localOf(oldUtc).slice(11), "anything old is its day in words, the year when not this one");
+  var thisYr = new Date(); thisYr.setDate(thisYr.getDate() - 20); thisYr.setHours(12, 0, 0, 0);
+  if (thisYr.getFullYear() === new Date().getFullYear())
+    ok(!/\d{4}/.test(relStamp(fmtUtc(thisYr))), "and without the year this year (" + relStamp(fmtUtc(thisYr)) + ")");
+  eq(agoWords(fmtUtc(thisYr)), "2 weeks ago", "how long ago, in words");
+  // a month count from 60 days never under two, the second year "a year ago"
+  var agoN = function (n) { var d = new Date(); d.setDate(d.getDate() - n); d.setHours(12, 0, 0, 0); return agoWords(fmtUtc(d)); };
+  eq(agoN(59), "8 weeks ago", "59 days, in weeks");
+  eq(agoN(60), "2 months ago", "60 days, 2 months (rule:words)");
+  eq(agoN(61), "2 months ago", "61 days, 2 months");
+  eq(agoN(364), "11 months ago", "364 days, 11 months");
+  eq(agoN(365), "a year ago", "365 days, a year");
+  eq(agoN(729), "a year ago", "729 days, still a year");
+  // Reports past a week: the day and the hour, never "3 months ago, 18:30"
+  var rwD = new Date(); rwD.setDate(rwD.getDate() - 90); rwD.setHours(12, 0, 0, 0);
+  eq(reportWhen(fmtUtc(rwD)), relStamp(fmtUtc(rwD)), "a report past a week is its day (" + reportWhen(fmtUtc(rwD)) + ")");
+  var rwN = new Date(); rwN.setDate(rwN.getDate() - 2); rwN.setHours(12, 0, 0, 0);
+  has(reportWhen(fmtUtc(rwN)), "2 days ago, ", "and within one, how long ago");
 
   /* ---------- created_at picker ----------
      Every control is clicked through its real listener: the −15m/−1h chips
@@ -250,12 +285,15 @@ autosaveMs = 0;
   eq($("#e_start_date").value, "", "clear blanks the start");
   setClean();
 
-  /* ---------- 1.5 word + byte count ---------- */
+  /* ---------- 1.5 word count (no bytes: rule:words) ---------- */
   console.log("-- counts --");
   $("#content").value = "one two three\nfour";
   countContent();
   has($("#clen").textContent, "4 words", "words counted");
-  has($("#clen").textContent, "18 bytes", "bytes counted");
+  ok(!/byte/.test($("#clen").textContent), "and no byte count, the database's measure");
+  $("#content").value = "one";
+  countContent();
+  eq($("#clen").textContent, "1 word", "one word is a word");
 
   /* ---------- 1.7 slash regex ---------- */
   console.log("-- slash syntax --");
@@ -276,6 +314,7 @@ autosaveMs = 0;
   refresh();
   eq(st.view.length, 0, "nothing matches");
   has($("#list").innerHTML, "no records found", "LCARS empty state");
+  eq($("#bFiltersDone").textContent, "None match", "the drawer's close says none match, never Show 0");
   ok($("#bClearF"), "clear-filters button offered");
   ok($("#bNewQ"), "a search that found nothing offers to create it");
   $("#q").value = "\"zzzzz nothing\"";
@@ -329,6 +368,63 @@ autosaveMs = 0;
   $("#list").scrollTop = 300;
   click($(".brand"));
   eq($("#list").scrollTop, 0, "an unfiltered list still goes back to the top");
+
+  /* ---------- 3.1b the toast sent away ---------- */
+  console.log("-- toast dismissed --");
+  var tEl = $("#toast"), tActed = 0;
+  toast("tap me");
+  ok(tEl.classList.contains("on"), "a toast is up");
+  click(tEl.querySelector(".tmsg"));
+  ok(!tEl.classList.contains("on"), "a tap on its text sends it away at once");
+  toast("deleted #1 (soft)", false, { label: "Undo", fn: function () { tActed++; } });
+  dispatch(tEl.querySelector(".tact"), "pointerdown", { pointerId: 3, clientX: 10, clientY: 10 });
+  click(tEl.querySelector(".tact"));
+  eq(tActed, 1, "its Undo still acts");
+  ok(!tEl.classList.contains("on"), "and takes the toast with it");
+  toast("deleted #1 (soft)", false, { label: "Undo", fn: function () { tActed++; } });
+  click(tEl);
+  eq(tActed, 1, "a tap beside the Undo dismisses without undoing");
+  // a swipe sideways: follows the finger, then out past the fling distance
+  toast("swipe me", false, { label: "Undo", fn: function () { tActed++; } });
+  dispatch(tEl, "pointerdown", { pointerId: 4, clientX: 100, clientY: 500 });
+  dispatch(tEl, "pointermove", { pointerId: 4, clientX: 130, clientY: 503 });
+  eq(tEl.style.translate, "30px 0", "a drag sideways follows the finger");
+  ok(tEl.classList.contains("drag"), "with no lag behind it");
+  dispatch(tEl, "pointermove", { pointerId: 4, clientX: 220, clientY: 505 });
+  dispatch(tEl, "pointerup", { pointerId: 4, clientX: 220, clientY: 505 });
+  ok(!tEl.classList.contains("on"), "and let go past the fling distance it is gone");
+  has(tEl.style.translate, "px 0", "sliding on out to the side");
+  ok(tEl.style.translate.indexOf("-") < 0, "the way it was swiped");
+  click(tEl);
+  eq(tActed, 1, "the mouse's click after a drag does nothing more");
+  // down, then a short drag that snaps back
+  toast("down with you");
+  eq(tEl.style.translate, "", "a new toast starts where it belongs");
+  dispatch(tEl, "pointerdown", { pointerId: 5, clientX: 100, clientY: 500 });
+  dispatch(tEl, "pointermove", { pointerId: 5, clientX: 102, clientY: 540 });
+  eq(tEl.style.translate, "0 40px", "a drag down follows the finger down");
+  dispatch(tEl, "pointermove", { pointerId: 5, clientX: 100, clientY: 380 });
+  eq(tEl.style.translate, "0px 0", "never up over the rows");
+  var tNow = performance.now; performance.now = function () { return tNow.call(performance) + 5000; };
+  dispatch(tEl, "pointerup", { pointerId: 5, clientX: 104, clientY: 520 });
+  performance.now = tNow;
+  ok(tEl.classList.contains("on"), "a short, slow drag snaps back");
+  eq(tEl.style.translate, "", "to where it was");
+  ok(!tEl.classList.contains("drag"), "easing back");
+  click(tEl);
+  ok(tEl.classList.contains("on"), "the click ending that drag is not a tap");
+  click(tEl);
+  ok(!tEl.classList.contains("on"), "the next one is");
+  toast("say it");
+  eq(vMatch(vWords("hide the message"), 0).cmd.say, "dismiss the message", "\u201chide the message\u201d is an order");
+  eq(vMatch(vWords("dismissed"), 0).cmd.say, "stand down", "\u201cdismissed\u201d still stands the microphone down");
+  vMatch(vWords("dismiss message"), 0).cmd.fn();
+  ok(!tEl.classList.contains("on"), "and it does");
+  toast("from the palette");
+  var tRow = paletteRows().find(function (r) { return r.label === "message · dismiss the toast"; });
+  ok(tRow, "a palette row too");
+  tRow.run();
+  ok(!tEl.classList.contains("on"), "which sends it away");
 
   /* ---------- 3.2 kind chips ---------- */
   console.log("-- kind chips --");
@@ -593,7 +689,7 @@ autosaveMs = 0;
   has(mdRender("[doc](media/a.pdf)"), "mdlink", "and a relative one stays inert");
   eq(mdRender("![x](//evil.test/a.jpg)").indexOf("<img"), -1, "a protocol-relative src is not fetched");
   eq(mdRender("![x](media/../../etc/a.jpg)").indexOf("<img"), -1, "nor one that climbs out with ..");
-  eq(mdRender("![x](data:image/png;base64,AAAA)").indexOf("<img"), -1, "nor a data: or any other scheme");
+  eq(mdRender("![x](data:text/html;base64,AAAA)").indexOf("<img"), -1, "nor a data: other than a picture, or any other scheme");
   eq(mdRender("[x](javascript:alert(1).mp4)").indexOf("<video"), -1, "a javascript: link never becomes a player");
   h = mdRender('![a"b](media/q.jpg)');
   ok(h.indexOf('alt="a&quot;b"') >= 0, "a quote in the alt stays inside the attribute");
@@ -651,20 +747,52 @@ autosaveMs = 0;
                   code:1, a:1, b:1, i:1, s:1, span:1, div:1, hr:1, button:1,
                   img:1, video:1, audio:1,
                   table:1, thead:1, tbody:1, tr:1, th:1, td:1 };
-  var bad = {}, rendered = 0;
+  // A handler is looked for inside tags only: an entry that mentions one in
+  // prose ("opened with onclick = fn") is escaped text, and scanning the whole
+  // output failed the deploy on Number One's own order (crew_msg 14223). The
+  // one handler the renderer writes itself, on its own <img>, is taken out first.
+  var hasHandler = function (html) {
+    return /<[^>]*\son[a-z]+\s*=/i.test(html.split(' onerror="mdMediaBroken(this)"').join(""));
+  };
+  ok(!hasHandler(mdRender("the button was opened with onclick = fn, and <b onclick=x>")),
+     "a handler named in prose is not one: the scan passes it");
+  ok(hasHandler('<p>x</p><img src="https://a/b.png" onload="steal()">'),
+     "a handler as a tag's attribute is caught");
+  // a src counts only as a real tag's attribute: a message quoting
+  // <img src="data:..."> as text is escaped, and is words, not markup. The
+  // sources allowed are the renderer's: http(s) and MD_DATA_IMG's pictures.
+  var badSrcs = function (out) {
+    var r = [], sr = /<(?:img|video|audio|source|iframe)\b[^>]*?\ssrc="([^"]*)"/g, sm;
+    while ((sm = sr.exec(out))) {
+      var v = sm[1].replace(/&amp;/g, "&");
+      if (!/^https?:\/\//.test(v) && !MD_DATA_IMG.test(v)) r.push(v);
+    }
+    return r;
+  };
+  var dImg = mdRender("![chart](data:image/png;base64,iVBORw0KGgo=)");
+  has(dImg, '<img src="data:image/png;base64,iVBORw0KGgo="', "a picture inlined as data:image/png is drawn");
+  eq(badSrcs(dImg).length, 0, "and the scan allows it");
+  var dHtml = mdRender("![x](data:text/html;base64,PHNjcmlwdD4=) ![y](data:image/svg+xml;base64,PHN2Zz4=)");
+  ok(dHtml.indexOf("<img") < 0 && dHtml.indexOf("mdimg") >= 0, "data:text/html and an SVG stay chips, never requested");
+  eq(badSrcs('<img src="data:text/html;base64,PHNjcmlwdD4=">').length, 1, "and the scan refuses such a src");
+  eq(badSrcs(mdRender('quoted: <img src="data:text/html,x"> as text')).length, 0, "a tag quoted as text is not one");
+  // a report entry in the format is never drawn as the page's markup
+  // (reportReadHtml: a sandboxed srcdoc, preformatted text or a link) but
+  // its markdown, which mdRender draws
+  var bad = {}, rendered = 0, rpSkip = 0;
   for (var i = 0; i < FIX.length; i++) {
-    var out = mdRender(FIX[i].content || "");
+    var rp = reportOf(FIX[i]);
+    if (FIX[i].kind === REPORT_KIND && (!rp || rp.type !== "md")) { rpSkip++; continue; }
+    var out = mdRender(rp ? FIX[i].content.slice(rp.at) : FIX[i].content || "");
     rendered++;
     var re = /<\/?([a-zA-Z][\w-]*)/g, m;
     while ((m = re.exec(out))) if (!ALLOWED[m[1].toLowerCase()]) bad[m[1]] = (bad[m[1]] || 0) + 1;
-    // the one handler the renderer writes itself, on its own <img>
-    if (/ on[a-z]+\s*=/.test(out.split(' onerror="mdMediaBroken(this)"').join(""))) bad["EVENT_HANDLER"] = 1;
-    var sr = / src="([^"]*)"/g, sm;
-    while ((sm = sr.exec(out))) if (!/^https?:\/\//.test(sm[1])) bad["SRC:" + sm[1].slice(0, 20)] = 1;
+    if (hasHandler(out)) bad["EVENT_HANDLER"] = 1;
+    badSrcs(out).forEach(function (v) { bad["SRC:" + v.slice(0, 20)] = 1; });
     if (/javascript:/i.test(out)) bad["JS_URL"] = 1;
   }
   ok(Object.keys(bad).length === 0,
-     "no tag outside the allowlist in " + rendered + " real entries: " + JSON.stringify(bad));
+     "no tag outside the allowlist in " + rendered + " real entries (" + rpSkip + " reports not markdown left out): " + JSON.stringify(bad));
 
   console.log("-- 3.1 read mode --");
   // An outline of the suite's own: the journal's first one is read, timed,
@@ -1101,9 +1229,12 @@ autosaveMs = 0;
   openDay(dayk);
   ok($("#ov").classList.contains("on"), "dialog opened");
   eq(dayOpen, dayk, "dialog knows its day");
+  eq(dayMode, "md", "the Day view opens rendered");
+  click($("#daymode").children[1]);
+  eq(dayMode, "full", "the ⋯'s Headers switches to the plain text");
   has($("#dayout").textContent, "entr", "day text rendered");
-  click($("#daymode").children[2]);
-  eq(dayMode, "md", "switched to rendered");
+  click($("#daymode").children[0]);
+  eq(dayMode, "md", "and Day back to rendered");
   has($("#dayout").innerHTML, "dayent", "entries rendered as markdown");
   // a click on a rendered entry opens it in the editor, not the reader
   var dent = $("#dayout").querySelector(".dayent .dbody");
@@ -1163,7 +1294,7 @@ autosaveMs = 0;
   click($("#dayclose"));
   ok(!$("#ov").classList.contains("on"), "dialog closed");
   eq(dayOpen, null, "and forgets its day");
-  dayMode = "full";
+  dayMode = "md";
 
   console.log("-- 3.4b ‹ goes back where the entry came from (design P10) --");
   (function () {
@@ -1174,7 +1305,7 @@ autosaveMs = 0;
     // the day: an entry's text tapped, ‹ Day back to the day at its scroll
     openDay(dayk);
     runTimers();
-    click($("#daymode").children[2]);
+    click($("#daymode").children[0]);
     $("#dayout").scrollTop = 137;
     var at = history._i;
     var d = $("#dayout").querySelector(".dayent .dbody"), did = Number(d.parentNode.dataset.id);
@@ -1182,7 +1313,7 @@ autosaveMs = 0;
     runTimers();
     eq(st.sel && st.sel.id, did, "the day's entry is open");
     eq($("#bBack").textContent, "‹ Day", "its ‹ is labelled for the day");
-    eq($("#bBack").getAttribute("aria-label"), "Back to the day", "and says so to a reader");
+    eq($("#bBack").getAttribute("aria-label"), "Day: back to the day", "and says so to a reader");
     eq(history._i, at + 1, "the entry is a step over the day");
     back();
     ok(ovOn() && dayOpen === dayk, "‹ Day reopens that day, in the tap");
@@ -1213,7 +1344,7 @@ autosaveMs = 0;
     ok(ovOn() && dayOpen === dayk && !st.sel, '"computer, go back" goes back to the day');
     runTimers();
     closeOv(); runTimers();
-    dayMode = "full";
+    dayMode = "md";
 
     // the task board
     openTasks();
@@ -1232,37 +1363,71 @@ autosaveMs = 0;
       closeOv(); runTimers();
     } else ok(true, "(no task in this journal to open)");
 
-    // a search
-    $("#q").value = "the"; refresh();
+    // a search, and the list below: they open a row of the suite's own, the
+    // newest and the only one with its word - what the journal's own newest
+    // rows are that day is not these checks' (the live journal's top is the
+    // crew's, a deploy's failure among them). Put in place here, with none
+    // of insertRow's state writes, which would count as a history step above
+    var p34 = { id: DB.reduce(function (m, r) { return Math.max(m, r.id); }, 0) + 1, kind: "personal_log",
+                title: "Quokkaform harbour notes", content: "quokkaform: a row of the suite's own, for the search",
+                value_int: 0, value_float: 0, done_bool: 0, deleted: 0, start_date: "", end_date: "",
+                created_at_utc: fmtUtc(new Date()), last_modified_at_utc: fmtUtc(new Date()) };
+    DB.push(JSON.parse(JSON.stringify(p34)));
+    st.all.unshift(p34); st.byId.set(p34.id, p34);
+    // and the ground under them set here, not inherited from the day's and
+    // the board's checks above (whose rows are the journal's): no entry open,
+    // no panel, no filter, and a history of one step, the list, with no
+    // Back of the page's still waiting to land
+    var ground = function () {
+      if (st.sel || st.isNew) closeEditor();
+      closeOv(); clearFilters(); runTimers();
+      history._st = [{ s: null, u: "/" }]; history._i = 0; history.state = null;
+      applyUrl("/");
+      lastUrl = ""; backPending = false; pushNext = false; backNext = false; histOk = true;
+    };
+    // what a failure found, so the next one explains itself in a deploy's log
+    var found = function () {
+      var top = st.view.slice(0, 3).map(function (e) { return e.kind + "#" + e.id; }).join(" ");
+      return " (found sel " + (st.sel ? st.sel.kind + "#" + st.sel.id : "none") + ", ovOn " + ovOn() +
+        ", route " + JSON.stringify(st.route) + ", path " + location.pathname + location.search +
+        ", ov class \"" + $("#ov").className + "\", dlg class \"" + $("#dlg").className +
+        "\", top " + top + ", history " + history._i + "/" + history._st.length +
+        " prev " + JSON.stringify(history.state && history.state.prev) + ", lastUrl " + JSON.stringify(lastUrl) +
+        ", backPending " + backPending + ", histOk " + histOk + ", q " + JSON.stringify($("#q").value) + ")";
+    };
+    ground();
+    $("#q").value = "quokkaform"; refresh();
     runTimers();
-    var hit = st.view[0];
-    ok(hit, "the search finds something");
-    var hitRow = $("#list").querySelector('.item[data-id="' + hit.id + '"]');
-    if (hitRow) click(hitRow); else openRow(hit.id);
+    var hit = st.view.find(function (e) { return e.id === p34.id; });
+    ok(hit, "the search finds something" + (hit ? "" : found()));
+    var hitRow = $("#list").querySelector('.item[data-id="' + p34.id + '"]');
+    if (hitRow) click(hitRow); else openRow(p34.id);
     runTimers();
-    eq($("#bBack").textContent, "‹ Search", "an entry from a search: ‹ Search");
+    eq($("#bBack").textContent, "‹ Search", "an entry from a search: ‹ Search" + found());
     back();
     runTimers();
-    ok(!st.sel && !ovOn(), "‹ Search closes it onto the list");
-    eq($("#q").value, "the", "searched as it was");
-    eq($("#bBack").textContent, "‹ List", "and the ‹ is the list's again");
+    var shut = !st.sel && !ovOn();
+    ok(shut, "‹ Search closes it onto the list" + (shut ? "" : found()));
+    eq($("#q").value, "quokkaform", "searched as it was");
+    eq($("#bBack").textContent, "‹ List", "and the ‹ is the list's again" + found());
 
     // the list, and anything else
-    clearFilters();
+    ground();
+    openRow(p34.id);
     runTimers();
-    openRow(st.view[0].id);
-    runTimers();
-    eq($("#bBack").textContent, "‹ List", "an entry from the list: ‹ List");
+    eq($("#bBack").textContent, "‹ List", "an entry from the list: ‹ List" + found());
     back();
     runTimers();
-    ok(!st.sel && !ovOn() && location.pathname === "/", "‹ List is the list");
+    shut = !st.sel && !ovOn() && location.pathname === "/";
+    ok(shut, "‹ List is the list" + (shut ? "" : found()));
     openStats();
     runTimers();
-    closeOv(); select(st.view[0].id);
+    closeOv(); select(p34.id);
     runTimers();
-    eq($("#bBack").textContent, "‹ List", "from any other view: ‹ List");
+    eq($("#bBack").textContent, "‹ List", "from any other view: ‹ List" + found());
     closeEditor();
     runTimers();
+    unplant(p34);
   })();
 
   console.log("-- 3.5 the stopwatch --");
@@ -1445,6 +1610,18 @@ autosaveMs = 0;
   runTimers(3100);
   await settle(2);
   eq(asPosts(), 0, "nothing to save: no POST, not from the chip, not from a pause");
+  // UI review slice 6: Read and a save asked for say nothing new - the chip
+  // already does - they shake it, and the caret stays in the box
+  var asToast = $("#toast").textContent;
+  setRead(true);
+  save();
+  await settle(2);
+  ok(!st.read && st.isNew, "Read on an empty draft stays in the editor");
+  ok($("#edchip").classList.contains("nudge"), "Read and Save shake the chip that says it");
+  ok($("#toast").textContent === asToast || !/write something/i.test($("#toast").textContent),
+     "and no toast says \"write something first\" again");
+  eq(document.activeElement, asTa, "the caret is in the box");
+  eq(asPosts(), 0, "and nothing was sent");
   input(asTa, "   ");
   runTimers(3100);
   await settle(2);
@@ -1472,7 +1649,7 @@ autosaveMs = 0;
   runTimers(3100);
   await settle(4);
   eq(asPosts(), 0, "a copy is not written by a pause");
-  eq($("#edchip").textContent, "● New · Save", "its chip still asks for the Save");
+  eq($("#edchip").textContent, "● Save new", "its chip still asks for the Save");
   input(asTa, asTa.value + " edited");
   runTimers(3100);
   await settle(6);
@@ -1504,24 +1681,32 @@ autosaveMs = 0;
   setClean(); closeEditor(); hideToast();
   autosaveMs = 0;
 
-  // iOS Safari reads a field's id, name, placeholder and aria-label for its
-  // contact AutoFill; one contact word makes the page a contact form
+  // iOS Safari reads a field's id, name, placeholder, aria-label, title and
+  // label for its contact AutoFill; one contact word makes the page a contact
+  // form, and a dialog's fields stay in the page after it closes
   // (test/check.py has the full rule, over the source; this is the open editor)
   console.log("\n-- 4.x the open editor's fields carry no contact word (iOS AutoFill Contact) --");
   var acLive = st.all.filter(function (e) { return !e.deleted; })[2];
   select(acLive.id);
   setRead(false);
   ok(!$("#e_title"), "the heading field is no longer #e_title");
-  var acRe = /(^|[^a-z])(name|title|first|last|surname|email|phone|tel|address|street|city|zip|postal|country|company|organi[sz]ation|job|location)/i;
-  var acBad = [];
+  var acRe = /(^|[^a-z])(name|title|first|last|surname|email|phone|tel|mobile|number|call|address|street|city|zip|postal|country|company|organi[sz]ation|job|location|user|login|account|person|recipient)/i;
+  var acBad = [], acUnnamed = [];
   document.querySelectorAll("input, textarea").forEach(function (el) {
-    if (/^(checkbox|radio|file|range|hidden|button|color)$/.test(el.getAttribute("type") || "")) return;
-    ["id", "name", "placeholder", "aria-label"].forEach(function (a) {
+    var type = el.getAttribute("type") || "";
+    if (/^(checkbox|radio|file|range|hidden|button|color)$/.test(type)) return;
+    if (/^(username|current-password|new-password)$/.test(el.getAttribute("autocomplete") || "")) return;
+    ["id", "name", "placeholder", "aria-label", "title"].forEach(function (a) {
       var v = el.getAttribute(a) || "";
       if (acRe.test(v.replace(/([a-z])([A-Z])/g, "$1 $2"))) acBad.push(a + "=" + v);
+      // a box saying whom it goes to ("to Lt. Torres") reads as a message's recipient
+      if (a !== "id" && a !== "name" && /^(reply )?to /i.test(v)) acBad.push(a + "=" + v);
     });
+    if (/^(|text|search|url)$/.test(type) && !/^search[A-Za-z0-9_]*$/.test(el.getAttribute("name") || ""))
+      acUnnamed.push(el.id || el.className || el.tagName);
   });
-  eq(acBad.join(" · "), "", "no text field in the page says name, title or another contact word");
+  eq(acBad.join(" · "), "", "no text field in the page says name, title or another contact word, or whom it goes to");
+  eq(acUnnamed.join(" · "), "", "every text field in the page carries the search name, Safari's opt-out");
   eq($("#e_head").getAttribute("placeholder"), "Heading", "the heading reads Heading, not Title");
   eq(fieldEl("title"), $("#e_head"), "and the title column still finds its field");
   closeEditor();
@@ -1757,7 +1942,26 @@ autosaveMs = 0;
   eq(st.pick.size, 2, "picking the same row again unpicks it");
   pickToggle(jold.id);
 
+  /* A title holding a " · ", a "#"+digits and "deleted = 1" of its own (the
+     live journal's did, and the deploy of 26 Oct failed on it): the check
+     below must let a title's own pass and still catch the dialog's. */
+  var jMid = jsorted[1], jMidTitle = jMid.title;
+  jMid.title = "Fixture · a title's own dot, #77 and deleted = 1";
   var joining = mergePicked();
+  await settle(3);
+  // rule:words: each entry its title, its kind by name and when; no id, slug,
+  // dots or column names
+  var jDlg = $("#ov").textContent;
+  has(jDlg, shownTitleText(jold), "the join names the oldest by its title");
+  has(jDlg, kindName(jold.kind), "and its kind by name");
+  has(jDlg, relStamp(jold.created_at_utc), "and when");
+  // the dialog's own words, the titles taken out: a title may hold a " · "
+  // or a "#" of its own (a release, a heading), as 0.332.1 found for the ids
+  var jWords = jpool.reduce(function (t, e) { return t.split(shownTitleText(e)).join(""); }, jDlg);
+  ok(jpool.every(function (e) { return jWords.indexOf("#" + e.id) < 0; }) && jWords.indexOf("deleted = 1") < 0 &&
+     jWords.indexOf(" · ") < 0, "no id, no dots, no column (rule:words)");
+  has(jDlg, jMid.title, "a title's own dot and digits are drawn as written");
+  jMid.title = jMidTitle;
   ok(await answerDialog(true), "the join asks before it writes");
   await joining;
   await settle(6);
@@ -1794,7 +1998,8 @@ autosaveMs = 0;
   ok($("#pkkind").disabled && $("#pksched").disabled && $("#pkdel").disabled, "with nothing picked, nothing to change");
   bpool.forEach(function (e) { pickToggle(e.id); });
   ok(!$("#pkkind").disabled && !$("#pksched").disabled && !$("#pkdel").disabled, "three picked: kind, schedule and delete are offered");
-  has($("#pkdel").textContent, "3", "the delete counts what it would take");
+  has($("#pkdel").title, "3", "the delete says what it would take, in its title (the count is on top)");
+  eq($("#pkdel").textContent, "Delete", "its label one word, no number");
   // the kind
   click($("#pkkind"));
   ok($("#ov").classList.contains("on") && $("#bk_kind"), "Kind… asks for the kind");
@@ -1838,7 +2043,20 @@ autosaveMs = 0;
   await settle(6);
   ok(bpool.every(function (e) { return dbFind(e.id).start_date === ""; }), "Unschedule clears them");
   // delete, and its undo
+  var bMid = bpool[1], bMidTitle = bMid.title;
+  bMid.title = "Fixture · a title's own dot, #77 and deleted = 1";   // as the join's, above
   var bDel = bulkDelete();
+  await settle(3);
+  var dDlg = $("#ov").textContent;
+  has(dDlg, shownTitleText(bpool[0]), "the delete names each by its title");
+  has(dDlg, kindName(bpool[0].kind), "its kind by name");
+  // the dialog's own words, the titles taken out (the join's check, above)
+  var bWords = bpool.reduce(function (t, e) { return t.split(shownTitleText(e)).join(""); }, dDlg);
+  ok(bpool.every(function (e) { return bWords.indexOf("#" + e.id) < 0; }) && bWords.indexOf("deleted = 1") < 0 &&
+     bWords.indexOf(" · ") < 0, "no id, no dots, no column (rule:words)");
+  has(dDlg, bMid.title, "a title's own dot and digits are drawn as written");
+  bMid.title = bMidTitle;
+  has(dDlg, "Deleted entries can be brought back from the toast.", "and says it in plain words");
   ok(await answerDialog(true), "a bulk delete asks first");
   await bDel;
   await settle(6);
@@ -1849,14 +2067,399 @@ autosaveMs = 0;
   ok(bpool.every(function (e) { return dbFind(e.id).deleted === 0; }), "Undo brings them all back");
   // All, and the ceiling
   pickMode(true);
+  eq($("#pkall").textContent, "All", "with nothing picked the toggle reads All");
   click($("#pkall"));
   eq(st.pick.size, st.view.length, "All picks every row the list shows");
+  eq($("#pkall").textContent, "None", "then reads None");
   if (st.view.length > BULK_MAX) {
     before = DBLOG.length;
     bulkKind();
     eq(DBLOG.length, before, "and more than " + BULK_MAX + " is refused before anything is written");
     ok(!$("#ov").classList.contains("on"), "without asking for a kind");
   }
+  click($("#pkall"));
+  eq(st.pick.size, 0, "None unpicks everything (it was Clear)");
+  ok(st.picking, "staying in select mode");
+  eq($("#pkall").textContent, "All", "and reads All again");
+  pickMode(false);
+
+  /* rule:select (ui-rules.md, "Select mode"): the count on top with All/None
+     and Done, Clear gone; the four actions in the phone's foot, Delete apart;
+     the bar says a change being written, a failure (the picks narrowed to
+     the rows that failed: the same press retries) and offline. */
+  console.log("-- select mode's bar (slice 5, rule:select) --");
+  eq($("#pkclear"), null, "Clear is gone: None is it");
+  ok($("#pkdone").classList.contains("on"), "Done is the lit one");
+  var pkBar = $("#pickbar");
+  ok($("#pkacts").parentNode === pkBar, "on the desk the actions are in the bar");
+  var pkKids = [].slice.call(pkBar.children).map(function (c) { return c.id; });
+  ok(pkKids.indexOf("pkcount") < pkKids.indexOf("pkall") && pkKids.indexOf("pkall") < pkKids.indexOf("pkacts") &&
+     pkKids.indexOf("pkacts") < pkKids.indexOf("pkdone"), "in one row: the count, All, the actions, Done last");
+  var acts = [].slice.call($("#pkacts").children).map(function (c) { return c.id; });
+  eq(acts.join(","), "pkkind,pksched,pkjoin,pkdel", "Kind, Schedule, Join, then Delete");
+  TEST.mobile = true;
+  pickMode(true);
+  ok($("#pkacts").parentNode === $("#lfoot"), "on a phone they move into the list's foot");
+  ok($("#lfoot").contains($("#pkdel")) && !$("#pickbar").contains($("#pkkind")), "the same buttons, moved, not copied");
+  pickMode(false);
+  TEST.mobile = false;
+  pickMode(true);
+  ok($("#pkacts").parentNode === pkBar, "and back into the bar on the desk");
+  eq($("#pkcount").textContent, "nothing picked", "nothing picked: said");
+  ok($("#pkkind").disabled && $("#pkdel").disabled && $("#pkjoin").disabled, "and nothing to press but All and Done");
+  var spool = st.all.filter(function (e) { return !e.deleted; }).slice(50, 53);
+  pickToggle(spool[0].id);
+  has($("#pkcount").textContent, "1 picked", "one picked");
+  ok($("#pkjoin").disabled && !$("#pkkind").disabled, "one: no Join, the rest offered");
+  pickToggle(spool[1].id); pickToggle(spool[2].id);
+  has($("#pkcount").textContent, "3 picked", "many");
+  // a change that fails on some rows: said on the bar, the picks narrowed to them
+  var apiS = api, sCalls = 0, sBusy = "", sFailed = 0;
+  api = function (path, o) {
+    if (o && o.method === "PUT") {
+      sBusy = sBusy || $("#pknote").textContent;
+      if (sCalls++ === 0) { sFailed = +path.split("/").pop(); return Promise.reject(new Error("no answer")); }
+    }
+    return apiS(path, o);
+  };
+  var sKinds = spool.map(function (e) { return e.kind; });
+  click($("#pkkind"));
+  input($("#bk_kind"), "bulk_kind2");
+  click($("#bk_ok"));
+  await settle(6);
+  api = apiS;
+  has(sBusy, "changing the kind of 3", "while it writes the bar says so");
+  eq(st.pick.size, 1, "a failure leaves the rows that did not change picked");
+  ok(st.pick.has(sFailed), "the one that failed");
+  has($("#pknote").textContent, "1 not changed: no answer", "and the bar says it, with why");
+  has($("#pknote").textContent, "Kind again to retry", "naming the button that retries");
+  ok(!$("#pkkind").disabled, "Kind again is the Retry");
+  eq($("#pickbar").getAttribute("aria-busy"), "false", "nothing held once it settled");
+  hideToast();
+  click($("#pkkind"));
+  input($("#bk_kind"), "bulk_kind2");
+  click($("#bk_ok"));
+  await settle(6);
+  eq(dbFind(sFailed).kind, "bulk_kind2", "the retry changes it");
+  ok($("#pknote").hidden && $("#pknote").textContent.indexOf("not changed") < 0, "and the failure line goes");
+  hideToast();
+  spool.forEach(function (e, i) { var r = dbFind(e.id); r.kind = sKinds[i]; st.byId.get(e.id).kind = sKinds[i]; });
+  // offline: an amber line, the writes wait in the outbox
+  ob.offline = true;
+  obPaint();
+  has($("#pknote").textContent, "sent when the link is back", "offline, the bar says the changes wait");
+  ob.offline = false;
+  obPaint();
+  ok($("#pknote").hidden, "and the line goes with the link back");
+  // a long count stays one line
+  pickAll();
+  has($("#pkcount").textContent, st.view.length + " picked", "a long count is the number, whole");
+  // the voice: None by name
+  eq(vMatch(vWords("pick none"), 0).cmd.say, "pick none", "\"pick none\" is a spoken order");
+  vMatch(vWords("pick none"), 0).cmd.fn();
+  eq(st.pick.size, 0, "which unpicks every row");
+  eq(vMatch(vWords("unpick everything"), 0).cmd.say, "pick none", "by another name too");
+  pickMode(false);
+
+  /* rule:select, the write path (slice 5's review): a second change while
+     one is written is refused by every door, saying what is still going; a
+     join half done keeps the mode on the rows still here with Delete as
+     the Retry; an Undo's failure stays in the toast; the toasts name
+     entries and kinds in words, never "#id" or a slug. */
+  console.log("-- select mode's writes (slice 5 review) --");
+  var wpool = st.view.filter(function (e) { return !e.deleted && e.content && !needsBody(e); }).slice(60, 63);
+  eq(wpool.length, 3, "three entries for the writes");
+  var wKinds = wpool.map(function (e) { return e.kind; });
+  pickMode(true);
+  wpool.forEach(function (e) { pickToggle(e.id); });
+  // (1) a write held open: nothing else may start
+  var apiW = api, held = [];
+  api = function (path, o) {
+    if (o && o.method === "PUT") return new Promise(function (res) { held.push(function () { res(apiW(path, o)); }); });
+    return apiW(path, o);
+  };
+  click($("#pkkind"));
+  input($("#bk_kind"), "bulk_kind3");
+  click($("#bk_ok"));
+  await settle(2);
+  has(st.pickBusy, "changing the kind of 3", "a kind change is being written");
+  var wLog = DBLOG.length, wHeld = held.length;
+  hideToast();
+  var j2 = mergePicked();
+  await settle(2);
+  ok(!$("#ov").classList.contains("on"), "J mid-write asks nothing");
+  has($("#toast").textContent, "still changing the kind of 3", "and says what is still being written");
+  hideToast();
+  var d2 = bulkDelete();
+  await settle(2);
+  ok(!$("#ov").classList.contains("on"), "Delete mid-write is refused before its confirm");
+  has($("#toast").textContent, "still changing the kind of 3", "saying why");
+  hideToast();
+  bulkSchedule();
+  ok(!$("#ov").classList.contains("on"), "Schedule mid-write is refused");
+  bulkKind();
+  ok(!$("#ov").classList.contains("on"), "a second Kind mid-write is refused");
+  vMatch(vWords("delete the picked"), 0).cmd.fn();
+  ok(!$("#ov").classList.contains("on"), "the voice's delete is refused");
+  has($("#toast").textContent, "still changing the kind of 3", "and voice is told the same");
+  await j2; await d2;
+  eq(held.length, wHeld, "no write of a second change was started");
+  eq(DBLOG.length, wLog, "and nothing more reached the server");
+  api = apiW;
+  while (held.length) held.shift()();
+  await settle(6);
+  eq(st.pickBusy, "", "the first change settles");
+  // (5) the kind by its name
+  var kT = $("#toast").textContent;
+  has(kT, kindName("bulk_kind3") + " now", "the toast names the kind by its name");
+  ok(kT.indexOf("bulk_kind3") < 0, "never its slug");
+  // (4) an Undo that fails, after new picks: the picks and the bar untouched
+  var kUndo2 = $("#toast").querySelector("button");
+  pickClear();
+  pickToggle(wpool[0].id); pickToggle(wpool[1].id);
+  api = function (path, o) {
+    if (o && o.method === "PUT" && +path.split("/").pop() === wpool[0].id) return Promise.reject(new Error("no answer"));
+    return apiW(path, o);
+  };
+  click(kUndo2);
+  await settle(6);
+  api = apiW;
+  eq(st.pick.size, 2, "an Undo that fails leaves the new picks as they are");
+  ok(st.pick.has(wpool[0].id) && st.pick.has(wpool[1].id), "the same two");
+  ok($("#pknote").textContent.indexOf("not changed") < 0 && $("#pknote").textContent.indexOf("retry") < 0,
+     "and puts no failure on the bar");
+  // (3) its toast counts, no ids
+  has($("#toast").textContent, "undo left 1 as it was", "the toast counts what it could not put back");
+  // the ids themselves, not any '#': a title may hold one (a heading, a tag)
+  ok(wpool.every(function (e) { return $("#toast").textContent.indexOf("#" + e.id) < 0; }), "with no id");
+  wpool.forEach(function (e, i) { dbFind(e.id).kind = wKinds[i]; st.byId.get(e.id).kind = wKinds[i]; });
+  // (5) nothing changed: said so, not "0 entries are …"
+  pickClear();
+  pickToggle(wpool[2].id);
+  api = function (path, o) {
+    if (o && o.method === "PUT") return Promise.reject(new Error("no answer"));
+    return apiW(path, o);
+  };
+  click($("#pkkind"));
+  input($("#bk_kind"), "bulk_kind3");
+  click($("#bk_ok"));
+  await settle(6);
+  api = apiW;
+  has($("#toast").textContent, "kind not changed", "a change of nothing says the kind is not changed");
+  ok($("#toast").textContent.indexOf("0 entr") < 0, "never \"0 entries are …\"");
+  ok(!$("#toast").querySelector("button"), "and offers no Undo of nothing");
+  hideToast();
+  // (2) a join whose deletes partly fail
+  pickClear();
+  wpool.forEach(function (e) { pickToggle(e.id); });
+  var wsorted = pickedRows(), wTarget = wsorted[0], wStuck = wsorted[2], wGone = wsorted[1];
+  var wBefore = dbFind(wTarget.id).content;
+  api = function (path, o) {
+    if (o && o.method === "DELETE" && +path.split("/").pop() === wStuck.id) return Promise.reject(new Error("no answer"));
+    return apiW(path, o);
+  };
+  var wj = mergePicked();
+  await settle(3);
+  ok(await answerDialog(true), "the join asks first");
+  await wj;
+  await settle(6);
+  api = apiW;
+  ok(dbFind(wTarget.id).content !== wBefore, "the text landed in the oldest");
+  eq(dbFind(wGone.id).deleted, 1, "one newer entry left the journal");
+  eq(dbFind(wStuck.id).deleted, 0, "the other would not delete");
+  ok(st.picking, "select mode stays");
+  eq(st.pick.size, 1, "with only the row still here picked");
+  ok(st.pick.has(wStuck.id), "that one");
+  has($("#pknote").textContent, "Joined; 1 still here. Delete it to finish", "the bar says Delete finishes it");
+  ok(!$("#pkdel").disabled, "and Delete is offered, the Retry");
+  var wT = $("#toast").textContent;
+  has(wT, shownTitleText(st.byId.get(wTarget.id)), "the toast names the entry by its title");
+  ok(wsorted.every(function (e) { return wT.indexOf("#" + e.id) < 0; }), "never by its id");
+  var wUndo = $("#toast").querySelector("button");
+  ok(wUndo && wUndo.textContent === "Undo", "and keeps an Undo for what landed");
+  click(wUndo);
+  await settle(6);
+  eq(dbFind(wTarget.id).content, wBefore, "Undo puts the text back");
+  eq(dbFind(wGone.id).deleted, 0, "and the deleted entry");
+  ok(st.pick.has(wStuck.id) && st.pick.size === 1, "the picks untouched");
+  ok($("#pknote").textContent.indexOf("to finish") < 0, "and \"delete it to finish\" gone, now wrong");
+  ok(wsorted.every(function (e) { return $("#toast").textContent.indexOf("#" + e.id) < 0; }), "the undo's toast with no id either");
+  hideToast();
+  pickMode(false);
+  // (3) the join's plain toast and the loading one
+  pickMode(true);
+  wpool.forEach(function (e) { pickToggle(e.id); });
+  var ensW = ensureBodies, cW = wsorted[1].content;
+  ensureBodies = function () { return Promise.resolve(); };
+  wsorted[1].content = undefined;
+  await mergePicked();
+  ensureBodies = ensW; wsorted[1].content = cW;
+  has($("#toast").textContent, "still loading the text of", "a body not loaded yet is said");
+  ok(wsorted.every(function (e) { return $("#toast").textContent.indexOf("#" + e.id) < 0; }), "naming the entry, not its id");
+  pickMode(false);
+
+  /* round three: an Undo pressed mid-write waits and runs, never lost; the
+     join's Undo restores the rows before the text; a refused Kind keeps its
+     dialog; the half join's mark goes with the mode; the join re-reads the
+     picks after its confirm. */
+  console.log("-- select mode's writes, round three --");
+  var r3k = wpool.map(function (e) { return dbFind(e.id).kind; });
+  pickMode(true);
+  pickToggle(wpool[0].id); pickToggle(wpool[1].id);
+  click($("#pkkind"));
+  input($("#bk_kind"), "bulk_kind4");
+  click($("#bk_ok"));
+  await settle(6);
+  var r3Undo = $("#toast").querySelector("button");
+  ok(r3Undo && r3Undo.textContent === "Undo", "a kind change offers its Undo");
+  // (A) another write starts, the Undo is pressed during it
+  pickClear();
+  pickToggle(wpool[2].id);
+  var held3 = [];
+  api = function (path, o) {
+    if (o && o.method === "PUT") return new Promise(function (res) { held3.push(function () { res(apiW(path, o)); }); });
+    return apiW(path, o);
+  };
+  click($("#pkkind"));
+  input($("#bk_kind"), "bulk_kind5");
+  click($("#bk_ok"));
+  await settle(2);
+  ok(!!st.pickBusy, "a second change is being written");
+  click(r3Undo);
+  await settle(2);
+  has($("#toast").textContent, "undo waits", "the Undo pressed mid-write says it waits");
+  eq(dbFind(wpool[0].id).kind, "bulk_kind4", "and writes nothing yet");
+  api = apiW;
+  while (held3.length) held3.shift()();
+  await settle(4);
+  runTimers();
+  await settle(8);
+  eq(dbFind(wpool[0].id).kind, r3k[0], "once the write ends the Undo runs: the first kind is back");
+  eq(dbFind(wpool[1].id).kind, r3k[1], "on both rows");
+  eq(dbFind(wpool[2].id).kind, "bulk_kind5", "and the other change stands");
+  eq(st.pickWaiting.length, 0, "nothing left waiting");
+  dbFind(wpool[2].id).kind = r3k[2]; st.byId.get(wpool[2].id).kind = r3k[2];
+  hideToast();
+  // nit: a refused Kind keeps its dialog and the kind typed
+  click($("#pkkind"));
+  input($("#bk_kind"), "bulk_kind6");
+  st.pickBusy = "deleting 3…";
+  click($("#bk_ok"));
+  ok($("#ov").classList.contains("on"), "a Kind refused mid-write keeps its dialog open");
+  eq($("#bk_kind").value, "bulk_kind6", "with the kind typed");
+  st.pickBusy = "";
+  shutOv();
+  hideToast();
+  // nit: the join re-reads the picks after its confirm
+  pickClear();
+  pickToggle(wpool[0].id); pickToggle(wpool[1].id);
+  var r3log = DBLOG.length;
+  var r3j = mergePicked();
+  await settle(3);
+  pickToggle(wpool[2].id);
+  ok(await answerDialog(true), "the join asks");
+  await r3j;
+  await settle(3);
+  eq(DBLOG.length, r3log, "picks changed during the confirm: nothing written");
+  has($("#toast").textContent, "picks changed", "and it says so");
+  hideToast();
+  // (B) the join's Undo: rows first, the text kept while one is out
+  var r3s = pickedRows(), r3t = r3s[0], r3before = dbFind(r3t.id).content;
+  var r3j2 = mergePicked();
+  await settle(3);
+  ok(await answerDialog(true), "a three-way join");
+  await r3j2;
+  await settle(6);
+  var r3U = $("#toast").querySelector("button");
+  ok(r3U && r3U.textContent === "Undo", "with its Undo");
+  api = function (path, o) {
+    if (o && o.method === "PUT" && o.body && o.body.deleted === 0 && +path.split("/").pop() === r3s[2].id)
+      return Promise.reject(new Error("no answer"));
+    return apiW(path, o);
+  };
+  click(r3U);
+  await settle(6);
+  api = apiW;
+  eq(dbFind(r3s[1].id).deleted, 0, "the row that could come back is back");
+  eq(dbFind(r3s[2].id).deleted, 1, "one is still out");
+  ok(dbFind(r3t.id).content !== r3before, "so the joined text stays in the target: its words are never in no live entry");
+  has($("#toast").textContent, "1 still deleted", "the toast counts what is still out");
+  var r3R = $("#toast").querySelector("button");
+  ok(r3R && r3R.textContent === "Retry", "and offers a Retry");
+  click(r3R);
+  await settle(6);
+  eq(dbFind(r3s[2].id).deleted, 0, "the Retry brings the last one back");
+  eq(dbFind(r3t.id).content, r3before, "and then the text");
+  hideToast();
+  // nit: the half join's mark goes with the mode
+  pickMode(true);
+  st.pickHalf = { id: r3t.id, line: "Joined; 1 still here. Delete it to finish" };
+  pickMode(false);
+  eq(st.pickHalf, null, "the half join's mark goes when the mode drops");
+
+  /* round four: a waiting Undo never takes the Undo of the write it waited
+     for; an Undo skips a row changed since; the join's Undo keeps an edit
+     made to the joined entry since. */
+  console.log("-- select mode's writes, round four --");
+  var r4k = wpool.map(function (e) { return dbFind(e.id).kind; });
+  pickMode(true);
+  pickToggle(wpool[0].id);
+  click($("#pkkind")); input($("#bk_kind"), "bulk_kind7"); click($("#bk_ok"));
+  await settle(6);
+  var r4A = $("#toast").querySelector("button");
+  // (F) the second write's toast keeps its Undo when the waiting one ends
+  pickClear(); pickToggle(wpool[1].id);
+  var held4 = [];
+  api = function (path, o) {
+    if (o && o.method === "PUT") return new Promise(function (res) { held4.push(function () { res(apiW(path, o)); }); });
+    return apiW(path, o);
+  };
+  click($("#pkkind")); input($("#bk_kind"), "bulk_kind8"); click($("#bk_ok"));
+  await settle(2);
+  click(r4A);
+  await settle(2);
+  api = apiW;
+  while (held4.length) held4.shift()();
+  await settle(4); runTimers(); await settle(8);
+  eq(dbFind(wpool[0].id).kind, r4k[0], "the waiting Undo ran");
+  eq(dbFind(wpool[1].id).kind, "bulk_kind8", "after the write it waited for");
+  has($("#toast").textContent, "put back", "its toast says so");
+  var r4B = $("#toast").querySelector("button");
+  ok(r4B && r4B.textContent === "Undo", "and keeps the Undo of the write it waited for");
+  if (r4B) { click(r4B); await settle(6); }
+  eq(dbFind(wpool[1].id).kind, r4k[1], "which still undoes that write");
+  hideToast();
+  // (H) a row changed again since is skipped, and counted
+  pickClear(); pickToggle(wpool[0].id);
+  click($("#pkkind")); input($("#bk_kind"), "bulk_kind9"); click($("#bk_ok"));
+  await settle(6);
+  var r4H = $("#toast").querySelector("button");
+  click($("#pkkind")); input($("#bk_kind"), "bulk_kind10"); click($("#bk_ok"));
+  await settle(6);
+  r4H.onclick();
+  await settle(6);
+  eq(dbFind(wpool[0].id).kind, "bulk_kind10", "an Undo leaves a row changed since as it is");
+  has($("#toast").textContent, "1 skipped, changed since", "and counts it");
+  dbFind(wpool[0].id).kind = r4k[0]; st.byId.get(wpool[0].id).kind = r4k[0];
+  hideToast();
+  // (G) the join's Undo keeps an edit made since
+  pickClear(); pickToggle(wpool[0].id); pickToggle(wpool[1].id);
+  var r4s = pickedRows(), r4t = r4s[0], r4before = dbFind(r4t.id).content;
+  var r4j = mergePicked();
+  await settle(3);
+  ok(await answerDialog(true), "a join");
+  await r4j; await settle(6);
+  var r4U = $("#toast").querySelector("button");
+  var r4edit = dbFind(r4t.id).content + "\nedited after the join";
+  dbFind(r4t.id).content = r4edit;
+  dbFind(r4t.id).last_modified_at_utc = "2099-01-01 00:00:00";
+  click(r4U);
+  await settle(8);
+  eq(dbFind(r4s[1].id).deleted, 0, "the Undo still brings the row back");
+  eq(dbFind(r4t.id).content, r4edit, "but keeps the edit made to the joined entry since");
+  has($("#toast").textContent, "edited since the join", "and says so");
+  dbFind(r4t.id).content = r4before;
+  hideToast();
   pickMode(false);
 
   console.log("-- 4.5 duplicate --");
@@ -1938,7 +2541,9 @@ autosaveMs = 0;
   console.log("-- 4.2 stats --");
   openStats();
   ok($("#ov").classList.contains("on"), "stats dialog opens");
-  has($("#dlg").innerHTML, "scard", "summary cards present");
+  ok($("#dlg").querySelector(".sgrid .sro b"), "the summary is readouts");
+  ok(!$("#dlg").querySelector(".scard"), "not the hero-metric cards (the review's finding 10)");
+  ok(!$("#dlg").querySelector(".sins i"), "and a finding carries no glyph for an icon");
   has($("#dlg").innerHTML, "sbar", "bars present");
   has($("#dlg").textContent, "longest streak", "streaks reported");
   var kbar = $("#dlg").querySelector(".sbar[data-k]");
@@ -1981,6 +2586,26 @@ autosaveMs = 0;
   closeOv();
   aged.created_at_utc = agedAt;
 
+  // a finding that found nothing is left out: a weekday and a weekend day
+  // that average the same are no "1.0×, 2.0 vs 2.0"; a month like the one
+  // before is "about as many", never "0% more"
+  var fx = { sleep: [], trips: [], vocab: [], people: [] };
+  var fc = function (day) {
+    return { timed: 0, punch: [], day: new Map(day), written: [], sorted: [], gap: { n: 0 }, rows: [], words: 0 };
+  };
+  var evenWeek = fc([["2026-10-05", 2], ["2026-10-10", 2]]);   // a Monday and a Saturday
+  var ins = statInsights(evenWeek, fx);
+  ok(!/×/.test(ins), "an even week has no weekday-and-weekend finding");
+  ok(!/ vs /.test(ins), "and no comparison of two equal numbers");
+  ins = statInsights(fc([["2026-10-05", 4], ["2026-10-10", 2]]), fx);
+  has(ins, "2.0×", "an uneven one does (4.0 vs 2.0)");
+  var fw = []; var fbase = Date.now() - DAY_MS;
+  for (var fi = 0; fi < 12; fi++) fw.push({ created_at_utc: fmtUtc(new Date(fbase - (fi < 6 ? fi : 30 + fi) * DAY_MS)), kind: "harness_kind" });
+  var fsame = fc([]); fsame.written = fw;
+  ins = statInsights(fsame, fx);
+  has(ins, "about as many as the 30 before (6)", "six and six is said plainly");
+  ok(!/0% (more|fewer)/.test(ins), "not as a 0% change");
+
   // the statistics answer the question the list is asking
   var liveN = st.all.filter(function (e) { return !e.deleted; }).length;
   var someKind = st.all.filter(function (e) { return !e.deleted && e.kind; })[0].kind;
@@ -1989,14 +2614,14 @@ autosaveMs = 0;
   refresh();
   openStats();
   ok($("#dlg").querySelector(".sfilt"), "a filtered list gets filtered statistics, and says so");
-  has($("#dlg").querySelector(".sfilt").textContent, someKind, "naming the filter");
-  eq($("#dlg").querySelector(".scard b").textContent, kindN.toLocaleString(), "counting only that kind's entries");
+  has($("#dlg").querySelector(".sfilt").textContent, kindName(someKind), "naming the filter, by the kind's name");
+  eq($("#dlg").querySelector(".sro b").textContent, kindN.toLocaleString(), "counting only that kind's entries");
   has($("#dlg").querySelector(".sfilt").textContent, "of " + liveN.toLocaleString(), "out of the whole journal");
   click($("#dlg").querySelector('[data-act="whole"]'));
-  eq($("#dlg").querySelector(".scard b").textContent, liveN.toLocaleString(), "the banner's button shows the whole journal");
+  eq($("#dlg").querySelector(".sro b").textContent, liveN.toLocaleString(), "the banner's button shows the whole journal");
   ok($("#dlg").querySelector('[data-act="scoped"]'), "and offers the filters back");
   click($("#dlg").querySelector('[data-act="scoped"]'));
-  eq($("#dlg").querySelector(".scard b").textContent, kindN.toLocaleString(), "which it applies again");
+  eq($("#dlg").querySelector(".sro b").textContent, kindN.toLocaleString(), "which it applies again");
   closeOv();
   clearFilters();
   openStats();
@@ -2104,6 +2729,93 @@ autosaveMs = 0;
   has($("#dlg").textContent, "toggle every kind the typed word matched",
       "and Tab, which has no binding of its own outside a picker");
   closeOv();
+
+  /* ---------- the keyboard help: searched, and run from ----------
+     The sheet is the palette's picker over KEYS (keyRows): a query matches
+     the key, the help and the section, a row runs its fn with the help
+     closed first, a gated one is shown dimmed and does not run. */
+  console.log("-- the keyboard help: search it, run from it --");
+  closeEditor();
+  openHelp();
+  ok(pk && pk.opts.heads, "the help is the picker, with its sections as headings");
+  eq(st.route && st.route.v, "help", "under its route, help, for Back and a bookmark");
+  eq(pk.rows.length, KEYS.filter(function (k) { return !k.head && k.help; }).length,
+     "every help line of KEYS is a row, none by hand");
+  ok($("#pkrows").querySelectorAll(".pkh").length >= 3, "an empty query reads as the sectioned page");
+  input($("#pkq"), "task board");
+  eq(pk.rows[0].k.key, "t", "the help text is searched: task board is t");
+  has($("#pkrows").innerHTML, "<mark>task</mark>", "the matched run is marked");
+  eq($("#pkrows").querySelectorAll(".pkh").length, 0, "a query flattens the sections");
+  has($("#pkrows").textContent, "Browsing", "and each row says its own");
+  input($("#pkq"), "K");
+  eq(pk.rows[0].k.key, "K", "a key typed is that key first");
+  input($("#pkq"), "sound");
+  ok(pk.rows.some(function (r) { return r.k.key === "s"; }) &&
+     pk.rows.every(function (r) { return r.sec === "Sound" || /sound/i.test(r.t); }),
+     "the section's name is searched");
+  input($("#pkq"), "zzqx nothing");
+  eq(pk.rows.length, 0, "a word in no line leaves nothing");
+  has($("#pkrows").textContent, "nothing matches", "and says so");
+  input($("#pkq"), "duplicate the open");
+  eq(pk.rows[0].k.key, "y", "y is found");
+  ok(pk.rows[0].off && $("#pkr0").classList.contains("off"), "with nothing open it is dimmed, not hidden");
+  has($("#pkr0").textContent, "with a saved entry open", "with why");
+  var nAll = st.all.length;
+  dispatch($("#pkq"), "keydown", { key: "Enter" });
+  ok($("#ov").classList.contains("on"), "Enter on a gated row leaves the help up");
+  eq(st.all.length, nAll, "and runs nothing");
+  has($("#pknote").textContent, "not now", "the read-out says why");
+  input($("#pkq"), "Esc step back");
+  ok(pk.rows[0].k.label === "Esc" && $("#pkr0").classList.contains("read"), "Esc is a row to read");
+  dispatch($("#pkq"), "keydown", { key: "Enter" });
+  ok($("#ov").classList.contains("on"), "which does not run");
+  input($("#pkq"), "the kind picker");
+  dispatch($("#pkq"), "keydown", { key: "Enter" });
+  ok(pk && pk.opts.stay && !pk.opts.heads, "Enter runs K: the help closed, the kind picker open");
+  closeOv();
+  click($("#bHelp"));
+  eq($("#pkq").value, "", "the side pane's button opens the help with an empty box, not its event");
+  ok(pk.rows.length > 20, "and every row drawn");
+  closeOv();
+  openHelp({ type: "click" });
+  eq($("#pkq").value, "", "openHelp takes a query only as a string");
+  closeOv();
+
+  /* help and hints by device (the review's finding 7, rule:hints): with no keyboard
+     (hover:none) the side pane's button opens the gestures and the voice
+     orders, and a picker's footer says what a tap does */
+  TEST.touch = true;
+  click($("#bHelp"));
+  ok(!pk || !$("#pkq"), "on a touch screen the side pane's button is not the keyboard sheet");
+  ok($("#v_gest") && $("#v_gest").classList.contains("touchonly"), "it is the help with the gestures");
+  has($("#v_gest").textContent, "pull the list down", "naming them");
+  has($("#dlg").textContent, "The microphone", "then the voice orders");
+  closeOv();
+  TEST.touch = false;
+  openPalette();
+  var pkKb = $("#dlg").querySelector(".pkfoot .kbonly"), pkTo = $("#dlg").querySelector(".pkfoot .touchonly");
+  has(pkKb && pkKb.textContent, "move", "the palette's key hint is only for a keyboard");
+  has(pkTo && pkTo.textContent, "a tap runs the row", "and a touch screen's says what a tap does");
+  closeOv();
+  openKindPicker();
+  has($("#dlg").querySelector(".pkfoot .kbonly").textContent, "Tab", "the kind picker's Tab hint is a keyboard's");
+  ok(!/Tab|⇧/.test($("#dlg").querySelector(".pkfoot .touchonly").textContent), "and not a touch screen's");
+  closeOv();
+  openHelp("calendar");
+  eq($("#pkq").value, "calendar", "the help opens searched");
+  var mRow = pk.rows.findIndex(function (r) { return r.k.key === "M"; });
+  ok(mRow >= 0, "M is among the calendar's keys");
+  click($("#pkr" + mRow));
+  ok(monthAt, "a tap on the row runs M");
+  closeOv();
+  eq(vMatch(vWords("keyboard help"), 0).cmd.fn.toString().indexOf("openHelp") >= 0, true,
+     "\u201ckeyboard help\u201d is an order");
+  voiceHeard("computer find the shortcut for the calendar");
+  await settle(2);
+  ok(pk && pk.opts.heads, "\u201cfind the shortcut for \u2026\u201d opens the help");
+  eq($("#pkq").value, "calendar", "searched for the words said, the filler dropped");
+  ok(pk.rows.some(function (r) { return r.k.key === "M"; }), "M with them");
+  closeOv();
   // a guarded binding falls through with its default intact when the guard says no
   closeEditor();
   eq(st.sel, null, "nothing is open");
@@ -2124,6 +2836,13 @@ autosaveMs = 0;
   var kAll = pk.rows.length;
   ok(kAll > 1, "every kind is offered (" + kAll + ")");
   eq($("#pkrows").querySelectorAll(".pkr").length, kAll, "one row drawn per kind");
+  // rule:words: each kind drawn by its name, the slug its tooltip (the design pass)
+  var kSlugRow = pk.rows.filter(function (r) { return /_/.test(r.label); })[0];
+  if (kSlugRow) {
+    var kEl = $("#pkr" + pk.rows.indexOf(kSlugRow)).querySelector(".pkl");
+    eq(kEl.textContent, kindName(kSlugRow.label), "a kind's row is its name (" + kEl.textContent + ")");
+    eq(kEl.getAttribute("title"), kSlugRow.label, "its slug the tooltip");
+  }
   has($("#pknote").textContent, "all kinds", "the read-out says nothing is pinned");
 
   input($("#pkq"), "zzqqzz");
@@ -2194,11 +2913,31 @@ autosaveMs = 0;
   ok($("#ov").classList.contains("on"), "p opens the palette");
   ok(pk && !pk.opts.stay, "a picker that closes on a pick");
   ok(pk.rows.length > 20, "it offers the whole surface (" + pk.rows.length + " rows)");
-  has($("#dlg").textContent, "sort · ", "the sorts are in it");
-  has($("#dlg").textContent, "state · ", "so are the state filters");
-  has($("#dlg").textContent, "kind · ", "and the kinds, one row each");
+  var palHas = function (pre) { return pk.rows.some(function (r) { return r.label.indexOf(pre) === 0; }); };
+  ok(palHas("sort · "), "the sorts are in it");
+  ok(palHas("state · "), "so are the state filters");
+  ok(palHas("kind · "), "and the kinds, one row each");
+  // rule:words, rule:dots (the design pass): drawn, a row is its name, a
+  // kind's by its name, then what it does apart; no slug, no middle dot
+  var palText = $("#pkrows").textContent;
+  ok(palText.indexOf(" · ") < 0, "no row draws a middle dot");
+  var palKind = pk.rows.filter(function (r) { return r.kind && /_/.test(r.kind); })[0];
+  if (palKind) {
+    var palEl = $("#pkr" + pk.rows.indexOf(palKind));
+    eq(palEl.querySelector(".pkl").textContent,
+       kindName(palKind.kind) + "filter by kind", "a kind's row: its name, then what the row does");
+    eq(palEl.querySelector(".pkw").textContent, "filter by kind", "in a span of its own");
+  }
+  // a group not in PAL_DOES draws no word at all, never its raw group
+  var palWords = Array.prototype.map.call($("#pkrows").querySelectorAll(".pkw"), function (w) { return w.textContent; });
+  var palDoes = Object.keys(PAL_DOES).map(function (g) { return PAL_DOES[g]; });
+  ok(palWords.length && palWords.every(function (w) { return palDoes.indexOf(w) >= 0; }),
+     "every row's second span says what it does (rule:words)");
   ok(pk.rows.some(function (r) { return r.label === "sort · created ↓" && r.on; }),
      "the row matching the live value is ticked");
+  input($("#pkq"), "sort len");
+  has($("#pkr0 .pkl").innerHTML, "<mark>", "a hit is marked on the drawn name, the group's letters left out");
+  input($("#pkq"), "");
 
   input($("#pkq"), "sort len");
   eq(pk.rows.filter(function (r) { return !r.m.fz; }).length, 1,
@@ -2373,7 +3112,10 @@ autosaveMs = 0;
   ok($("#wikiac").classList.contains("on"), "typing [[ opens the popup");
   ok($("#wikiac").querySelectorAll(".wac").length >= 2, "with more than one candidate");
   has($("#wikiac").innerHTML, "<b>", "the matched run is marked in the label");
-  eq($("#content").getAttribute("aria-expanded"), "true", "the textarea announces it");
+  eq($("#content").getAttribute("aria-activedescendant"), "wac0", "the textarea points a reader at the chosen option");
+  eq($("#content").getAttribute("aria-expanded"), null, "with no aria-expanded, which a textbox may not carry");
+  eq($("#wacsr").textContent, $("#wikiac").querySelectorAll(".wac").length + " suggestions",
+     "a screen reader is told the list opened, and how long it is (#wacsr)");
   eq($("#wikiac").querySelector(".wac.on").dataset.i, "0", "the best match starts selected");
   dispatch(ta, "keydown", { key: "ArrowDown" });
   eq($("#wikiac").querySelector(".wac.on").dataset.i, "1", "ArrowDown moves the highlight");
@@ -2385,7 +3127,7 @@ autosaveMs = 0;
      "a name an entry wears lands as a link to that entry, by id");
   eq(ta.selectionStart, ta.value.length, "with the caret past the brackets");
   ok(!$("#wikiac").classList.contains("on"), "and the popup is gone");
-  eq($("#content").getAttribute("aria-expanded"), "false", "which the textarea announces too");
+  eq($("#content").getAttribute("aria-activedescendant"), null, "and the textarea points at no option");
 
   open("x [[ger]] y", 7);
   ok($("#wikiac").classList.contains("on"), "a half-typed link inside its own brackets opens it");
@@ -2413,6 +3155,18 @@ autosaveMs = 0;
   ok(esc.defaultPrevented, "Escape is swallowed by the popup");
   ok(!$("#wikiac").classList.contains("on"), "which closes");
   ok(document.activeElement === ta, "and leaves the caret where it was");
+  eq($("#wacsr").textContent, "", "and the reader's count is cleared with it");
+  // New's dial (slice G): tabbed into and closed by Escape, the focus goes
+  // back to New rather than dropping to the body as the dial goes inert
+  fdOpen();
+  $("#newdial .fdi").focus();
+  ok(document.activeElement === $("#newdial .fdi"), "an option of New's open dial takes the focus");
+  // the dial's Escape is a window listener, which the shim's dispatch does not reach
+  var fdEsc = { type: "keydown", key: "Escape", target: document.activeElement, defaultPrevented: false,
+    preventDefault: function () { this.defaultPrevented = true; }, stopImmediatePropagation: function () {} };
+  for (const f of window._on.keydown || []) f(fdEsc);
+  ok(!fd.open && document.activeElement === $("#lnew"), "Escape closes the dial and gives the focus back to New");
+  ta.focus();
 
   open("plain");
   ok(!$("#wikiac").classList.contains("on"), "plain text keeps it shut");
@@ -2565,6 +3319,123 @@ autosaveMs = 0;
   ok(!$("#wikiac").classList.contains("on"), "so does one in a code fence");
   open("> @yeo");
   ok(!$("#wikiac").classList.contains("on"), "and one on a quoted line");
+
+  /* Where the box lands. The shim has no layout, so this block lends it one:
+     a monospace face (8px a column, 20px a line), the textarea at (100, 50)
+     with 1px borders and 10px padding, and the mirror's marker placed by the
+     same rule (wrapped at the mirror's width, which wikiMirror sets from the
+     field's clientWidth). The caret's point is worked out here on its own
+     from that rule, and the box measured against it: deep in a long entry,
+     after a wrapped line, in a scrolled field, the list narrowing under a
+     box flipped above the line (the @yeoman report, 0.311.2), and inside a
+     visual viewport the keyboard or a pinch has moved (offsetTop/Left). */
+  console.log("-- the popup's place --");
+  var CW = 8, LH = 20, PAD = 10, BRD = 1, TX = 100, TY = 50, TW = 500, TH = 400;
+  var cols = Math.floor((TW - 2 * BRD - 2 * PAD) / CW);
+  var rowcol = function (s) {        // where offset s.length ends, by the rule
+    var row = 0, col = 0;
+    s.split("\n").forEach(function (ln, i) {
+      if (i) { row++; col = 0; }
+      row += Math.floor(ln.length / cols); col = ln.length % cols;
+    });
+    return { row: row, col: col };
+  };
+  var caretAt = function (at) {
+    var rc = rowcol(ta.value.slice(0, at));
+    return { x: TX + BRD + PAD + rc.col * CW - ta.scrollLeft, y: TY + BRD + PAD + rc.row * LH - ta.scrollTop };
+  };
+  var gcsWas = window.getComputedStyle, vvWas = window.visualViewport;
+  var gcs = function () {
+    return { fontSize: "16px", lineHeight: LH + "px", paddingTop: PAD + "px", paddingLeft: PAD + "px",
+             paddingRight: PAD + "px", paddingBottom: PAD + "px", borderTopWidth: BRD + "px", borderLeftWidth: BRD + "px" };
+  };
+  var box = $("#wikiac"), lay = function (prop) {
+    return function () {
+      var m = this.parentNode;
+      if (!m || m !== wikiMirrorEl) return 0;
+      var t = m.textContent.replace(/​$/, "");
+      var rc = (function () { var w = Math.floor((parseFloat(m.style.width) - 2 * PAD) / CW), row = 0, col = 0;
+        t.split("\n").forEach(function (ln, i) { if (i) { row++; col = 0; } row += Math.floor(ln.length / w); col = ln.length % w; });
+        return { row: row, col: col }; })();
+      return prop === "top" ? PAD + rc.row * LH : PAD + rc.col * CW;
+    };
+  };
+  Object.defineProperty(El.prototype, "offsetTop", { configurable: true, get: lay("top") });
+  Object.defineProperty(El.prototype, "offsetLeft", { configurable: true, get: lay("left") });
+  try {
+    window.getComputedStyle = globalThis.getComputedStyle = gcs;
+    window.visualViewport = { offsetTop: 0, offsetLeft: 0, width: 1400, height: 900 };
+    ta._rect = { left: TX, top: TY, right: TX + TW, bottom: TY + TH, width: TW, height: TH };
+    ta.clientWidth = TW - 2 * BRD; ta.scrollLeft = 0;
+    box.offsetWidth = 300; box.offsetHeight = 200;
+    var at = function () { return { left: parseFloat(box.style.left), top: parseFloat(box.style.top) }; };
+    var lines = []; for (var li = 0; li < 40; li++) lines.push("line " + li + " of a long entry");
+    var deep = lines.join("\n") + "\n- @";
+
+    wikiClose();
+    ta.scrollTop = 600;              // the field scrolled to its foot, the @ line in sight
+    open(deep);
+    var c = caretAt(wac.start);
+    eq(at().left, c.x, "a line deep in a long, scrolled entry: the box's left edge at the name's column");
+    eq(at().top, c.y + LH + 4, "and its top at the line below the caret");
+
+    ta.scrollTop = 560;
+    dispatch(ta, "scroll", {});
+    c = caretAt(wac.start);
+    eq(at().top, c.y + LH + 4, "the field's own scroll moves it with the line");
+
+    wikiClose();
+    ta.scrollTop = 0;
+    var longln = Array(cols * 2 + 6).join("w");   // a line that wraps twice
+    open("intro\n" + longln + "\n@");
+    c = caretAt(wac.start);
+    eq(c.y, TY + BRD + PAD + 4 * LH, "(the wrapped line's rows counted: the @ on the fifth row)");
+    eq(at().left, c.x, "after a wrapped line: at the name's column");
+    eq(at().top, c.y + LH + 4, "and below its own row, not the paragraph's first");
+
+    // near the foot of the screen: flipped above, placed by its bottom edge
+    wikiClose();
+    window.visualViewport = { offsetTop: 0, offsetLeft: 0, width: 1400, height: 320 };
+    ta.scrollTop = 600;
+    box.offsetHeight = 200;
+    open(deep);
+    c = caretAt(wac.start);
+    ok(wac.above, "near the foot of the screen the box goes above the line");
+    eq(at().top + 200, c.y - 4, "its bottom edge just over the line");
+    box.offsetHeight = 40;           // the rows go as "yeo" is typed
+    open(deep + "yeo");
+    ok(wac.above, "the narrowed list stays on its side");
+    eq(at().top + 40, c.y - 4, "and still touches the line: no gap where the rows were");
+
+    // the keyboard up: the visual viewport is the lower part of the layout
+    // one, and the box is kept inside it, not inside 0..height
+    wikiClose();
+    window.visualViewport = { offsetTop: 200, offsetLeft: 0, width: 390, height: 300 };
+    ta.scrollTop = 560;
+    box.offsetHeight = 60;
+    open(deep);
+    c = caretAt(wac.start);
+    ok(c.y > 300 && c.y + LH + 4 + 60 < 200 + 300 - 8, "(the caret low in the layout viewport, in the visual one's room)");
+    ok(!wac.above, "a visual viewport moved down by the keyboard: the box stays below the line it has room under");
+    eq(at().top, c.y + LH + 4, "at the line below, in the same coordinates as the caret");
+    window.visualViewport = { offsetTop: 0, offsetLeft: 220, width: 300, height: 900 };
+    wikiPlace();
+    eq(at().left, 220 + 8, "a pinch moved it right: the box kept inside what is seen");
+    window.visualViewport = { offsetTop: 0, offsetLeft: 0, width: 390, height: 900 };
+    box.offsetWidth = 230;
+    wikiPlace();
+    eq(at().left, c.x, "on a phone's width the box starts at the caret's column");
+    ok(parseFloat(box.style.maxWidth) <= 390 - 8 - c.x, "narrowed to the room right of it rather than pushed left");
+  } finally {
+    wikiClose();
+    delete El.prototype.offsetTop; delete El.prototype.offsetLeft;
+    delete ta._rect; delete ta.clientWidth; delete ta.scrollLeft; delete box.offsetWidth; delete box.offsetHeight;
+    box.style.maxWidth = "";
+    ta.scrollTop = 0;
+    window.getComputedStyle = gcsWas;
+    if (gcsWas === undefined) delete globalThis.getComputedStyle; else globalThis.getComputedStyle = gcsWas;
+    window.visualViewport = vvWas;
+  }
 
   var ttl = $("#e_head"), ttlWas = ttl.value;
   ttl.focus();
@@ -2890,7 +3761,7 @@ autosaveMs = 0;
   ok($("#ov").classList.contains("on"), "? opens the cheat sheet");
   has($("#dlg").textContent, "duplicate the open entry", "which lists the bindings");
   has($("#dlg").innerHTML, "<kbd>", "as real keys");
-  click($("#h_close"));
+  click($("#pk_close"));
   ok(!$("#ov").classList.contains("on"), "and closes again");
 
   console.log("-- escape unwinds one layer at a time --");
@@ -3180,28 +4051,98 @@ autosaveMs = 0;
   });
   if (own) has(dtext, "[[" + own.title.trim() + "]]", "a title only one entry carries is bracketed");
 
-  console.log("-- 4.10 the button --");
+  console.log("-- 4.10 the button: Today opens the Day view, Save as a page the draft (slice 3, rule:dayview) --");
   TEST.confirmAnswer = true;
   setClean();
   closeEditor();
   hideToast();
   var today = isoDay(new Date());
-  var mine = dayPageRows(today);
+  var tdBefore = DBLOG.length;
+  var tdWrites = function () {
+    return DBLOG.slice(tdBefore).filter(function (l) { return /^(POST|PUT|PATCH|DELETE)/.test(l); });
+  };
+  autosaveMs = 3000;
   click($("#bDayPage"));
-  if (mine.length) {
-    ok(st.isNew, "the day page opens as an entry that exists nowhere else yet");
-    eq($("#e_kind").value, kindOf("page"), "of kind page");
-    eq($("#e_head").value, today, "titled with the day itself, so [[2026-01-01]] finds it");
-    ok(document.body.classList.contains("dirty"), "and dirty, so it cannot be lost by a stray key");
-    has($("#content").value, "((" + mine[0].id + "))", "carrying links to the day");
-    has($("#toast").textContent, "not saved yet", "the toast says it is still a draft");
-    eq($("#edbody").style.display, "flex", "and it opens in the form, not the reader");
-    setClean();
-    closeEditor();
-  } else {
-    ok(!st.isNew, "a day with nothing in it makes no page");
-    has($("#toast").textContent, "nothing logged", "and says so");
+  ok($("#ov").classList.contains("on"), "Today opens a view");
+  eq(dayOpen, today, "today's Day view");
+  ok(!st.isNew, "not a draft in the editor");
+  has($("#dlgh").textContent, "Today, ", "its head says Today");
+  eq(dayMode, "md", "rendered, by time");
+  runTimers(3100);
+  await settle(4);
+  eq(tdWrites().length, 0, "Today writes nothing");
+  if (!dayEntries(today).length) {
+    ok($("#dayout").querySelector(".empty"), "a day with nothing in it says so");
+    ok($("#daypage").hidden && $("#daycopy").hidden, "and offers no Save as a page or Copy");
+    ok($("#daynew"), "but Write one now");
   }
+  closeOv();
+  runTimers();
+  // the view's rendering: every entry under its time, in clock order, the kind by name
+  openDay(busiest);
+  var dvEnts = [...$("#dayout").querySelectorAll(".dayent")];
+  eq(dvEnts.length, dayEntries(busiest).length, "the Day view draws every entry of the day");
+  var dvTimes = dvEnts.map(function (d) { return d.querySelector(".dtime").textContent; });
+  ok(dvTimes.every(function (t) { return /^\d\d:\d\d$/.test(t); }), "each under its time");
+  eq(dvTimes.join("|"), dvTimes.slice().sort().join("|"), "in clock order");
+  var dv0 = st.byId.get(Number(dvEnts[0].dataset.id));
+  eq(dvEnts[0].querySelector(".dkind").textContent, kindName(dv0.kind), "the kind by its name, not its slug");
+  has(dvEnts[0].getAttribute("style"), kindColor(dv0.kind), "its edge in the kind's colour");
+  // its own id, not any '#' and digit: a title may hold one (a heading, an issue number)
+  ok(!new RegExp("#" + dv0.id + "(?!\\d)").test(dvEnts[0].querySelector(".dayenth").textContent), "and no id in its head");
+  var dvFacts = $("#daymeta").textContent;
+  has(dvFacts, dayEntries(busiest).length + " entries", "the facts count the day");
+  has(dvFacts, dvTimes[0] + " to " + dvTimes[dvTimes.length - 1], "and say from when to when");
+  ok($("#dmap"), "the day's map line is kept");
+  ok($("#daymore").hidden, "the plain-text forms wait behind the ⋯");
+  click($("#daydots"));
+  ok(!$("#daymore").hidden, "which shows them");
+  eq($("#daydots").getAttribute("aria-expanded"), "true", "and says it is open");
+  click($("#daydots"));
+  // Save as a page: the draft in the editor, written only once it is edited
+  tdBefore = DBLOG.length;
+  var drowsB = dayPageRows(busiest);
+  click($("#daypage"));
+  ok(!$("#ov").classList.contains("on"), "Save as a page leaves the view");
+  ok(st.isNew, "for the day page's draft, an entry that exists nowhere else yet");
+  eq($("#e_kind").value, kindOf("page"), "of kind page");
+  eq($("#e_head").value, busiest, "titled with the day itself, so [[2026-01-01]] finds it");
+  has($("#content").value, "((" + drowsB[0].id + "))", "carrying links to the day");
+  has($("#toast").textContent, "not saved yet", "the toast says it is still a draft");
+  eq($("#edbody").style.display, "flex", "and it opens in the form, not the reader");
+  runTimers(3100);
+  await settle(4);
+  eq(tdWrites().length, 0, "the draft is not written by a pause");
+  input($("#content"), $("#content").value + "\na line of my own");
+  runTimers(3100);
+  await settle(6);
+  eq(tdWrites().filter(function (l) { return l.indexOf("POST") === 0; }).length, 1, "an edit writes it, once");
+  ok(!st.isNew && st.sel && st.sel.kind === kindOf("page"), "and it is a page row");
+  autosaveMs = 0;
+  setClean();
+  closeEditor();
+  runTimers();
+  // a day the list's filters empty: Nothing written alone, no Save as a page beside it
+  $("#q").value = "zzqx no such words anywhere"; refresh();
+  openDay(busiest);
+  ok($("#dayout").querySelector(".empty"), "a day the filters empty says Nothing written");
+  has($("#dayout").textContent, "filters", "and says the filters did it");
+  ok($("#daypage").hidden && $("#daycopy").hidden, "with no Save as a page or Copy beside it");
+  closeOv();
+  $("#q").value = ""; refresh();
+  runTimers();
+  // the voice orders: "day page" and "today's page" open the view, "save the day page" the draft
+  eq(vMatch(vWords("day page"), 0).cmd.say, "day page", "\u201cday page\u201d is an order");
+  vMatch(vWords("today's page"), 0).cmd.fn();
+  eq(dayOpen, today, "\u201ctoday\u2019s page\u201d opens today's Day view");
+  ok(!st.isNew, "and writes no draft");
+  closeOv();
+  openDay(busiest);
+  vMatch(vWords("save the day page"), 0).cmd.fn();
+  ok(st.isNew && $("#e_head").value === busiest, "\u201csave the day page\u201d drafts the day open");
+  setClean();
+  closeEditor();
+  runTimers();
   hideToast();
 
   console.log("\nsection D: " + TEST.asserts + " assertions, " + TEST.fails.length + " failures");
@@ -3649,8 +4590,8 @@ async function answerPrompt(text) {
   eq(kindOf("log"), KINDMAP.log ? KINDMAP.log.kind : "personal_log", "which is the log role's kind (personal_log by default)");
   eq(localOf(made.start_date).slice(11), "10:00", "starting where the drag did");
   eq(localOf(made.end_date).slice(11), "11:30", "and ending where it stopped");
-  // the server fills an empty title with its own placeholder, so the gesture
-  // cannot leave the field blank — it leaves it selected instead
+  // the server fills an empty title with its own placeholder: the database's
+  // words, which the field does not show as a name
   eq(made.title, "HTTP Entry", "carrying the placeholder the server gives an untitled row");
   // Sketching a day is draw-name-draw-name, so the calendar keeps the screen
   // and the naming happens on the block itself.
@@ -3659,7 +4600,8 @@ async function answerPrompt(text) {
   var ren = $("#mogrid").querySelector(".calren");
   ok(!!ren, "the new block carries a name field");
   eq(TEST.focused, ren, "with the cursor already in it");
-  eq(ren.value, "HTTP Entry", "on the placeholder the server gave it, ready to be typed over");
+  eq(ren.value, "", "empty, not on the server's \"HTTP Entry\"");
+  eq(ren.placeholder, "what is it?", "asking for a name");
   eq(crename && crename.id, made.id, "and it is that block's, not another's");
 
   ren.value = "Deep work";
@@ -3749,6 +4691,257 @@ async function answerPrompt(text) {
   eq($("#mogrid").querySelectorAll(".calhr").length, 24, "an empty day still draws all of it");
   ok($("#mogrid").querySelector(".calday.sched"), "on the fixed hour scale");
   ok($("#mogrid").querySelector(".calsched"), "with a lane to draw a new block on");
+
+  /* ---------- the phone's week and day (the design pass's slice 4) ----------
+     rule:weekday (ui-rules.md, "The phone's week and day"): the month's strip
+     of dot cells for the seven days and the chosen day's agenda; on the day,
+     the free hours a row each, whose tap schedules an hour through calCreate
+     (start_date and end_date) and never writes when an entry was written. */
+  console.log("-- the calendar: the phone's week and day in the month's pattern (slice 4, rule:weekday) --");
+  clearFilters();
+  refresh();
+  TEST.mobile = true;
+  var wkDay = dayKey(st.all.filter(function (e) { return !e.deleted; })[0].created_at_utc);
+  calOpen("week", wkDay);
+  var strip = $("#mogrid").querySelector(".mcal.calstrip");
+  ok(!!strip, "the phone's week is the month's strip");
+  eq(strip.querySelectorAll(".mcd[data-d]").length, 7, "of seven day cells");
+  eq($("#mogrid").querySelector(".calwk"), null, "with no seven columns of chips");
+  eq(strip.querySelectorAll(".mcd.sel").length, 1, "the chosen day lit");
+  eq(strip.querySelector(".mcd.sel").dataset.d, wkDay, "and it is the day the week was opened on");
+  eq(strip.querySelector(".mcd").dataset.d, calWeekStart(wkDay), "from the week's Sunday");
+  var wkRows = $("#mogrid").querySelectorAll(".mag .magr[data-open]");
+  eq(wkRows.length, (calIndex().get(wkDay) || []).length, "the chosen day's agenda: a row per entry");
+  ok(!!$("#mogrid").querySelector('.magh [data-zoom="' + wkDay + '"]'), "its head's Day button opens the day's hours");
+  ok(wkRows[0].querySelector(".magk").textContent === kindName(st.byId.get(+wkRows[0].dataset.open).kind),
+     "a row names its kind by its name");
+  has($("#mohint").textContent, "Details", "the week's hint names the tap that stands for the drag");
+  ok($("#mohint").textContent.indexOf("drag") < 0, "and offers no drag on a phone");
+  var other = strip.querySelector(".mcd.has:not(.sel)");
+  if (other) {
+    dispatch(other, "click");
+    eq(calAt, other.dataset.d, "a tap on another day chooses it");
+    eq(calScale, "week", "on the week still");
+    eq($("#mogrid").querySelector(".mcd.sel").dataset.d, other.dataset.d, "and lights it");
+  }
+
+  console.log("-- the calendar: the phone's day, its free hours --");
+  // a future day with nothing written or scheduled in it
+  var planDay = calShiftDays(calToday(), 9);
+  while ((calIndex().get(planDay) || []).length || (calSchedIndex().get(planDay) || []).length)
+    planDay = calShiftDays(planDay, 1);
+  calOpen("day", planDay);
+  ok(!!$("#mogrid").querySelector(".mcal.calstrip"), "the phone's day has the week's strip over it");
+  eq($("#mogrid").querySelector(".calday"), null, "and none of the 24 hour slots");
+  var frees = $("#mogrid").querySelectorAll(".magfree[data-free]");
+  eq(frees.length, 1, "an empty day is one free row");
+  has(frees[0].textContent, "the whole day free", "which says the whole day is free");
+  ok($("#mogrid").querySelector(".magh [data-zoom]") === null, "the day's head has no Day button of its own");
+  has($("#mohint").textContent, "free hour", "the hint names the free hour's tap");
+  // planning is for the days ahead: on the day scale every day of the strip
+  // can be chosen, an empty one ahead included
+  var stripD = $("#mogrid").querySelectorAll(".calstrip .mcd[data-d]");
+  eq(Array.prototype.filter.call(stripD, function (c) { return c.disabled; }).length, 0,
+     "on the day every day of the strip can be chosen, those ahead too");
+  var ahead = calShiftDays(planDay, planDay === calWeekStart(planDay) ? 1 : -1);
+  if (ahead > calToday() && !(calIndex().get(ahead) || []).length && !(calSchedIndex().get(ahead) || []).length) {
+    dispatch($("#mogrid").querySelector('.calstrip .mcd[data-d="' + ahead + '"]'), "click");
+    eq(calAt, ahead, "a tap on an empty day ahead chooses it");
+    eq(calScale, "day", "on the day still");
+    calOpen("day", planDay);
+  }
+  // the free runs, by the hour: written entries and a block taking theirs
+  var fakeAt = function (h, m, d) { var dd = calDate(d || planDay); return fmtUtc(new Date(dd.getFullYear(), dd.getMonth(), dd.getDate(), h, m, 0)); };
+  var runsOf = function (its) { return its.filter(function (it) { return it.free !== undefined; }).map(function (it) { return it.free + "+" + it.hours; }).join(" "); };
+  var its = calDayItems(planDay, [{ id: -1, kind: "x", created_at_utc: fakeAt(9, 15) }],
+                        [{ id: -2, kind: "x", start_date: fakeAt(13, 0), end_date: fakeAt(15, 30) }], -1);
+  eq(runsOf(its), "0+9 10+3 16+8", "the hours an entry or a block holds split the day into free runs");
+  eq(its.filter(function (it) { return it.e; }).map(function (it) { return it.at; }).join(" "), "555 780",
+     "the entries sit at their minute, a block at its start");
+  var itsNow = calDayItems(planDay, [], [], 14 * 60 + 20);
+  eq(runsOf(itsNow), "0+14 14+10", "on today the free run is split at the hour in hand");
+  var nowAt = itsNow.findIndex(function (it) { return it.now !== undefined; });
+  eq(itsNow[nowAt + 1].free, 14, "and the now line sits right before it");
+  eq(calFreeWords(1) + "|" + calFreeWords(3), "an hour free|3 hours free", "an hour, or hours, free");
+  // a block with no end is an instant: its own hour, not the half hour after
+  eq(runsOf(calDayItems(planDay, [], [{ id: -3, kind: "x", start_date: fakeAt(10, 45) }], -1)), "0+10 11+13",
+     "a block with no end at 10:45 takes hour 10 only");
+  // unfolded hours are a run each
+  eq(runsOf(calDayItems(planDay, [], [], -1, new Set([3, 4]))), "0+3 3+1 4+1 5+19",
+     "an unfolded hour is a row of its own, the runs around it folded still");
+  // across midnight: the real times, and the other end's day
+  var night = { id: -4, kind: "x", title: "Night shift", start_date: fakeAt(22, 0, calShiftDays(planDay, -1)), end_date: fakeAt(7, 0) };
+  var nIt = calDayItems(planDay, [], [night], -1).filter(function (it) { return it.e; })[0];
+  var nRow = calAgendaRow(night, nIt.from, nIt.to, planDay, nIt);
+  has(nRow, ">22:00<", "a block from the day before shows its real start");
+  has(nRow, "<small>07:00</small>", "and its end");
+  has(nRow, "from the day before", "and says it began the day before");
+  ok(nRow.indexOf("00:00") < 0, "never the 00:00 it is cut at");
+  var late = { id: -5, kind: "x", title: "Flight", start_date: fakeAt(23, 0), end_date: fakeAt(2, 0, calShiftDays(planDay, 1)) };
+  var lIt = calDayItems(planDay, [], [late], -1).filter(function (it) { return it.e; })[0];
+  var lRow = calAgendaRow(late, lIt.from, lIt.to, planDay, lIt);
+  has(lRow, "<small>02:00</small>", "one running into the next day shows its real end");
+  has(lRow, "until the day after", "and says it goes on");
+  ok(lRow.indexOf("24:00") < 0, "never 24:00");
+  var tdK = calToday();
+  var lateT = { id: -6, kind: "x", title: "Flight", start_date: fakeAt(23, 0, tdK), end_date: fakeAt(2, 0, calShiftDays(tdK, 1)) };
+  has(calAgendaRow(lateT, 1380, 1440, tdK, { clipBot: true }), "until tomorrow", "on today, until tomorrow");
+  var fromT = { id: -7, kind: "x", title: "Night", start_date: fakeAt(22, 0, tdK), end_date: fakeAt(7, 0, calShiftDays(tdK, 1)) };
+  has(calAgendaRow(fromT, 0, 420, calShiftDays(tdK, 1), { clipTop: true }), "from today", "on tomorrow, one begun today says from today");
+
+  // a run is a fold: its tap opens it into an hour a row, writing nothing
+  var nBefore = st.all.length;
+  ok(frees[0].classList.contains("fold"), "a run of hours is a fold");
+  dispatch(frees[0], "click");
+  await settle(2);
+  eq(st.all.length, nBefore, "a tap on a run writes nothing");
+  var hrs = $("#mogrid").querySelectorAll(".magfree[data-free]");
+  eq(hrs.length, 24, "it opens into one row an hour");
+  eq($("#mogrid").querySelectorAll(".magfree.fold").length, 0, "none of them a fold");
+  eq(TEST.focused, hrs[0], "the run's first hour focused");
+  has(hrs[9].textContent, "09:00", "each says its hour");
+
+  // the tap on an hour: scheduled through the calendar's own create, named in place
+  DBLOG.length = 0;
+  var ft = hrs[9];
+  var cpaW = calPlanAt, cpaH = null;
+  calPlanAt = function (h) { cpaH = h; return Promise.resolve(null); };
+  dispatch(ft, "click");
+  calPlanAt = cpaW;
+  eq(cpaH, 9, "a tap on a one-hour row plans that hour");
+  var planP = calPlanAt(+ft.dataset.free, ft);
+  eq(ft.getAttribute("aria-busy"), "true", "the tapped row is busy in the tap's frame");
+  has(ft.textContent, "planning 09:00 to 10:00", "and says what it is planning");
+  await planP;
+  await settle(8);
+  eq(st.all.length, nBefore + 1, "the free row's tap made an entry");
+  var post = DBLOG.filter(function (l) { return l.indexOf("POST /entries") === 0; }).pop() || "";
+  has(post, '"start_date"', "with a start");
+  has(post, '"end_date"', "and an end");
+  ok(post.indexOf("created_at_utc") < 0, "never setting when it was written");
+  var planned = st.all.find(function (x) { return x.start_date && dayKey(x.start_date) === planDay; });
+  ok(!!planned, "scheduled on the day of the row");
+  eq(localOf(planned.start_date).slice(11), "09:00", "from the row's hour");
+  eq(localOf(planned.end_date).slice(11), "10:00", "for an hour");
+  eq(planned.kind, kindOf("log"), "in the log role's kind, as a drawn block");
+  ok(dayKey(planned.created_at_utc) !== planDay, "its written time is the server's now, not the planned day");
+  var pren = $("#mogrid").querySelector(".calren.magren");
+  ok(!!pren, "named in place, in its agenda row's place");
+  eq(TEST.focused, pren, "with the cursor in it");
+  eq(pren.value, "", "an empty field, not the server's \"HTTP Entry\"");
+  eq(pren.placeholder, "what is it?", "asking for a name");
+  ok($("#mogrid").querySelector('.magr[data-open="' + planned.id + '"]').hidden, "the row hidden while it is named");
+  pren.value = "Dentist";
+  dispatch(pren, "keydown", { key: "Enter" });
+  await settle(8);
+  eq(planned.title, "Dentist", "Enter names it");
+  ok(!!$("#mogrid").querySelector('.magr[data-open="' + planned.id + '"]'), "and the agenda draws its row");
+  has($("#mogrid").querySelector('.magr[data-open="' + planned.id + '"] .magt').textContent, "10:00", "with its end under its start");
+  eq($("#mogrid").querySelectorAll(".magfree[data-free]").length, 23, "the other hours stay open, an hour a row");
+  has($("#monote").textContent, "1 scheduled", "the facts count it");
+  ok($("#toast").textContent.indexOf("#" + planned.id) < 0, "the toast names no id");
+  // the strip counts what is planned on a day as well as what was written
+  var pCell = $("#mogrid").querySelector('.calstrip .mcd[data-d="' + planDay + '"]');
+  ok(pCell.classList.contains("has"), "a planned day ahead does not look empty");
+  ok(!!pCell.querySelector(".mcdd i"), "its cell has the plan's dot");
+  hideToast();
+  // left empty, a new block's field writes nothing
+  DBLOG.length = 0;
+  var plWas = planned.title;
+  planned.title = "HTTP Entry";
+  calRenameOpen(planned.id);
+  dispatch($("#mogrid").querySelector(".calren.magren"), "keydown", { key: "Enter" });
+  await settle(4);
+  eq(DBLOG.filter(function (l) { return l.indexOf("PUT") === 0; }).length, 0, "an unnamed block left empty writes nothing");
+  planned.title = plWas;
+
+  // a failed plan says so on its row, which is its Retry
+  var apiWas = api;
+  api = function () { return Promise.reject(new Error("no answer")); };
+  var ft2 = $("#mogrid").querySelector(".magfree[data-free]");
+  var bad = await calPlanAt(+ft2.dataset.free, ft2);
+  api = apiWas;
+  eq(bad, null, "a plan the server refuses makes nothing");
+  ok(ft2.classList.contains("bad"), "the row says it failed");
+  has(ft2.textContent, "Not planned: no answer", "with why");
+  ok(ft2.getAttribute("aria-busy") !== "true", "and can be tapped again");
+  hideToast();
+  // and on the row drawn in its place, when the day is redrawn while it runs
+  api = function () { calRepaint(); return Promise.reject(new Error("no answer")); };
+  var ft3 = $("#mogrid").querySelector(".magfree[data-free]"), h3 = ft3.dataset.free;
+  await calPlanAt(+h3, ft3);
+  api = apiWas;
+  ok(!ft3.isConnected, "the tapped row was redrawn meanwhile");
+  var ft3b = $("#mogrid").querySelector('.magfree[data-free="' + h3 + '"]');
+  ok(ft3b.classList.contains("bad"), "the failure is said on the row that stands there now");
+  has(ft3b.textContent, "Not planned", "with why, not in the toast only");
+  hideToast();
+  // a plan handed a run (plan an hour on today: the run that starts now)
+  // opens that hour first, so a failure is said on a one-hour row, whose
+  // tap is the Retry, never on a fold, whose tap would open it
+  var fdDay = calShiftDays(planDay, 3);
+  calOpen("day", fdDay);
+  var fold = $("#mogrid").querySelector(".magfree.fold");
+  ok(!!fold, "a day ahead holds a run of free hours");
+  if (fold) {
+    var fdN = st.all.length;
+    api = function () { return Promise.reject(new Error("no answer")); };
+    var fdRow = null;
+    var fdP = calPlanAt(+fold.dataset.free, fold);
+    fdRow = $("#mogrid").querySelector('.magfree[data-free="' + fold.dataset.free + '"]');
+    eq(fdRow.dataset.hours, "1", "a plan on a run opens its hour first");
+    has(fdRow.textContent, "planning", "and says planning on that hour's row");
+    await fdP;
+    api = apiWas;
+    fdRow = $("#mogrid").querySelector('.magfree[data-free="' + fold.dataset.free + '"]');
+    ok(fdRow.classList.contains("bad") && !fdRow.classList.contains("fold"), "the failure is on a one-hour row, not a fold");
+    has(fdRow.textContent, "Not planned", "saying why");
+    eq(st.all.length, fdN, "nothing written");
+    hideToast();
+  }
+
+  // offline: the amber line says what is read from the device
+  ob.offline = true;
+  calRepaint();
+  has($("#mogrid").querySelector(".magoff").textContent, "sent when the link is back", "offline, an amber line says the plan waits");
+  ob.offline = false;
+  calRepaint();
+  eq($("#mogrid").querySelector(".magoff"), null, "and goes with the link back");
+
+  // "plan an hour": the voice order and the palette row
+  eq(vMatch(vWords("plan an hour"), 0).cmd.fn.toString().indexOf("calPlanFree") >= 0, true, "\"plan an hour\" is a spoken order");
+  eq(vMatch(vWords("plan the next free hour"), 0).cmd.say, "plan an hour", "by another name too");
+  // on another day: the day's free hours opened, none guessed
+  calOpen("day", calShiftDays(planDay, 1));
+  if (!(calSchedIndex().get(calAt) || []).length && !(calIndex().get(calAt) || []).length) {
+    var nB2 = st.all.length;
+    eq($("#mogrid").querySelectorAll(".magfree[data-free]").length, 1, "another day ahead starts folded");
+    eq(await calPlanFree(), null, "on a day not today it plans nothing");
+    await settle(4);
+    eq(st.all.length, nB2, "writing nothing, not the night's 00:00");
+    eq($("#mogrid").querySelectorAll(".magfree[data-free]").length, 24, "it opens the day's free hours");
+    has($("#toast").textContent, "which hour", "and asks which");
+    hideToast();
+  }
+  // on today: the next free hour from the hour in hand (the plan stood in for)
+  var cpaWas = calPlanAt, cpaGot = null;
+  calPlanAt = function (h) { cpaGot = h; return Promise.resolve(null); };
+  calOpen("day", calToday());
+  var tdFree = calDayItems(calToday(), calIndex().get(calToday()) || [], calSchedIndex().get(calToday()) || [],
+                           new Date().getHours() * 60 + new Date().getMinutes())
+    .filter(function (it) { return it.free !== undefined && it.free >= new Date().getHours(); });
+  await calPlanFree();
+  calPlanAt = cpaWas;
+  if (tdFree.length) eq(cpaGot, tdFree[0].free, "on today it plans the next free hour from now");
+  else eq(cpaGot, null, "on today with no free hour left, nothing");
+  hideToast();
+  TEST.mobile = false;
+  calOpen("day", planDay);
+  ok(!!$("#mogrid").querySelector(".calday.sched"), "the desk's day keeps its hour grid");
+  ok(!!$("#mogrid").querySelector(".calsched .calblk"), "with the planned hours as blocks");
+  calOpen("week", wkDay);
+  ok(!!$("#mogrid").querySelector(".calwk"), "and the desk's week its seven columns");
+  calOpen("day", calShiftDays(calToday(), 12));   // back where the next check expects it
 
   console.log("-- the calendar: it shows what the filters show --");
   var calTotal = function () {
@@ -4431,7 +5624,7 @@ async function answerPrompt(text) {
   fillKinds();
   click($("#series").querySelector('.sx[data-x="harness_weight"]'));
   ok($("#ov").classList.contains("on"), "the strip's arrow opens the explorer");
-  has($("#dlgh").textContent, "explore", "under its own heading");
+  eq($("#dlgh").textContent, "Readings", "under its own heading");
   var xpan = $("#xpanels").querySelector(".xpanel");
   eq(xpan.querySelector(".xq").value, "harness_weight", "one panel, querying that kind");
   ok(xpan.querySelector("svg.xsvg path.xline"), "drawn as a line");
@@ -4472,20 +5665,22 @@ async function answerPrompt(text) {
   closeOv();
   openExplore();
   ok($("#x_cat").hasAttribute("open"), "opened from nowhere in particular, the explorer lists the metrics there are");
-  var crow = $("#x_cats").querySelectorAll(".xcrow").filter(function (r) { return r.textContent.indexOf("harness_weight") >= 0; })[0];
-  ok(crow, "one row per series");
+  var crow = $("#x_cats").querySelectorAll(".xcrow").filter(function (r) { return r.textContent.indexOf("Harness weight") >= 0; })[0];
+  ok(crow, "one row per series, by the kind's name (rule:words)");
   has(crow.textContent, "3 readings", "saying how many readings it has");
   ok(crow.querySelector("svg.kcs"), "with its line");
   var catq = $("#x_catq");
   ok(catq, "the metrics can be filtered");
   input(catq, "kg");
-  var kgrow = $("#x_cats").querySelectorAll(".xcrow").filter(function (r) { return r.textContent.indexOf("harness_weight") >= 0; })[0];
+  var kgrow = $("#x_cats").querySelectorAll(".xcrow").filter(function (r) { return r.textContent.indexOf("Harness weight") >= 0; })[0];
   ok(kgrow, "by a word in a reading's title");
-  has(kgrow.textContent, "1 reading ", "cut down to the readings that match");
+  has(kgrow.textContent, "1 reading,", "cut down to the readings that match");
+  ok(!/\d{4}-\d\d-\d\d/.test(kgrow.querySelector(".xcm").textContent), "its span in words, not ISO (rule:words)");
   eq(kgrow.querySelector("[data-cshow]").getAttribute("data-cshow"), 'harness_weight{"kg"}',
      "charting the kind with a title matcher");
+  eq(kgrow.querySelector("[data-cadd]").textContent, "+ chart", "the row adds a chart, the dialog's own word (rule:words)");
   click(kgrow.querySelector("[data-cadd]"));
-  eq(xp.panels[xp.panels.length - 1].q, 'harness_weight{"kg"}', "which + panel adds as its own panel");
+  eq(xp.panels[xp.panels.length - 1].q, 'harness_weight{"kg"}', "which + chart adds as its own panel");
   eq($("#xpanels").querySelectorAll(".xpanel")[xp.panels.length - 1].querySelectorAll("circle.xdot").length, 1,
      "drawing only that reading");
   $("#x_cat").open = true;
@@ -4497,7 +5692,7 @@ async function answerPrompt(text) {
   has($("#x_cats").textContent, "no kind is called that", "and nothing matching says so");
   input(catq, "");
   click($("#x_cat").querySelector('[data-cadd="harness_weight"]'));
-  eq(xp.panels[xp.panels.length - 1].q, "harness_weight", "+ panel adds it");
+  eq(xp.panels[xp.panels.length - 1].q, "harness_weight", "+ chart adds it");
   click($("#x_cat").querySelector('[data-cshow="harness_weight"]'));
   eq(xp.panels.length, 1, "show makes it the only panel");
   eq($("#xpanels").querySelector(".xq").value, "harness_weight", "and charts it");
@@ -5244,11 +6439,14 @@ async function answerPrompt(text) {
   openStats();
   var cntCard = $("#dlg").querySelector('[data-counter="diaper"]');
   ok(/Counters/.test($("#dlg").innerHTML) && cntCard, "Stats has a Counters section, a card per thing");
-  has(cntCard && cntCard.textContent, "2diaper today · 3 in 7 days", "today and the week");
+  has(cntCard && cntCard.textContent, "2diaper today3 in 7 days", "today and the week, each on its own line");
   ok($("#dlg").querySelector('[data-counter="feed"]'), "and the feed");
   closeOv();
   // the palette's "count …": which, as chips of the ones counted before
   ok(paletteRows().some(function (r) { return /^count …/.test(r.label); }), "a palette row “count …”");
+  // TEMPORARY, with the iOS AutoFill bisect in index.html: its eight rows
+  ok(paletteRows().filter(function (r) { return /^iOS AutoFill test: [1-8] · /.test(r.label); }).length === 8,
+     "the palette's eight iOS AutoFill test rows");
   openCounter();
   var cntChip = $("#cnt_known").querySelector('[data-cnt="diaper"]');
   ok(cntChip, "it offers the things counted before");
@@ -5583,6 +6781,8 @@ async function answerPrompt(text) {
 })().catch(function (e) { console.log("SUITE F THREW: " + e + "\n" + (e && e.stack)); });
 
 /* ===================== suite E: failure modes ===================== */
+// the page's speech queue state, taken here: suite E has a `say` of its own
+var sayQ = say;
 (async function () {
   if (!await waitFlag("__phaseF")) return;
   closeEditor();
@@ -5798,7 +6998,7 @@ async function answerPrompt(text) {
   await loadAll();
   await settle(30);
   eq(st.bodies, 0, "nothing is left pending");
-  ok(st.all.every(function (e) { return !needsBody(e); }), "every row has its body");
+  ok(st.all.every(function (e) { return !bodyMissing(e); }), "every row has its body");
   eq($("#list").querySelectorAll(".sn.pend").length, 0, "no pending snippets on screen");
   ok($("#count").textContent.indexOf("bodies loading") < 0, "and the count stops saying so");
   var cached2 = JSON.parse(localStorage.getItem("lcars.cache"));
@@ -5849,7 +7049,7 @@ async function answerPrompt(text) {
   eq(gets("/dump?") - mDumps, 1, "one /dump");
   eq(gets("/entries?") - mPages, 1, "beside the one metadata page that paints the list first");
   eq(st.all.length, DB.length, "every row is in");
-  ok(st.all.every(function (e) { return !needsBody(e); }), "each with its body");
+  ok(st.all.every(function (e) { return !bodyMissing(e); }), "each with its body");
   eq(st.bodies, 0, "so there is no sweep left to run");
   var mDesc = true;
   for (var mi = 1; mi < st.all.length; mi++) if (st.all[mi - 1].id <= st.all[mi].id) mDesc = false;
@@ -5866,7 +7066,7 @@ async function answerPrompt(text) {
   ok(await mirrorPaint(), "the mirror painted");
   eq(TEST.fetches.length - mWas, 0, "with no request at all");
   eq(st.all.length, DB.length, "the whole journal");
-  ok(st.all.every(function (e) { return !needsBody(e); }), "bodies included");
+  ok(st.all.every(function (e) { return !bodyMissing(e); }), "bodies included");
   ok($("#list").querySelectorAll(".item").length > 0, "on screen");
   has($("#hstat").textContent, "syncing", "and the header says it is catching up");
 
@@ -6247,6 +7447,140 @@ async function answerPrompt(text) {
   ok(!$("#ov").classList.contains("on"), "Escape closes the graph too");
   ok(!gv.open, "leaving nothing running behind it");
 
+  /* ---------- the list's rows: text, names and the id (UI review slice 1, rule:words) ---------- */
+  console.log("\n-- a row shows the entry, not its source, and keeps its id --");
+  eq(plainPreview("- **Morning** review of the [[LCARS UI]] plan\ntype:: log\n## Next\n- [ ] water the `plants` [site](https://x.y)"),
+     "Morning review of the LCARS UI plan Next water the plants site", "markup, properties and boxes stripped from the preview");
+  eq(plainPreview("…ng [[LCARS"), "…ng LCARS", "half a link from a cut loses its brackets");
+  eq(kindName("personal_log"), "Personal log", "a slug read as a name");
+  eq(kindName("WAKE_LOG"), "Wake log", "shouted slugs too");
+  eq(kindName(""), "(no kind)", "and no kind says so");
+  clearFilters();
+  closeEditor();
+  refresh();
+  var rowsNow = $("#list").querySelectorAll(".item");
+  ok(rowsNow.length > 0, "the list has rows to read");
+  var idMiss = 0, kindSlug = 0, bytes = 0;
+  for (var ri = 0; ri < rowsNow.length; ri++) {
+    var rr = rowsNow[ri], nid = rr.querySelector(".nid"), kc = rr.querySelector(".kchip");
+    if (!nid || nid.textContent !== rr.dataset.id) idMiss++;
+    var re = st.byId.get(Number(rr.dataset.id));
+    if (kc && re && re.kind && /_/.test(re.kind) && kc.textContent === re.kind) kindSlug++;
+    if (/\b\d+b\b/.test(rr.querySelector(".m").textContent)) bytes++;
+  }
+  eq(idMiss, 0, "every row shows its entry's id (the captain's condition)");
+  eq(kindSlug, 0, "no row names its kind by the slug");
+  eq(bytes, 0, "and no row carries a byte count");
+
+  /* rule:words past the list: the editor, the reader, Tasks and the filters
+     drawer show a kind by its name, and no #id or byte count, outside
+     Details, code, the fields and the entries' own text (.md) (the analysis
+     of 0.321.0, finding 1; slice A). */
+  console.log("-- the reader, the editor, Tasks and the filters: the captain's words --");
+  var wSlugs = {};
+  st.all.forEach(function (e) { if (e.kind && /_/.test(e.kind)) wSlugs[e.kind.toLowerCase()] = 1; });
+  var wSlugRe = new RegExp("(^|[^\\w])(" + Object.keys(wSlugs).map(function (k) {
+    return k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join("|") + ")(?![\\w])", "i");
+  function wText(n) {
+    if (n.nodeType === 3) return n.data;
+    // .md is an entry's own text, rendered (the reader's body, a task's line):
+    // the captain's words, which may well say "#7454"; the rule is the page's
+    if (n.nodeType !== 1 || n.id === "eddet" || n.hidden || (n.style && n.style.display === "none") ||
+        (n.classList && n.classList.contains("md")) ||
+        /^(CODE|PRE|INPUT|TEXTAREA|SELECT|OPTION|SCRIPT|STYLE|TITLE|title)$/.test(n.tagName)) return "";
+    return n.childNodes.map(wText).join(" ");
+  }
+  // a "#123" an entry's own title holds is the captain's words, shown wherever
+  // the title is (a Tasks row, the side): only the rest is an id the page put there
+  var wTitleNums = {};
+  st.all.forEach(function (e) {
+    (String(e.title || "").match(/#\d{2,}/g) || []).forEach(function (m) { wTitleNums[m] = 1; });
+  });
+  function wFound(root) {
+    var t = root ? wText(root) : "", out = [];
+    var s = Object.keys(wSlugs).length && t.match(wSlugRe);
+    if (s) out.push("slug " + s[2]);
+    var i = (t.match(/#\d{2,}/g) || []).filter(function (m) { return !wTitleNums[m]; });
+    if (i.length) out.push("id " + i[0]);
+    var b = t.match(/\b\d[\d,]*\s?(b|bytes)\b/i);
+    if (b) out.push("bytes " + b[0]);
+    // an ISO date is the database's too (the design pass): "Thu 24 Sep, 20:00"
+    var iso = t.match(/\b\d{4}-\d\d-\d\d\b/);
+    if (iso) out.push("ISO date " + iso[0]);
+    return out.join(", ");
+  }
+  var wRow = st.all.filter(function (e) { return e.kind && /_/.test(e.kind); })[0];
+  ok(!!wRow, "a row whose kind is a slug with an underscore, to read");
+  clearFilters();
+  select(wRow.id);
+  setRead(true);
+  var wRd = wFound($("#readbody"));
+  ok(!wRd, "the reader names no slug, #id or byte count (" + wRd + ")");
+  setRead(false);
+  var wEd = wFound($("#editpane"));
+  ok(!wEd, "nor does the editor (" + wEd + ")");
+  closeEditor();
+  openTasks();
+  var wTk = wFound($("#dlg"));
+  ok(!wTk, "nor Tasks (" + wTk + ")");
+  closeOv();
+  openDrawer();
+  var wSd = wFound($("#side"));
+  ok(!wSd, "nor the filters drawer (" + wSd + ")");
+  has($("#side").textContent, "Written", "whose date section is Written, not Created (UTC)");
+  closeDrawer();
+
+  /* rule:words, the design pass's slice 1: the screens past slice A's -
+     Statistics, Share, the palette, Templates, What's new, the stack,
+     ambient mode, Match options, select mode's rows, an old entry's
+     date in the reader's head (Reports, Resurface, Media, the kind
+     pickers and the offline capsule are checked where those are). */
+  console.log("-- Statistics, Share, Templates, What's new, the stack, ambient: the captain's words --");
+  clearFilters();
+  openStats(true);
+  for (var wsI = 0; wsI < 400 && $("#st_words"); wsI++) { await pump(2); runTimers(5); }
+  var wSt = wFound($("#dlg"));
+  ok(!wSt, "Statistics names no slug, #id, byte count or ISO date (" + wSt + ")");
+  ok(!/\d+k\s*content/i.test($("#dlg").textContent), "and has no byte readout");
+  closeOv();
+  openShareSheet(wRow.id);
+  eq($("#dlgh").textContent, "Share \u201c" + shownTitleText(wRow) + "\u201d", "Share is titled by the entry's name");
+  closeOv();
+  var wTpls = templateRowsByUse();
+  if (wTpls.length) {
+    openTemplates();
+    var wTp = wFound($("#pkrows"));
+    ok(!wTp, "the templates' rows name no size or number (" + wTp + ")");
+    closeOv();
+  }
+  openWhatsNew(); await settle(2);
+  var wWn = wFound($("#wnrows"));
+  ok(!wWn, "What's new dates its releases in words (" + wWn + ")");
+  closeOv();
+  stackOpen(wRow.id, true);
+  var wSk = wFound($("#stackwrap"));
+  ok(!wSk, "a pinned panel's bar and facts carry no #id (" + wSk + ")");
+  stackClose(wRow.id);
+  ambStart();
+  var wAm = wFound($("#ambmem"));
+  ok(!wAm, "ambient mode's memory: no slug or #id (" + wAm + ")");
+  ok($("#ambmem .ambmh") && $("#ambmem .ambmh").textContent.indexOf("\u00b7") < 0, "and its facts apart, not dotted");
+  ambStop();
+  eq([$("#fCase"), $("#fWord"), $("#fInv")].map(function (c) { return c.parentNode.textContent.trim(); }).join("|"),
+     "Match case|Whole words|Not matching", "Match options say what they do, not grep's Aa, \\b and -v");
+  eq($("#q").getAttribute("placeholder"), "Search the journal", "the search says what it is for");
+  pickMode(true);
+  var wPk = $("#list").querySelector(".item .nid");
+  ok(wPk && wPk.querySelector(".pkbox") && !/\d/.test(wPk.textContent), "select mode: the box in the id's place, no number");
+  pickMode(false);
+  var wOld = st.all.filter(function (e) { return !e.deleted && entryAge(e) > 30 && e.kind !== "report"; })[0];
+  if (wOld) {
+    select(wOld.id); setRead(true);
+    var wOh = wFound($("#readbody"));
+    ok(!wOh, "an old entry's reader dates it in words (" + wOh + ")");
+    closeEditor();
+  }
+
   /* ---------- multi-word AND search ---------- */
   console.log("\n-- several words all have to match --");
   clearFilters();
@@ -6304,6 +7638,20 @@ async function answerPrompt(text) {
   input($("#q"), "quokka");
   refresh();
   has(snippet(andRow), "quokka", "the snippet excerpts around the hit");
+  // the excerpt is cut in the plain text (slice D): a hit inside a link's
+  // text, or past an image, never leaves the link's markup or URL behind
+  var andC = andRow.content;
+  andRow.content = "I read [the article on quokka](https://example.com/q-article) ![a pic](media/x.png) today";
+  var lnk = snippet(andRow);
+  has(lnk, "quokka", "a hit inside a link's text is in the excerpt");
+  ok(!/\]\(|https?:|[\[\]]|\.png/.test(lnk), "and the excerpt carries no link or image markup: " + lnk);
+  var andT = andRow.title;
+  andRow.title = "";
+  eq(shownTitle(andRow).t, "I read the article on quokka today", "an untitled row's borrowed title drops the link's markup and the image");
+  andRow.title = andT;
+  andRow.content = "kind:: quokka\nthe body below";
+  ok(snippet(andRow).indexOf("::") < 0, "a hit on a property line shows the row's plain text, not the line");
+  andRow.content = andC;
 
   input($("#q"), "/zebra.*quokka/");
   refresh();
@@ -6457,7 +7805,8 @@ async function answerPrompt(text) {
   console.log("-- and the reader shows them --");
   select(target.id);
   await drainExtras();
-  has($("#rd_back").innerHTML, "Linked from · 2", "the reader heads the section with a count");
+  has($("#rd_back").innerHTML, '<span>Linked from</span><span class="bln">2</span>',
+      "the reader heads the section with a count, a fact of its own beside the label");
   has($("#rd_back").innerHTML, "#" + from1.id, "listing the entry that links here");
   var blrow = $("#rd_back").querySelector(".blrow");
   ok(blrow, "each backlink is a row");
@@ -6754,8 +8103,10 @@ async function answerPrompt(text) {
   click($("#bDel"));
   await settle(2);
   has($("#dlg").innerHTML, "Delete this entry", "Delete opens the themed question");
-  has($("#dlg").innerHTML, "#" + victim.id, "naming the entry");
-  has($("#dlg").innerHTML, "deleted = 1", "and saying what a soft delete is");
+  has($("#dlg").textContent, shownTitleText(victim), "naming the entry by its title");
+  ok($("#dlg").textContent.indexOf("#" + victim.id) < 0 && $("#dlg").textContent.indexOf("deleted = 1") < 0,
+     "no id, no column (rule:words)");
+  has($("#dlg").textContent, "brought back", "and saying it can be brought back");
   ok(await answerDialog(false), "which can be answered no");
   await settle(6);
   ok(!dbFind(victim.id).deleted, "answering no leaves the row alone");
@@ -6903,7 +8254,23 @@ async function answerPrompt(text) {
   ok(dAges.every(function (v, i) { return !i || dAges[i - 1] >= v; }),
      "finished ones read newest first, like the journal");
   eq(taskRows("all").length, taskIndex().length, "all means all of them");
-  has($("#tkrows").innerHTML, 'class="task', "rows are painted by the renderer itself");
+  has($("#tkrows").innerHTML, 'class="tkt md"', "rows are painted by the renderer itself");
+  // rule:words (the design pass's slice 2): the marker is the bar's, by its
+  // name with the count apart; a row has no marker chip, the kind by its
+  // name in its colour (no badge), the age in words, amber from 60 days
+  var tkHead = $("#tkrows").querySelector(".shead");
+  ok(tkHead && tkHead.textContent.indexOf(" · ") < 0 && /^[A-Z][a-z]/.test(tkHead.textContent),
+     "the bar names the marker in words, its count apart (" + (tkHead && tkHead.textContent) + ")");
+  ok(!$("#tkrows").querySelector(".tkrow .task") && !$("#tkrows").querySelector(".tkrow .kbadge, .tkrow .kb"),
+     "no marker chip and no kind badge on a row");
+  var tkRows = Array.prototype.slice.call($("#tkrows").querySelectorAll(".tkrow"));
+  var tkOne = tkRows[0], tkE = dbFind(Number(tkOne.dataset.id));
+  eq(tkOne.querySelector(".tkk").textContent, kindName(tkE.kind || ""), "the kind by its name");
+  eq(tkOne.querySelector(".tkage").textContent, agoWords(tkE.created_at_utc), "the age in words");
+  ok(tkRows.every(function (r) { return !/\d{4}-\d\d-\d\d|\d\d:\d\d/.test(r.textContent); }), "no ISO date, no clock time on a row");
+  ok(tkRows.every(function (r) {
+    return r.querySelector(".tkage").classList.contains("old") === (entryAge(st.byId.get(Number(r.dataset.id))) >= 60); }),
+     "amber exactly from 60 days");
   has($("#tknote").textContent, "entries", "the note counts the entries behind the lines");
 
   console.log("-- tasks: the board hands over --");
@@ -6914,6 +8281,134 @@ async function answerPrompt(text) {
   await settle(3);
   ok(!$("#ov").classList.contains("on"), "clicking a task closes the board");
   eq(st.sel && st.sel.id, tkId, "and opens the entry the task lives in");
+
+  /* the tick (the design pass's slice 2): a tap on the ring finishes the
+     line in place by the reader's own write, the row says so in the same
+     frame, Undo puts it back; a failed write rings the row again and says so
+     there */
+  console.log("-- tasks: the tick --");
+  openTasks();
+  await settle(3);
+  var tick = $("#tkrows").querySelector(".tktick");
+  ok(tick, "every row has a tick");
+  var tkRow = tick.closest(".tkrow"), tkEid = Number(tick.dataset.eid), tkLn = Number(tick.dataset.ln);
+  var tkLine = function () { return dbFind(tkEid).content.replace(/\r\n?/g, "\n").split("\n")[tkLn]; };
+  var tkWas = TASK_LINE.exec(tkLine())[1];
+  has(tick.getAttribute("aria-label"), "Finish: ", "named for what it does");
+  var ticking = taskTick(tick);
+  ok(tick.classList.contains("done") && tkRow.classList.contains("ticked"), "the row is ticked in the tap, before the write");
+  await ticking;
+  await settle(4);
+  eq(TASK_LINE.exec(tkLine())[1], "DONE", "the line is DONE in the entry");
+  ok($("#ov").classList.contains("on"), "and the board stays open");
+  has($("#toast").textContent, "Done: ", "the toast says what was done");
+  ok($("#toast").textContent.indexOf("#" + tkEid) < 0, "without an id (rule:words)");
+  click($("#toast").querySelector("button"));
+  await settle(6);
+  eq(TASK_LINE.exec(tkLine())[1], tkWas, "Undo puts the old marker back");
+  ok(!tick.classList.contains("done") && !tkRow.classList.contains("ticked"), "and the ring is open again");
+  var apiTk = api;
+  api = function (path, o) { if (o && o.method === "PUT") return Promise.reject(new Error("offline")); return apiTk(path, o); };
+  await taskTick(tick);
+  await settle(3);
+  api = apiTk;
+  ok(!tick.classList.contains("done"), "a failed write rings the row again");
+  has(tkRow.textContent, "not saved", "and says so on the row");
+  eq(TASK_LINE.exec(tkLine())[1], tkWas, "with the line as it was");
+  await taskTick(tick);
+  await settle(4);
+  ok(!tkRow.querySelector(".tkfail"), "the tick is the Retry");
+  eq(TASK_LINE.exec(tkLine())[1], "DONE", "and a retry writes it");
+  click($("#toast").querySelector("button"));
+  await settle(6);
+  eq(TASK_LINE.exec(tkLine())[1], tkWas, "put back for the tests after");
+  closeOv();
+  await settle(2);
+
+  /* the write path (Zimmerman on slice 2): two ticks on one entry both land,
+     one at a time; a line is found by its text, never another written in its
+     place; a refusal draws the board again; a fenced line is code, no task */
+  console.log("-- tasks: the tick's write path --");
+  var twE = dbFind(tkEid), twSt = st.byId.get(tkEid), twWas = twE.content, twMod = twE.last_modified_at_utc;
+  var twSet = function (body, mod) {
+    twE.content = body; twSt.content = body; clen(twE);
+    twE.last_modified_at_utc = twSt.last_modified_at_utc = mod || twE.last_modified_at_utc; st.bodyGen++;
+  };
+  var twBody = "first line\nTODO alpha task\nTODO beta task\n```\nTODO in a fence\n```\nend";
+  var twTicks = function () { return Array.prototype.filter.call($("#tkrows").querySelectorAll(".tktick"),
+    function (b) { return Number(b.dataset.eid) === tkEid; }); };
+  var twLn = function (i) { return dbFind(tkEid).content.replace(/\r\n?/g, "\n").split("\n")[i]; };
+  twSet(twBody);
+  var twIdx = taskIndex().filter(function (t) { return t.e.id === tkEid; });
+  eq(twIdx.map(function (t) { return t.text; }).join("|"), "alpha task|beta task",
+     "a line inside a code fence is no task on the board, as the reader draws it");
+  openTasks();
+  await settle(3);
+  eq(twTicks().length, 2, "the entry's two lines, a tick each");
+  var tw1 = taskTick(twTicks()[0]), tw2 = taskTick(twTicks()[1]);
+  await tw1; await tw2;
+  await settle(6);
+  eq(twLn(1) + "|" + twLn(2), "DONE alpha task|DONE beta task", "two ticks on one entry: both written");
+  eq(twLn(4), "TODO in a fence", "and the fenced line left alone");
+  // the server moves the lines (another writer): refused, the board drawn again
+  twSet(twBody);
+  closeOv(); openTasks();
+  await settle(3);
+  var twOld = twTicks()[1];
+  eq(twOld.dataset.ln, "2", "the beta line at its place");
+  twE.content = "inserted above\n" + twBody; clen(twE); twE.last_modified_at_utc = "2099-02-02 00:00:00";
+  await taskTick(twOld);
+  await settle(4);
+  eq(twLn(3), "TODO beta task", "a refused tick writes nothing");
+  ok(!twOld.isConnected || twOld.parentNode === null || twTicks()[1] !== twOld, "and the board is drawn again");
+  eq(twTicks()[1].dataset.ln, "3", "from what the entry now says");
+  // the page's body moves under a row not drawn again (a sync): the line is
+  // found by its text, not written at the old index
+  var twStale = twTicks()[1];
+  twSet("one\ntwo\n" + twE.content);
+  await taskTick(twStale);
+  await settle(6);
+  eq(twLn(5) + "|" + twLn(4), "DONE beta task|TODO alpha task", "the tick finds its line by its text");
+  // an unsaved edit of the same entry: said on the row in the toast's words
+  twSet(twBody);
+  closeOv(); openTasks();
+  await settle(3);
+  var twSel = st.sel;
+  st.sel = twSt; document.body.classList.add("dirty");
+  await taskTick(twTicks()[0]);
+  await settle(2);
+  document.body.classList.remove("dirty"); st.sel = twSel;
+  has(twTicks()[0].closest(".tkrow").textContent, "save or revert your edit first", "an edit in the way says what to do");
+  ok(twTicks()[0].closest(".tkrow").textContent.indexOf("tap the ring") < 0, "not to tap again");
+  eq(twLn(1), "TODO alpha task", "and nothing is written");
+  // Undo after the board was drawn again: the write is put back and the
+  // board shows it, not the detached old tick
+  var twU = twTicks()[0];
+  await taskTick(twU);
+  await settle(4);
+  eq(twLn(1), "DONE alpha task", "ticked");
+  taskBoardDraw();
+  ok(!twU.isConnected || twU.parentNode === null || twTicks().indexOf(twU) < 0, "the board drawn again");
+  click($("#toast").querySelector("button"));
+  await settle(6);
+  eq(twLn(1), "TODO alpha task", "Undo puts it back");
+  var twU2 = twTicks().filter(function (b) { return b.dataset.text === "alpha task"; })[0];
+  ok(twU2 && !twU2.classList.contains("done") && !twU2.closest(".tkrow").classList.contains("ticked"),
+     "and the board's row for it is open again");
+  // twins: the row's marker first, so a DONE twin is not called done
+  twSet("x\nDONE gamma\nTODO gamma");
+  closeOv(); openTasks();
+  await settle(3);
+  var twG = Array.prototype.filter.call($("#tkrows").querySelectorAll(".tktick"), function (b) {
+    return Number(b.dataset.eid) === tkEid && b.dataset.text === "gamma"; })[0];
+  eq(twG && twG.dataset.ln, "2", "the open twin's tick");
+  twSet("x\nTODO gamma\nDONE gamma");
+  await taskTick(twG);
+  await settle(5);
+  eq(twLn(1) + "|" + twLn(2), "DONE gamma|DONE gamma", "the moved TODO twin is the one written, not the DONE");
+  closeOv();
+  twSet(twWas, twMod);
+  await settle(2);
 
   console.log("-- tasks: the scope segment --");
   openTasks();
@@ -6926,6 +8421,34 @@ async function answerPrompt(text) {
   click($("#tkscope").querySelector('[data-v="open"]'));
   await settle(2);
   closeOv();
+  await settle(2);
+
+  /* the phone folds the board's filters to one line (the review's finding 7):
+     the folding is the dialog's class, acted on by CSS under 820px; the line's
+     button opens and shuts them and names what is picked */
+  console.log("-- tasks: the folded filters --");
+  taskFiltersOpen = false;
+  openTasks();
+  await settle(3);
+  ok($("#dlg").classList.contains("tkfolded"), "the filters start folded");
+  eq($("#tkfold").getAttribute("aria-expanded"), "false", "and the line's button says so");
+  eq($("#tkpk").textContent, "Open", "naming the scope, and no filter picked");
+  ok($("#tkfold").parentNode === $("#tkscope").parentNode, "on the scope's own line");
+  click($("#tkfold"));
+  ok(!$("#dlg").classList.contains("tkfolded") && $("#tkfold").getAttribute("aria-expanded") === "true",
+     "a tap unfolds them");
+  input($("#tkq"), "boiler");
+  await settle(4);
+  has($("#tkpk").textContent, "“boiler”", "the search is named on the line");
+  input($("#tkq"), "");
+  await settle(4);
+  click($("#tkfold"));
+  ok($("#dlg").classList.contains("tkfolded"), "a second tap folds them");
+  closeOv();
+  taskFilters(true);
+  ok($("#tkfold") && !$("#dlg").classList.contains("tkfolded"), "the voice order opens the board unfolded");
+  closeOv();
+  taskFiltersOpen = false;
   await settle(2);
 
   /* The board's own filter strip: a search read by the list's rules but asked
@@ -6956,7 +8479,7 @@ async function answerPrompt(text) {
   ok($("#tkqerr").textContent.length > 0, "a regex that does not parse says so");
   input($("#tkq"), "zzqqxxnothing");
   await settle(4);
-  has($("#tkrows").textContent, "no open tasks", "a search nothing matches says so");
+  has($("#tkrows").textContent, "No open tasks", "a search nothing matches says so");
   input($("#tkq"), "");
   await settle(4);
 
@@ -6970,6 +8493,7 @@ async function answerPrompt(text) {
   await settle(4);
   eq(st.kinds.join(","), pickK, "a tap pins the kind on the page's own filter");
   eq(taskWhere, "view", "and puts the board under it");
+  has($("#tkpk").textContent, kindName(rawKind(pickK)), "and the folded line names it");
   ok($("#tkwhere").style.display !== "none", "the in-view switch is offered once something is pinned");
   ok($("#tkkinds").querySelector('.kc[data-k="' + pickK + '"]').classList.contains("on"),
      "the chip is lit");
@@ -7018,7 +8542,9 @@ async function answerPrompt(text) {
   closeOv();
   await settle(2);
   var live = st.all.filter(function (e) { return !e.deleted; });
-  var eA = live[0], eB = live[live.length - 1];
+  // the newest, and the oldest of another kind: which kind the sample's
+  // oldest row has is the journal's, not the check's
+  var eA = live[0], eB = live.slice().reverse().filter(function (e) { return e.kind !== eA.kind; })[0];
   var gone = st.all.filter(function (e) { return e.deleted; })[0];
   ok(eA && eB && eA.kind !== eB.kind, "two live entries of different kinds to hang files off");
   var mrow = function (id, eid, mime, name, at) {
@@ -7218,55 +8744,167 @@ async function answerPrompt(text) {
   shOwn.forEach(function (e) { e.deleted = 0; });
 
   /* ---------- the reports ----------
-     GET /reports, drawn as the server sends it (newest first): a link per
-     report to its file under /media/, opening a tab of its own, and a tap
-     marked at once. */
-  console.log("\n-- reports --");
-  REPORTS = null;
-  reportsAll = null;
-  openReports();
-  await settle(4);
-  has($("#rprows").textContent, "no GET /reports", "a server without the route says so");
-  closeOv();
-  await settle(2);
+     A report is an entry of kind report (docs/design/reports-as-entries.md):
+     its first line "report:: <type> <rel>", a blank line, the file's text
+     for html, md, txt and csv. The reader draws it by its type, the list's
+     preview is its type and never the marker or the markup, and the Reports
+     page is these entries, newest first, with no GET /reports. */
+  console.log("\n-- reports: entries of kind report --");
   REPORTS = [
     { path: "media/reports/2026/10/fleet-status-1a2b3c4d.html", title: "Fleet <status>", type: "html",
       bytes: 2048, published_utc: "2026-10-15 09:30:00" },
     { path: "media/reports/2026/09/weights-9f8e7d6c.csv", title: "Weights", type: "csv",
       bytes: 512, published_utc: "2026-09-02 08:00:00" },
-    { path: "media/reports/2026/08/audit-0a0b0c0d.pdf", title: "Audit", type: "pdf",
-      bytes: 9000, published_utc: "2026-08-01 08:00:00" },
   ];
+  var rpAt = function (min) { return fmtUtc(new Date(Date.now() + min * 60000)); };
+  var rpHtml = await plant({ kind: "report", title: "Fleet <status>", created_at_utc: rpAt(5),
+    content: "report:: html media/reports/2026/10/fleet-status-1a2b3c4d.html\n\n" +
+      "<!doctype html><html><head><style>body{color:red}</style><script>parent.secret=1<\/script></head>" +
+      "<body><h1>Fleet \"status\" &amp; more</h1><p>All warp cores nominal.</p></body></html>" });
+  var rpMd = await plant({ kind: "report", title: "Weekly review", created_at_utc: rpAt(4),
+    content: "report:: md media/reports/2026/10/weekly-review-0b0b0b0b.md\n\n# Weekly review\n\nThe **sleep** held at 7h.\n" });
+  var rpCsv = await plant({ kind: "report", title: "Weights", created_at_utc: rpAt(3),
+    content: "report:: csv media/reports/2026/09/weights-9f8e7d6c.csv\n\ndate,kg\n2026-09-01,<80>\n" });
+  var rpPdf = await plant({ kind: "report", title: "Audit", created_at_utc: rpAt(2),
+    content: "report:: pdf media/reports/2026/08/audit-0a0b0c0d.pdf" });
+  var rpBig = await plant({ kind: "report", title: "Big pictures", created_at_utc: rpAt(1),
+    content: "report:: html media/reports/2026/07/big-pictures-0c0c0c0c.html\n" });
+  var rpOdd = await plant({ kind: "report", title: "Hand edited", created_at_utc: rpAt(0),
+    content: "a report whose first line was edited away\n\nreport:: html media/reports/2026/07/x-0d0d0d0d.html" });
+
+  var rpP = reportOf(rpHtml);
+  eq(rpP && rpP.type, "html", "the marker's type is read");
+  eq(rpP && rpP.rel, "media/reports/2026/10/fleet-status-1a2b3c4d.html", "and its file");
+  eq(rpHtml.content.slice(rpP.at, rpP.at + 15), "<!doctype html>", "the text starts after the blank line");
+  ok(!rpP.link, "an HTML report with its text is shown in the page");
+  ok(reportOf(rpPdf).link && reportOf(rpBig).link, "a PDF, and an HTML one of its first line alone, are links");
+  eq(reportOf(rpOdd), null, "a first line edited out of shape is an entry like any other");
+  eq(reportOf({ kind: "personal_log", content: rpHtml.content }), null, "and so is the marker in another kind");
+  eq(reportOf({ kind: "report" }), null, "a body not loaded is not read");
+
+  console.log("\n-- reports: the list's preview --");
+  eq(snippet(rpHtml), "HTML report", "an HTML report's preview is its type, no markup, no marker");
+  has(snippet(rpMd), "MD report · Weekly review The sleep held", "a markdown one's, its type and its words");
+  ok(snippet(rpMd).indexOf("report::") < 0 && snippet(rpMd).indexOf("**") < 0, "never the marker line or the source");
+  eq(snippet(rpPdf), "PDF report · opens as a file", "a PDF's says it is a file");
+  has(snippet(rpBig), "opens as a page", "one too big for the journal says it opens as a page");
+  eq(plainPreview("<style>p{color:red}</style><p>Hello</p><script>x()<\/script> there"), "Hello there",
+     "a page's style and script are not words of its preview");
+  refresh();
+  await settle(1);
+  var rpRow = document.querySelector('.item[data-id="' + rpHtml.id + '"]');
+  ok(rpRow, "a report is a row of the list");
+  ok(rpRow && rpRow.textContent.indexOf("Fleet <status>") >= 0 && rpRow.textContent.indexOf("HTML report") >= 0,
+     "its title and its type");
+  ok(rpRow && rpRow.textContent.indexOf("doctype") < 0 && rpRow.textContent.indexOf("report::") < 0 &&
+     rpRow.textContent.indexOf("color:red") < 0, "and nothing of its source");
+
+  console.log("\n-- reports: the Reports page --");
+  DBLOG.length = 0;
   openReports();
-  await settle(4);
-  ok(DBLOG.some(function (l) { return l === "GET /reports"; }), "it asks the server for the list");
+  await settle(2);
+  ok(!DBLOG.some(function (l) { return l === "GET /reports"; }), "it asks the server for no list");
   eq(st.route && st.route.v, "reports", "it has a url of its own");
   var rps = $("#rprows").querySelectorAll(".rprow");
-  eq(rps.length, 3, "a row per report");
-  has(rps[0].getAttribute("href"), "/media/reports/2026/10/fleet-status-1a2b3c4d.html", "each a link to its file");
-  eq(rps[0].getAttribute("target"), "_blank", "opened in a tab of its own");
-  eq(rps[0].querySelector(".rptitle").textContent, "Fleet <status>", "the title, as text");
-  has(rps[1].textContent, "CSV", "and its type");
-  has($("#rpnote").textContent, "3 reports", "the note counts them");
-  eq(rps[0].dataset.report, "media/reports/2026/10/fleet-status-1a2b3c4d.html", "an HTML row is the viewer's");
-  eq(rps[1].dataset.report, "media/reports/2026/09/weights-9f8e7d6c.csv", "and a text one");
-  ok(!rps[2].dataset.report, "a PDF's is not: Chromium will not open it sandboxed");
-  click(rps[2]);
-  ok(rps[2].classList.contains("pressing"), "a tap on a PDF shows at once");
-  eq(rps[2].querySelector(".rpwhen").textContent, "opening…", "and says it is opening in its tab");
+  var rpIds = Array.prototype.map.call(rps, function (r) { return +r.dataset.rpid; });
+  var rpOurs = [rpHtml, rpMd, rpCsv, rpPdf, rpBig, rpOdd].map(function (e) { return e.id; });
+  eq(rpIds.filter(function (i) { return rpOurs.indexOf(i) >= 0; }).join(), rpOurs.join(), "a row per report entry, newest first");
+  eq(rps.length, reportEntries().length, "every report entry, and nothing else");
+  var rpRowOf = function (e) { return $("#rprows").querySelector('[data-rpid="' + e.id + '"]'); };
+  eq(rpRowOf(rpHtml).querySelector(".rptitle").textContent, "Fleet <status>", "the title, as text");
+  // rule:words (the design pass): HTML, the usual, is not said; when in words, no size
+  eq(rpRowOf(rpHtml).querySelector(".rptype"), null, "an HTML report says no type");
+  eq(rpRowOf(rpHtml).querySelector(".rpwhen").textContent, "today, " + localOf(rpHtml.created_at_utc).slice(11, 16),
+     "when, in words: " + rpRowOf(rpHtml).querySelector(".rpwhen").textContent);
+  var rpTxt = Array.prototype.map.call($("#rprows").querySelectorAll(".rpwhen, .rptype"),
+                                      function (x) { return x.textContent; }).join(" ") + " " + $("#rpnote").textContent;
+  ok(!/\d{4}-\d\d-\d\d/.test(rpTxt) && !/\b\d[\d.,]*\s?(b|k|kb|mb|bytes)\b/i.test(rpTxt),
+     "no ISO date and no byte count on the page");
+  eq(rpRowOf(rpCsv).querySelector(".rptype").textContent, "CSV", "another type is said");
+  eq(rpRowOf(rpPdf).querySelector(".rptype").textContent, "PDF", "a PDF's too");
+  has($("#rpnote").textContent, rps.length + " report", "the note counts them");
+  click(rpRowOf(rpHtml));
+  await settle(1);
+  ok(!$("#ov").classList.contains("on"), "a tap closes the page");
+  ok(st.sel === rpHtml && st.read, "and reads the report like any entry");
+
+  console.log("\n-- reports: the reader by type --");
+  // rule:outside (ui-rules.md, "Text from outside")
+  var rpFr = $("#rd_content").querySelector("iframe.rpframe");
+  ok(rpFr, "an HTML report is framed in the reader");
+  eq(rpFr && rpFr.getAttribute("sandbox"), "", "sandboxed with nothing allowed: no script, no same origin");
+  has(rpFr && rpFr.getAttribute("srcdoc"), "<h1>Fleet \"status\" &amp; more</h1>", "its text the frame's document, whole");
+  ok(rpFr && rpFr.getAttribute("srcdoc").indexOf("report::") < 0, "not the marker line");
+  ok(window.secret === undefined, "nothing of it ran in the page");
+  // a picture by a relative path is the report's folder's, not the page's
+  // (an about:srcdoc document resolves against the page: /ui/<file>)
+  var rpDoc = rpFr ? rpFr.getAttribute("srcdoc") : "";
+  ok(rpDoc.indexOf('<!doctype html><base href="' + mediaUrl("media/reports/2026/10") + '/">') === 0,
+     "the frame's base is the report's own folder, after its doctype: " + rpDoc.slice(0, 80));
+  var rpOwnBase = reportReadHtml({ title: "b", content: "" },
+    { type: "html", rel: "media/reports/2026/10/b-00000000.html", at: 0, text: true, link: false });
+  ok(rpOwnBase.indexOf("base href") > 0, "one with no doctype gets the base too");
+  rpOwnBase = reportReadHtml({ title: "b", content: '<head><base href="https://example.org/"></head><img src="x.png">' },
+    { type: "html", rel: "media/reports/2026/10/b-00000000.html", at: 0, text: true, link: false });
+  eq((rpOwnBase.match(/base href/g) || []).length, 1, "a report with a base of its own keeps it");
+  // Open as a page in the reader's head, above the frame: on a phone the row
+  // under the pane-high frame is below the fold
+  var rpHead = $("#rd_meta").querySelector("a.rdopen");
+  ok(rpHead, "Open as a page is in the reader's head");
+  has(rpHead && rpHead.textContent, "Open as a page", "by that name");
+  eq(rpHead && rpHead.getAttribute("href"), mediaUrl("media/reports/2026/10/fleet-status-1a2b3c4d.html"), "the file's own URL");
+  eq(rpHead && rpHead.getAttribute("target"), "_blank", "in a tab of its own");
+  ok(rpHead && !rpHead.dataset.report, "not the viewer's");
+  var rpHeadEv = click(rpHead);
+  ok(!rpHeadEv.defaultPrevented, "the tap is the link's: the browser opens the tab");
+  ok(rpHead.classList.contains("pressing"), "and shows at once");
+  has(rpHead.textContent, "opening…", "saying it is opening");
+  ok(!$("#rview"), "with no viewer");
+  ok(paletteRows().some(function (r) { return r.label === "entry · open the report as a page, in a tab"; }),
+     "a palette row while a report is read");
+  eq(vMatch(vWords("open the report as a page"), 0).cmd.say, "open the report", "“open the report as a page” is an order");
+  var rpOpen = $("#rd_content").querySelector("a.rpentry");
+  eq(rpOpen && rpOpen.dataset.report, "media/reports/2026/10/fleet-status-1a2b3c4d.html", "open as a page: the viewer's, for its script");
+  eq($("#rd_title").textContent, "Fleet <status>", "the reader's own chrome as for any entry");
+  setRead(false);
+  ok(/^report:: html /.test($("#content").value), "the editor shows the raw text");
+  setRead(true);
+  select(rpMd.id);
+  ok($("#rd_content").querySelector("h3") && $("#rd_content").querySelector("b"), "markdown is rendered, as the reader renders it");
+  ok($("#rd_content").textContent.indexOf("report::") < 0, "without its marker");
+  select(rpCsv.id);
+  var rpPre = $("#rd_content").querySelector("pre.rppre");
+  eq(rpPre && rpPre.textContent, "date,kg\n2026-09-01,<80>\n", "a CSV is its text, preformatted");
+  select(rpPdf.id);
+  var rpLink = $("#rd_content").querySelector("a.rpentry");
+  has(rpLink && rpLink.getAttribute("href"), "/media/reports/2026/08/audit-0a0b0c0d.pdf", "a PDF is a link to its file");
+  eq(rpLink && rpLink.getAttribute("target"), "_blank", "in a tab of its own");
+  ok(!$("#rd_meta").querySelector("a.rdopen"), "its row is the first thing read: no second link in the head");
+  ok(rpLink && !rpLink.dataset.report, "not the viewer's: Chromium will not open it sandboxed");
+  click(rpLink);
+  ok(rpLink.classList.contains("pressing"), "a tap on it shows at once");
+  eq(rpLink.querySelector(".rpwhen").textContent, "opening…", "and says it is opening");
   ok(!$("#rview"), "and opens no viewer");
+  select(rpBig.id);
+  var rpBl = $("#rd_content").querySelector("a.rpentry");
+  eq(rpBl && rpBl.dataset.report, "media/reports/2026/07/big-pictures-0c0c0c0c.html", "one too big for the journal is a link to the page");
+  has($("#rd_content").textContent, "the report opens as a page", "saying why");
+  ok(!$("#rd_content").querySelector("iframe"), "with no empty frame");
+  select(rpOdd.id);
+  ok(!$("#rd_content").querySelector(".rpentry, iframe"), "an entry out of the format reads as markdown");
 
   console.log("\n-- the report viewer --");
+  select(rpHtml.id);
   var rvHist = history._st.length;
-  var rvEv = click(rps[0]);
-  ok(rvEv.defaultPrevented, "a viewer row's tap is not a tab");
+  var rvEv = click($("#rd_content").querySelector("a.rpentry"));
+  ok(rvEv.defaultPrevented, "open as a page is not a tab");
   ok($("#rview"), "the viewer opens in the same frame");
   eq($("#rvh").textContent, "Fleet <status>", "with the report's title");
   eq($("#rvtype").textContent, "HTML", "and its type");
   eq($("#rvnote").textContent, "loading the report…", "saying it is loading");
   has($("#rvtab").getAttribute("href"), "/media/reports/2026/10/fleet-status-1a2b3c4d.html", "Open in a tab is the file's link");
   has(location.pathname, "/report/2026/10/fleet-status-1a2b3c4d.html", "it is a step of its own, ./report/<path>");
-  eq(history._st.length, rvHist + 1, "pushed over the Reports page");
+  eq(history._st.length, rvHist + 1, "pushed over the reader");
   ok(!$("#rview").querySelector("iframe"), "no frame before the HEAD has answered");
   await settle(1);
   ok(DBLOG.indexOf("HEAD /media/reports/2026/10/fleet-status-1a2b3c4d.html") >= 0, "the file is asked for with a HEAD first");
@@ -7278,11 +8916,10 @@ async function answerPrompt(text) {
   ok(!$("#rvnote").hidden, "the loading line stays until the frame has loaded");
   rvf.onload();
   ok($("#rvnote").hidden, "and goes when it has");
-  ok($("#rprows"), "the Reports page is still under it");
   history.back();
   await settle(1);
   ok(!$("#rview"), "Back closes the viewer");
-  ok($("#rprows") && st.route && st.route.v === "reports", "and leaves the Reports page as it was");
+  ok(st.sel === rpHtml && st.read, "and leaves the reader as it was");
   history.forward();
   await settle(1);
   ok($("#rview"), "Forward opens it again");
@@ -7290,13 +8927,12 @@ async function answerPrompt(text) {
   ok(!$("#rview"), "Close closes it");
   await settle(1);
   ok(!/\/report\//.test(location.pathname), "and takes its step back off");
-  ok($("#rprows"), "back on the Reports page");
-  click($("#rprows").querySelectorAll(".rprow")[1]);
-  eq($("#rvtype").textContent, "CSV", "a text report opens here too");
+  reportView("media/reports/2026/09/weights-9f8e7d6c.csv", "Weights");
+  eq($("#rvtype").textContent, "CSV", "a text report opens there too");
   window._on.keydown.forEach(function (f) { f({ key: "Escape", stopImmediatePropagation: function () {}, preventDefault: function () {} }); });
   ok(!$("#rview"), "Escape closes it");
   await settle(1);
-  ok($("#rprows"), "and only it");
+  ok(st.sel === rpHtml, "and only it");
   // a report gone from the store: said where the report would be
   reportView("media/reports/2026/10/gone-11111111.html", "Gone");
   await settle(1);
@@ -7310,8 +8946,6 @@ async function answerPrompt(text) {
   has($("#rvnote").textContent, "did not finish loading", "a load that never ends is said");
   reportClose();
   await settle(1);
-  closeOv();
-  await settle(2);
 
   console.log("\n-- report links in markdown, and the chat's card --");
   eq(reportRel("https://debian.example.ts.net/media/reports/2026/10/fleet-status-1a2b3c4d.html"),
@@ -7361,12 +8995,10 @@ async function answerPrompt(text) {
   eq(vMatch(vWords("show the latest report"), 0).cmd.say, "show the latest report", "\u201cshow the latest report\u201d is an order");
   eq(vMatch(vWords("open the report"), 0).cmd.say, "open the report", "\u201copen the report\u201d is one");
   eq(vMatch(vWords("close the report"), 0).cmd.say, "close the report", "\u201cclose the report\u201d is one");
-  reportsAll = null;
   vMatch(vWords("show the latest report"), 0).cmd.fn();
-  ok($("#rview"), "the viewer opens at once");
-  has($("#rvnote").textContent, "finding the latest report", "finding the report meanwhile");
-  await settle(2);
-  eq($("#rvh").textContent, "Fleet <status>", "then the newest one");
+  ok(st.sel === reportEntries()[0] && st.read, "\u201cshow the latest report\u201d reads the newest report entry");
+  vMatch(vWords("open the report"), 0).cmd.fn();
+  ok($("#rview"), "\u201copen the report\u201d opens its page in the viewer");
   vMatch(vWords("close the report"), 0).cmd.fn();
   ok(!$("#rview"), "and the order closes it");
   await settle(1);
@@ -7375,6 +9007,354 @@ async function answerPrompt(text) {
   ok($("#rprows"), "and it opens the page");
   closeOv();
   await settle(2);
+  /* The user manual (docs/design/manual.md 2): the help's foot links it, and
+     the order and the palette open it in a tab; a tab refused (a spoken
+     order is no tap) is a toast whose Open is the tap. */
+  console.log("\n-- the user manual --");
+  openHelp();
+  var manA = $("#manual_open");
+  ok(manA && manA.getAttribute("href") === "manual/" && manA.getAttribute("target") === "_blank",
+     "the keyboard help's foot links manual/, in a tab");
+  closeOv(); await settle(1);
+  voiceHelp();
+  ok($("#manual_open"), "and so does the voice help's");
+  closeOv(); await settle(1);
+  for (var said of ["open the manual", "the manual", "user manual", "show me the manual"])
+    eq(vMatch(vWords(said), 0).cmd.say, "open the manual", "\u201c" + said + "\u201d opens the manual, not a pinned entry");
+  ok(paletteRows().some(r => r.label === "app · the user manual"), "the palette has its row");
+  var manOpen = window.open, manGot = [];
+  window.open = (u, t) => { manGot.push([u, t]); return manGot.length === 1 ? {} : null; };
+  vMatch(vWords("open the manual"), 0).cmd.fn();
+  eq(JSON.stringify(manGot[0]), JSON.stringify(["manual/", "_blank"]), "the order opens manual/ in a tab");
+  ok(/opened in a tab/.test($("#toast").textContent), "and says so");
+  openManual();
+  var manT = $("#toast .tact");
+  ok(manT && manT.textContent === "Open" && manGot.length === 2, "a refused tab: the toast offers Open");
+  click(manT);
+  eq(manGot.length, 3, "whose tap opens it");
+  window.open = manOpen;
+
+  /* Themes (docs/design/theming.md): btop's files and omarchy's colors.toml
+     read onto one palette and :root's tokens, the picker that shows each
+     as its cursor reaches it, the orders, the fade's class, and the
+     contrast sweep that must find exactly the design note's appendix. */
+  console.log("\n-- themes --");
+  (function () {
+    var files = Object.keys(THEME_FILES).sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+    eq(files.length, 41, "41 btop themes ship in themes/");
+    eq(JSON.stringify(THEMES), JSON.stringify(["lcars"].concat(files)), "THEMES is lcars, then every file in themes/");
+    var roles = ["bg", "fg", "accent", "title", "sel", "muted", "line", "red", "orange", "yellow", "green", "cyan", "blue", "magenta"];
+    var bad = [];
+    files.forEach(function (n) {
+      var p = themeParse(THEME_FILES[n]);
+      if (!p || p.fmt !== "btop") { bad.push(n + ": not btop"); return; }
+      var pal = themePalette(p);
+      roles.forEach(function (r) { if (!/^#[0-9a-f]{6}$/.test(pal[r] || "")) bad.push(n + ": " + r + "=" + pal[r]); });
+      if (pal.heat.length !== 3 || !pal.heat.every(function (h) { return /^#[0-9a-f]{6}$/.test(h); })) bad.push(n + ": heat");
+      var t = themeTokens(pal);
+      for (var k in t) if (!t[k] || /NaN|undefined/.test(t[k])) bad.push(n + ": " + k + "=" + t[k]);
+    });
+    eq(bad.join("; "), "", "every shipped file parses as btop's and gives every role and token a colour");
+    // every token a theme sets is one :root has (a typo would set nothing)
+    var tk = Object.keys(themeTokens(themePalette(themeParse(THEME_FILES.nord))));
+    eq(tk.filter(function (k) { return k !== "color-scheme" && !ROOT_TOKENS.includes(k); }).join(" "), "",
+       "every token a theme sets is one of :root's");
+    // values: #BW, #RGB, "R G B", junk after the quote, an empty main_bg
+    eq(themeHex("#ff") + themeHex("#0f8") + themeHex("16 32 255") + themeHex("300 1 1") + "|" + themeHex(""),
+       "#ffffff#00ff88#1020ff|", "#BW, #RGB and R G B read; out of range and empty are none");
+    eq(themeParse('theme[cpu_mid]="#F8F8F2" #2eb398"').keys.cpu_mid, "#F8F8F2", "what follows the closing quote is let go");
+    var ad = themePalette(themeParse(THEME_FILES.adapta));
+    eq(ad.bg, "#000000", "an empty main_bg under a light main_fg is black");
+    eq(themePalette(themeParse('theme[main_bg]=""\ntheme[main_fg]="#202020"')).bg, "#ffffff", "and white under a dark one");
+    eq(themePalette(themeParse(THEME_FILES.greyscale)).bg, "#000000", "greyscale's #00 is black");
+    var gr = themePalette(themeParse(THEME_FILES.greyscale));
+    ok(thRatio(gr.red, gr.bg) >= 4.5 && thHs(gr.red)[0] < 10, "a hue a grey theme lacks keeps LCARS's red, readable on its field");
+    // a light theme flips the ink, the white and the scheme
+    var sl = themeFromText(THEME_FILES.solarized_light, "solarized_light");
+    ok(sl.light, "solarized_light is light");
+    eq(sl.tokens["--ink"] + " " + sl.tokens["--white"] + " " + sl.tokens["color-scheme"], sl.tokens["--bg"] + " #000000 light",
+       "a light theme: the ink is its field, --white black, color-scheme light");
+    var nd = themeFromText(THEME_FILES.nord, "nord");
+    eq(nd.tokens["--bg"] + " " + nd.tokens["--txt"] + " " + nd.tokens["--orange"] + " " + nd.tokens["--amber"],
+       "#2e3440 #d8dee9 #5e81ac #8fbcbb", "nord: main_bg, main_fg, hi_fg and title onto --bg, --txt, --orange, --amber");
+    eq(nd.tokens["--ink"] + " " + nd.tokens["--white"] + " " + nd.tokens["color-scheme"], "#2e3440 #ffffff dark", "a dark one: --white white");
+    ok(thRatio(nd.tokens["--dim"], nd.tokens["--panel"]) >= 4.5, "a derived text is held to AA on the panel");
+    // omarchy: its colors.toml, and the btop.theme its own template makes of it
+    var omNord = 'mode = "dark"\naccent = "#81a1c1"\nselection = "#434c5e"\nmuted = "#4c566a"\n' +
+      'background = "#2e3440"\ndark_background = "#222730"\nforeground = "#d8dee9"\nlight_foreground = \'#adb5c4\'\n' +
+      'red = "#bf616a"\nyellow = "#ebcb8b"\norange = "#d5967a"\ngreen = "#a3be8c"\ncyan = "#88c0d0"\n' +
+      'blue = "#81a1c1"\nmagenta = "#b48ead"\nbrown = "#6a4b3d"\n# a comment\n';
+    var op = themeParse(omNord);
+    eq(op.fmt + " " + op.keys.light_foreground, "omarchy #adb5c4", "a colors.toml is omarchy's, single quotes read");
+    var opal = themePalette(op), ot = themeTokens(opal);
+    eq([ot["--bg"], ot["--txt"], ot["--orange"], ot["--amber"], ot["--red"], ot["--salmon"], ot["--blue"], ot["--sky"], ot["--purple"]].join(" "),
+       "#2e3440 #d8dee9 #81a1c1 #ebcb8b #bf616a #d5967a #88c0d0 #81a1c1 #b48ead", "omarchy's keys onto the tokens by the table");
+    var tpl = "main_bg=background main_fg=foreground title=foreground hi_fg=accent selected_bg=selection selected_fg=accent " +
+      "inactive_fg=muted div_line=muted cpu_start=cyan cpu_mid=blue cpu_end=magenta mem_box=green net_box=red cpu_box=magenta";
+    var vals = op.keys, gen = tpl.split(" ").map(function (x) { var kv = x.split("="); return "theme[" + kv[0] + ']="' + vals[kv[1]] + '"'; }).join("\n");
+    var gpal = themePalette(themeParse(gen));
+    eq(["bg", "fg", "accent", "sel", "muted", "line"].map(function (r) { return gpal[r]; }).join(" ") + " " + gpal.heat.join(" "),
+       ["bg", "fg", "accent", "sel", "muted", "line"].map(function (r) { return opal[r]; }).join(" ") + " " + opal.heat.join(" "),
+       "the btop.theme omarchy's template makes reads the same roles as its colors.toml");
+    eq(themeParse("just words\nnothing here"), null, "a file that is no theme is refused");
+    ok(themeFromText(THEME_FILES.whiteout, "whiteout").light, "whiteout (#ff) is light");
+
+    // the contrast sweep: exactly the appendix
+    var PAIRS = [["--txt", "--bg"], ["--dim", "--panel"], ["--soft", "--panel"], ["--txt2", "--panel"], ["--red-light", "--panel"],
+      ["--red-lighter", "--panel"], ["--amber", "--panel"], ["--orange", "--panel"], ["--purple", "--panel"], ["--blue", "--panel"],
+      ["--green", "--panel"], ["--red", "--panel"], ["--ink", "--orange"]];
+    var lines = files.map(function (n) {
+      var t = themeFromText(THEME_FILES[n], n).tokens;
+      var f = PAIRS.map(function (p) { return [p, thRatio(t[p[0]], t[p[1]])]; }).filter(function (x) { return x[1] < 4.5; })
+        .map(function (x) { return x[0][0] + " on " + x[0][1] + " " + x[1].toFixed(2); });
+      return f.length ? "- " + n + ": " + f.join(", ") : "";
+    }).filter(Boolean).join("\n");
+    var m = /<!-- sweep:begin -->\n([\s\S]*?)<!-- sweep:end -->/.exec(THEME_NOTE);
+    var have = m ? m[1].trim() : "(no sweep block)";
+    eq(have === lines, true, "the contrast sweep's failures are exactly theming.md's appendix");
+    if (have !== lines) console.log("    the appendix should read:\n<!-- sweep:begin -->\n" + lines + "\n<!-- sweep:end -->");
+    var lowN = files.filter(function (n) { return themeFromText(THEME_FILES[n], n).low; });
+    ok(lowN.every(function (n) { return lines.indexOf("- " + n + ": --txt on --bg") >= 0; }), "a theme marked low contrast is one whose text fails on its field");
+  })();
+
+  console.log("\n-- themes: applying, the picker, the orders --");
+  var thHtml = document.documentElement, thLs0 = localStorage.getItem("lcars.theme");
+  ok(await themeSet("nord"), "theme nord applied");
+  eq(thHtml.style.getPropertyValue("--bg"), "#2e3440", "its tokens on <html>'s own style");
+  ok(thHtml.classList.contains("theming"), "html.theming is set for the change");
+  eq(thHtml.style.getPropertyValue("--theme-ms"), THEME_MS + "ms", "at the change's length");
+  runTimers(THEME_MS + 60);
+  ok(!thHtml.classList.contains("theming"), "and taken off when it ends");
+  eq(JSON.parse(localStorage.getItem("lcars.theme")).name, "nord", "kept on this device, with its tokens");
+  ok(/theme · nord/.test($("#toast").textContent), "a toast names it");
+  // reduced motion: no class
+  var thMM = window.matchMedia;
+  window.matchMedia = function (q) { return { matches: /reduce/.test(q) }; };
+  await themeSet("dracula");
+  ok(!thHtml.classList.contains("theming") && thHtml.style.getPropertyValue("--bg") === themeFromText(THEME_FILES.dracula, "d").tokens["--bg"],
+     "under reduced motion the colours change with no fade");
+  window.matchMedia = thMM;
+  await themeSet("lcars");
+  eq(thHtml.style.getPropertyValue("--bg") + "|" + localStorage.getItem("lcars.theme"), "|null", "lcars takes every token away, and the kept one");
+  runTimers(THEME_MS + 60);
+  // the orders
+  var thSay = function (s) { return vMatch(vWords(s), 0); };
+  eq(thSay("theme nord").cmd.say, "theme {*}", "“theme nord” is the order");
+  eq(themeFind("gruvbox dark") + " " + themeFind("tokyo night") + " " + themeFind("the solarized light theme") + " " +
+     themeFind("Hot Purple Traffic Light") + " " + themeFind("hotpurpletrafficlight") + " " + themeFind("kanagawa lotus"),
+     "gruvbox_dark tokyo-night solarized_light HotPurpleTrafficLight HotPurpleTrafficLight kanagawa-lotus",
+     "names matched loosely: case, hyphens and underscores as spaces");
+  eq(themeFind("everforest") + "|" + themeFind("lotus") + "|" + themeFind("default"), "|kanagawa-lotus|lcars",
+     "two that fit is none; one word that fits one is it; default is lcars");
+  var thH = thSay("theme gruvbox dark"); await thH.cmd.fn(thH.arg); await settle(2);
+  eq(theme.name, "gruvbox_dark", "“computer, theme gruvbox dark” applies it");
+  eq(thSay("default theme").cmd.say, "default theme", "“default theme” is an order");
+  await thSay("default theme").cmd.fn(); await settle(2);
+  eq(theme.name, "lcars", "and puts LCARS back");
+  thSay("theme nothing like it").cmd.fn(thSay("theme nothing like it").arg); await settle(1);
+  ok(/no theme called/.test($("#toast").textContent) && theme.name === "lcars", "a name that is no theme says so, and changes nothing");
+  eq(thSay("choose a theme").cmd.say, "choose a theme", "“choose a theme” opens the picker");
+  ok(paletteRows().some(function (r) { return r.label === "app · theme…"; }) &&
+     paletteRows().some(function (r) { return r.label === "app · theme: lcars" && r.on; }), "the palette's two rows, lcars ticked");
+  // the picker
+  runTimers(THEME_MS + 60);
+  openThemes(); await settle(3);
+  var thRows = function () { return Array.prototype.slice.call($("#pkrows").querySelectorAll(".pkr")); };
+  eq(thRows().length, 42, "a row per theme");
+  ok(/cur/.test(thRows()[0].className) && /on/.test(thRows()[0].className), "lcars first, ticked, under the cursor");
+  ok(/light/.test(thRows()[THEMES.indexOf("solarized_light")].textContent) && /dark/.test(thRows()[THEMES.indexOf("nord")].textContent),
+     "each tagged light or dark");
+  dispatch($("#pkq"), "keydown", { key: "ArrowDown" });
+  eq(theme.name, THEMES[1], "the cursor moved: that theme is shown at once");
+  ok(thHtml.classList.contains("theming") && thHtml.style.getPropertyValue("--theme-ms") === THEME_PEEK_MS + "ms", "with the shorter fade");
+  eq(JSON.parse(localStorage.getItem("lcars.theme") || "null"), null, "and nothing kept yet");
+  key("Escape"); await settle(1);
+  ok(!$("#ov").classList.contains("on"), "Escape closes the picker");
+  eq(theme.name + "|" + thHtml.style.getPropertyValue("--bg"), "lcars|", "and puts the old one back");
+  openThemes(); await settle(3);
+  input($("#pkq"), "nord"); await settle(1);
+  eq(theme.name, "nord", "typing a name shows the row it lands on");
+  dispatch($("#pkq"), "keydown", { key: "Enter" }); await settle(2);
+  eq(theme.name + "|" + JSON.parse(localStorage.getItem("lcars.theme")).name, "nord|nord", "Enter keeps it");
+  openThemes(); await settle(3);
+  ok(/cur/.test(thRows()[THEMES.indexOf("nord")].className), "opened again, the cursor is on the current one");
+  closeOv(); await settle(1);
+  eq(theme.name, "nord", "closed with the cursor not moved: it stays");
+  runTimers(THEME_MS + 60);
+  await themeSet("lcars"); runTimers(THEME_MS + 60);
+
+  /* Slice 2 (theming.md 5): the choice is the journal's settings entry
+     titled theme, written by PUT /theme, followed as the sync brings it. The
+     journal under test may hold one of its own: it is set aside (deleted on
+     the page's copy) while these run, and put back. */
+  console.log("\n-- themes: the journal's entry, the stored version --");
+  var thOwn = st.all.filter(function (e) { return e.kind === "settings" && e.title === "theme" && !e.deleted; });
+  thOwn.forEach(function (e) { e.deleted = 1; });
+  THEME_PUTS.length = 0;
+  await themeSet("nord"); await settle(2);
+  eq(JSON.stringify(THEME_PUTS[THEME_PUTS.length - 1]), '{"name":"nord"}', "a built-in chosen is written: PUT /theme {name}");
+  THEME_CODE = 500;
+  await themeSet("dracula"); await settle(2);
+  ok(theme.name === "dracula" && /theme kept on this device only/.test($("#toast").textContent),
+     "a write that fails: the theme stays, and the toast says it is this device's only");
+  THEME_CODE = 0;
+  runTimers(THEME_MS + 60);
+  // the entry arriving, as a sync lands it (a new row, then an edit of it)
+  var thId = st.all.reduce(function (m, e) { return Math.max(m, e.id); }, 0) + 1000;
+  var thRow = { id: thId, kind: "settings", title: "theme", deleted: 0, done: 0, value_int: 0, value_float: 0,
+                created_at_utc: "2099-01-01 00:00:00", last_modified_at_utc: "2099-01-01 00:00:00",
+                content: JSON.stringify({ v: 1, name: "gruvbox_light", fmt: "builtin", text: "" }) };
+  thRow.content_length = thRow.content.length;
+  theme$.booted = true;
+  var thFades = [], thFadeWas = themeFade;
+  themeFade = function (ms) { thFades.push(ms); return thFadeWas(ms); };
+  st.all.unshift(thRow); st.byId.set(thId, thRow);
+  refresh(); await settle(3);
+  eq(theme.name + "|" + thHtml.style.getPropertyValue("--bg"), "gruvbox_light|" + themeFromText(THEME_FILES.gruvbox_light, "g").tokens["--bg"],
+     "the entry's arrival applies its theme");
+  ok(thFades.join() === String(THEME_MS) && /theme · gruvbox_light/.test($("#toast").textContent),
+     "fading, and named in a toast (a change from elsewhere)");
+  eq(JSON.parse(localStorage.getItem("lcars.theme")).name, "gruvbox_light", "kept on this device as the entry's cache");
+  runTimers(THEME_MS + 60);
+  var thPuts = THEME_PUTS.length;
+  refresh(); await settle(2);
+  eq(THEME_PUTS.length + "|" + theme.name, thPuts + "|gruvbox_light", "an arrival is not written back, and a repaint does nothing");
+  // a theme from omarchy: the file's text in the entry
+  var thToml = 'mode = "light"\naccent = "#286983"\nbackground = "#faf4ed"\nforeground = "#575279"\n' +
+    'red = "#b4637a"\nyellow = "#ea9d34"\ngreen = "#56949f"\nblue = "#286983"\nmagenta = "#907aa9"\ncyan = "#d7827e"\n';
+  thRow.content = JSON.stringify({ v: 1, name: "rose-pine-dawn", fmt: "omarchy", text: thToml });
+  thRow.content_length = thRow.content.length;
+  refresh(); await settle(3);
+  eq(theme.name + "|" + thHtml.style.getPropertyValue("--bg") + "|" + thHtml.style.getPropertyValue("color-scheme"),
+     "rose-pine-dawn|#faf4ed|light", "an edit to it applies the file it carries (omarchy's colors.toml)");
+  var thKept = JSON.parse(localStorage.getItem("lcars.theme"));
+  eq(thKept.v + "|" + (thKept.text === thToml) + "|" + thKept.fmt, THEME_V + "|true|omarchy", "kept with the table's version and its text");
+  runTimers(THEME_MS + 60);
+  openThemes(); await settle(3);
+  eq(thRows().length + "|" + thRows()[1].querySelector(".pkl").textContent, "43|rose-pine-dawn",
+     "the picker has a row for it, after lcars");
+  ok(/from omarchy/.test(thRows()[1].textContent) && /light/.test(thRows()[1].textContent) &&
+     /cur/.test(thRows()[1].className) && /on/.test(thRows()[1].className), "said to be from omarchy, light, ticked, the cursor on it");
+  dispatch($("#pkq"), "keydown", { key: "ArrowUp" });
+  eq(theme.name, "lcars", "the cursor off it shows lcars");
+  key("Escape"); await settle(1);
+  eq(theme.name + "|" + thHtml.style.getPropertyValue("--bg"), "rose-pine-dawn|#faf4ed", "Escape puts the handed-in one back");
+  runTimers(THEME_PEEK_MS + 60);
+  THEME_PUTS.length = 0;
+  await themeSet("nord"); runTimers(THEME_MS + 60);
+  openThemes(); await settle(3);
+  input($("#pkq"), "rose pine"); await settle(1);
+  eq(theme.name, "rose-pine-dawn", "picked again from its row");
+  dispatch($("#pkq"), "keydown", { key: "Enter" }); await settle(2);
+  var thLast = THEME_PUTS[THEME_PUTS.length - 1] || {};
+  eq(thLast.name + "|" + (thLast.text === thToml), "rose-pine-dawn|true", "and written back with its text");
+  runTimers(THEME_MS + 60);
+  // the stored version: a copy kept by an older table is computed again at boot, with no fade
+  localStorage.setItem("lcars.theme", JSON.stringify({ name: "nord", v: 0, tokens: { "--bg": "#123456" } }));
+  thFades.length = 0;
+  themeBoot(); await settle(2);
+  eq(theme.name + "|" + thHtml.style.getPropertyValue("--bg") + "|" + JSON.parse(localStorage.getItem("lcars.theme")).v,
+     "nord|#2e3440|" + THEME_V, "a kept theme of another table version is computed again and kept anew");
+  eq(thFades.length, 0, "with no fade");
+  localStorage.setItem("lcars.theme", JSON.stringify({ name: "nord", v: THEME_V, tokens: { "--bg": "#123456" } }));
+  var thF = TEST.fetches.length;
+  themeBoot(); await settle(2);
+  eq(TEST.fetches.length, thF, "one of this version is taken as it is: nothing fetched");
+  // an ambiguous name opens the picker on the ones it fits
+  var thAmb = thSay("theme everforest"); thAmb.cmd.fn(thAmb.arg); await settle(3);
+  ok($("#ov").classList.contains("on") && $("#pkq").value === "everforest" && thRows().length === 3,
+     "“theme everforest” fits three: the picker opens on them");
+  key("Escape"); await settle(1);
+  // the tap doors (a phone has no palette): a tile under More, a row in Config
+  openMore(); await settle(1);
+  var thTile = Array.prototype.slice.call(document.querySelectorAll("#dlg .shtile"))
+    .filter(function (b) { return /Theme/.test(b.textContent); })[0];
+  ok(thTile, "More has a Theme tile");
+  thTile.click(); await settle(3);
+  ok($("#ov").classList.contains("on") && $("#dlgh").textContent === "Theme" && thRows().length > 40, "and it opens the picker");
+  key("Escape"); await settle(1);
+  openQuick(); await settle(1);
+  ok(!/Theme/.test($("#quickgrid").textContent), "it is not one the header can carry");
+  closeOv(); await settle(1);
+  openCfg(); await settle(1);
+  ok($("#c_theme") && $("#c_theme").textContent.indexOf(theme.name) >= 0, "Config has a Theme… row naming the one worn");
+  $("#c_theme").click(); await settle(3);
+  ok($("#dlgh").textContent === "Theme" && thRows().length > 40, "and it opens the picker");
+  key("Escape"); await settle(1);
+  // put back
+  themeFade = thFadeWas;
+  st.all.splice(st.all.indexOf(thRow), 1); st.byId.delete(thId);
+  thOwn.forEach(function (e) { e.deleted = 0; });
+  theme$.scanN = -1; theme$.row = null; theme$.seen = null; theme$.booted = false;
+  theme.custom = null;
+  await themeSet("lcars"); runTimers(THEME_MS + 60);
+  THEME_PUTS.length = 0;
+  if (thLs0) localStorage.setItem("lcars.theme", thLs0);
+
+  /* The cold load and the sweep carry a report's first line alone
+     (lcars_http.h, report_body; the design's "The cold load"): its content
+     shorter than content_length is a body not loaded yet. */
+  console.log("\n-- reports: a body the cold load left out --");
+  var rpWhole = rpMd.content, rpHead = rpWhole.split("\n")[0];
+  var rpCut = function (e) { e.content = e.content.split("\n")[0]; st.bodyGen++; };
+  rpCut(rpMd);
+  ok(needsBody(rpMd) && !bodyMissing(rpMd), "a report cut to its first line needs its body, and is not one the sweep owes");
+  ok(!needsBody(rpPdf) && !needsBody(rpBig),
+     "a report that is the first line whole (its length equal) is not cut");
+  var rpCp = reportOf(rpMd);
+  ok(rpCp && rpCp.type === "md" && rpCp.cut && !rpCp.link, "its type is read from the first line, no fetch");
+  eq(snippet(rpMd), "MD report", "the list's preview is its type");
+  ok(!reportOf(Object.assign({}, rpPdf, { content_length: rpPdf.content.length })).cut,
+     "a first-line-only report whose content_length equals its length stays the link");
+  DBLOG.length = 0;
+  refresh();
+  await settle(1);
+  var rpCr = document.querySelector('.item[data-id="' + rpMd.id + '"]');
+  ok(rpCr && rpCr.textContent.indexOf("MD report") >= 0 && !rpCr.querySelector(".sn.pend"),
+     "its row shows the type, nothing loading");
+  openReports();
+  await settle(2);
+  eq(rpRowOf(rpMd).querySelector(".rptype").textContent, "MD", "the Reports page names its type");
+  ok(rpRowOf(rpMd).querySelector(".rpwhen").textContent.indexOf(fmtSize(rpMd.content_length)) < 0, "and no size (rule:words)");
+  ok(DBLOG.indexOf("GET /entries/" + rpMd.id) < 0, "neither the list nor the page fetched it");
+  closeOv();
+  await settle(1);
+  select(rpMd.id);
+  ok(/loading/.test($("#rd_content").textContent), "the reader says it is loading");
+  ok(DBLOG.indexOf("GET /entries/" + rpMd.id) >= 0, "and fetches the whole entry on open");
+  await settle(2);
+  eq(rpMd.content, rpWhole, "the body lands whole");
+  ok($("#rd_content").querySelector("h3"), "and is drawn by its type");
+  // the same version cut again (a sync's /dump) keeps the whole one read
+  landBody(rpMd, Object.assign({}, rpMd, { content: rpHead }));
+  eq(rpMd.content, rpWhole, "a cut copy of the same version does not take the body back");
+  select(rpOdd.id);
+  rpCut(rpMd);
+  select(rpMd.id);
+  setRead(false);
+  ok($("#content").readOnly, "the editor waits for the whole body before editing");
+  await settle(2);
+  ok(!$("#content").readOnly && $("#content").value === rpWhole, "then edits the whole of it");
+  setRead(true);
+  // what the server sends: the sweep's pages and /dump cut, /entries/<id> whole
+  TEST.fetches.length = 0;
+  var rpPage = await fetchPage(0, BODY_PAGE, { body: true });
+  ok(TEST.fetches.some(function (u) { return /\/entries\?.*report_body=0/.test(u); }), "the sweep asks for report_body=0");
+  var rpSw = rpPage.filter(function (r) { return r.id === rpCsv.id; })[0];
+  ok(rpSw && bodyCut(rpSw) && rpSw.content_length === rpCsv.content_length, "and gets the first line, content_length whole");
+  var rpOther = rpPage.filter(function (r) { return r.kind !== "report" && r.content && r.content.indexOf("\n") >= 0; })[0];
+  ok(!rpOther || !bodyCut(rpOther), "another kind's body is whole");
+  DUMP_ON = true;
+  var rpDump = await fetchRows("deleted=all&order=id&dir=desc");
+  DUMP_ON = false;
+  var rpDh = rpDump.filter(function (r) { return r.id === rpHtml.id; })[0];
+  ok(rpDh && rpDh.content === rpHtml.content.split("\n")[0], "/dump sends a report's first line");
+  eq((await api("/entries/" + rpHtml.id)).content, rpHtml.content, "GET /entries/<id> the whole");
+  closeEditor();
+  await settle(1);
+
+  [rpHtml, rpMd, rpCsv, rpPdf, rpBig, rpOdd].forEach(unplant);
+  await settle(1);
   REPORTS = null;
 
   /* ---------- the tape deck ----------
@@ -7536,6 +9516,57 @@ async function answerPrompt(text) {
   eq(chip.dataset.w, nextTaskWord(want), "an activation with no pointer behind it taps too");
   var at = chip.dataset.w;
 
+  /* two chips of one entry tapped quickly (Zimmerman's second round): the
+     writes go one at a time, and the first landing must not repaint the
+     second, still queued, back to its old word and live again */
+  console.log("-- tasks: two chips of one entry, tapped quickly --");
+  var t2Row = await api("/entries", { method: "POST", body: { kind: "personal_log", title: "Two errands",
+    content: "Two errands\n- TODO buy bread\n- TODO buy eggs" } });
+  insertRow(await api("/entries/" + t2Row.id));
+  select(t2Row.id, true);
+  await settle(5);
+  var t2c = function (ln) { return $("#rd_content").querySelector('button.task.tsw[data-ln="' + ln + '"]'); };
+  var t2Gates = [], apiT2 = api;
+  api = function (path, o) {
+    if (o && o.method === "PUT" && path === "/entries/" + t2Row.id)
+      return new Promise(function (res) { t2Gates.push(res); }).then(function () { return apiT2(path, o); });
+    return apiT2(path, o);
+  };
+  click(t2c(1)); click(t2c(2));
+  await settle(4);
+  eq(t2Gates.length, 1, "one write at a time on the entry");
+  eq(t2c(2).textContent, "DOING", "the second chip shows its word while it waits");
+  t2Gates.shift()();
+  await settle(5);
+  eq(t2c(1).textContent, "DOING", "the first lands");
+  eq(t2c(2).textContent, "DOING", "the second, still queued, keeps its word");
+  ok(t2c(2).disabled && t2c(2).classList.contains("busy"), "and stays busy");
+  click(t2c(2));
+  await settle(3);
+  eq(t2Gates.length, 1, "a tap on the waiting chip queues nothing more");
+  t2Gates.shift()();
+  await settle(5);
+  api = apiT2;
+  var t2L = dbFind(t2Row.id).content.split("\n");
+  eq(t2L[1] + "|" + t2L[2], "- DOING buy bread|- DOING buy eggs", "both land on their words");
+  ok(!t2c(2).classList.contains("busy") && !t2c(2).disabled, "and both chips are live again");
+  // whatever throws in a turn, the chip is given back and the failure said
+  var tlWas = taskLines;
+  taskLines = function () { throw new Error("boom"); };
+  var t2r = await setTaskWord(t2Row.id, 1, "DONE", t2c(1), null, { text: "buy bread", w: "DOING" });
+  taskLines = tlWas;
+  await settle(2);
+  eq(t2r, TASK_FAILED, "a turn that throws is a failure");
+  ok(!t2c(1).classList.contains("busy") && t2c(1).textContent === "DOING", "its chip repainted from the body");
+  has($("#toast").textContent, "could not move that task", "and the toast says so");
+  // a throw after the write (the toast's own callback) is not a failed write
+  var t2s = await setTaskWord(t2Row.id, 1, "DONE", null, function () { throw new Error("after"); });
+  await settle(3);
+  eq(t2s, 1, "the word on the server is a success");
+  eq(dbFind(t2Row.id).content.split("\n")[1], "- DONE buy bread", "and written");
+  unplant(st.byId.get(t2Row.id));
+  refresh();
+
   console.log("-- tasks: what it refuses to write --");
   var p0 = puts();
   await setTaskWord(tsk.e.id, 9999, "DONE", null);
@@ -7676,6 +9707,15 @@ async function answerPrompt(text) {
   eq(st.sel && st.sel.id, rWeek.id, "the one candidate comes up");
   has($("#toast").textContent, "this week in " + ry, "the toast says it is this week in " + ry);
   has($("#toast").textContent, "has photos", "and that it has photos");
+  // rule:words: when in words and the day, never the entry's number
+  has($("#toast .tmsg").textContent, "From 2 years ago, " + dayShort(rThen), "it says when, in words: " + $("#toast .tmsg").textContent);
+  ok(!new RegExp("#" + rWeek.id + "(?!\\d)").test($("#toast").textContent), "and no #id");
+  var rAnother = $("#toast .tact");
+  eq(rAnother && rAnother.textContent, "Another", "with Another to draw the next");
+  var rWas = st.sel.id;
+  resurfaced = [rWas];          // the anniversary's weight would draw it again
+  click(rAnother);
+  ok(st.sel && st.sel.id !== rWas, "Another resurfaces another entry (" + rWas + " -> " + (st.sel && st.sel.id) + "; " + $("#toast").textContent + ")");
   hideToast();
   closeEditor();
   resurfaced = [];
@@ -7802,6 +9842,8 @@ async function answerPrompt(text) {
 
   console.log("-- aloud: with no synthesiser --");
   ok(!ttsApi(), "QuickJS has none");
+  await sayProvider();
+  eq(sayQ.prov, null, "and the fake server no voice (GET /say: 503)");
   paintMode(true);
   eq($("#bAloud").style.display, "none", "so the button is not offered");
   hideToast();
@@ -7824,7 +9866,7 @@ async function answerPrompt(text) {
      would actually be said, rather than the journal's first long one, whose
      kind and state change with the day's data. */
   var aloudText = "- The **morning** watch logged a quiet sensor sweep and a [[Ship's garden]] check.\n";
-  var longRow = await plant({ title: "Aloud probe", content: aloudText + aloudText + aloudText + aloudText });
+  var longRow = await plant({ title: "Aloud probe", content: new Array(9).join(aloudText) });
   ok(ttsChunks("Aloud probe. " + ttsText(longRow.content)).length > 1, "an entry worth reading out");
   select(longRow.id);
   await settle(3);
@@ -8182,7 +10224,10 @@ async function answerPrompt(text) {
   });
   ok(VCMDS.some(function (c) { return c.say === "voice through the earpiece" && /microphone stays open/.test(c.help); }), "the help says what each does");
   var outGum = navigator.mediaDevices, outN = 0, outStops = 0, outConv = conv.cur, outPhone = convHoldForTts;
-  var outStream = function () { return { getTracks: function () { return [{ stop: function () { outStops++; } }]; } }; };
+  var outStream = function () {
+    var t = [{ readyState: "live", enabled: true, stop: function () { this.readyState = "ended"; outStops++; } }];
+    return { getTracks: function () { return t; }, getAudioTracks: function () { return t; }, clone: outStream };
+  };
   navigator.mediaDevices = { getUserMedia: function () { outN++; return Promise.resolve(outStream()); } };
   var oc = { conv: true, down: true, open: true, held: false, takeT: 0, heard: false, final: [], interim: "", stream: outStream(), node: { n: 1 },
              src: { disconnect: function () { oc.srcGone = true; } },
@@ -8214,7 +10259,7 @@ async function answerPrompt(text) {
   sayState(oRun, "pending");
   sayStop();
   runTimers(V_HOLD_SETTLE); await settle(3);
-  ok(oc.stream && outN === 2 && outStops === 2, "a reply stopped: dropped, then taken again");
+  ok(oc.stream && outN === 1 && outStops === 2, "a reply stopped: dropped, then taken again - from the kept capture, no new getUserMedia");
   vMatch(vWords("voice through the earpiece"), 0).cmd.fn();
   eq(conv.out, "earpiece", "said: the earpiece, at once");
   eq(lsGet("lcars.deck.convout", ""), "earpiece", "remembered on this device");
@@ -8225,10 +10270,12 @@ async function answerPrompt(text) {
   ok(oc.held && !oc.stream && outStops === 3, "the speaker chosen mid-reply: dropped at once");
   convSetOutput("earpiece");
   await settle(3);
-  ok(!oc.held && oc.stream && outN === 3, "the earpiece chosen mid-reply: taken again at once");
+  ok(!oc.held && oc.stream && outN === 1, "the earpiece chosen mid-reply: taken again at once (the kept capture)");
   sayStop();
   vMatch(vWords("voice through the speaker"), 0).cmd.fn();
   eq(conv.out, "speaker", "said: the speaker");
+  talkMicDrop(oc.stream); vMicLetGo();
+  ok(!vmic.base && !vmic.users.size, "let go: the kept capture with it");
   conv.cur = outConv; convHoldForTts = outPhone; navigator.mediaDevices = outGum; sayQuiet = quietWas;
   runTimers(1000); await settle(2);
   console.log("-- an engineer's lines: nothing twice, nothing stale (voice-live-narration.md 2.1, 2.2) --");
@@ -8532,8 +10579,8 @@ async function answerPrompt(text) {
   ok(!dmA.el.querySelector("#chtalk") && !dmA.el.querySelector("#talkptt"), "a window has no talk row (one microphone, the full view's)");
   eq(dA.unread, 2, "restored without the focus, it is not read by being shown");
   ok(!chatSees(dA), "nor counted as on screen");
-  has($("#dock").querySelector(".dkpill").textContent, "Chats", "the pill");
-  ok(/·\s*\d/.test($("#dock").querySelector(".dkpill").textContent), "with the count waiting");
+  ok(!$("#dock").querySelector(".dkpill"), "no pill floats over the page: the header's Chats is the dock's door");
+  ok(/\d/.test($("#bChat").textContent), "the header's Chats carries the count waiting");
   eq(dmA.el.querySelector(".dkun").textContent, "2", "the window's header says its unread");
   // the focus into it: read (the shim's log is at its end), and "the chat"
   dmA.box.focus(); dockFocusIn(dmA);
@@ -8542,7 +10589,7 @@ async function answerPrompt(text) {
   // a reply in a conversation with no window: the pill counts it, nothing opens
   dD.unread = 1; chatListPaint();
   ok(!dockHas(dD.id) && !dockMounts.get(dD.id), "a message in a closed conversation opens no window");
-  has($("#dock").querySelector(".dkpill").textContent, String(chatUnreadTotal() + engAnswerCount()), "the pill counts it");
+  has($("#bChat").textContent, String(chatUnreadTotal() + engAnswerCount()), "the header's Chats counts it");
   dD.unread = 0;
   // acts change no route
   var dH = history._i, dU = curRel();
@@ -8581,8 +10628,9 @@ async function answerPrompt(text) {
   dockRender();
   ok($("#dock").querySelector(".dkovf").hidden, "room again: no overflow");
   // the list panel
-  click($("#dock").querySelector(".dkpill")); runTimers(); await settle(1);
-  ok($("#dock").querySelector(".dklist") && dock.list === "open", "the pill opens the list panel");
+  click($("#bChat")); runTimers(); await settle(1);
+  ok($("#dock").querySelector(".dklist") && dock.list === "open", "the header's Chats opens the list panel");
+  ok($("#bChat").classList.contains("on"), "and is lit while it is open");
   ok(document.activeElement === $("#dock").querySelector(".dkfind"), "its search focused");
   ok($("#dock").querySelector('.dkrows .chrow[data-id="' + dA.id + '"]'), "the same rows as the full list");
   ok($("#dock").querySelector('.dkrows .chrow.dkon[data-id="' + dA.id + '"]'), "a row whose window is open is marked");
@@ -9134,6 +11182,46 @@ async function answerPrompt(text) {
   voiceStop();
   ok(!vmic.users.size && !vmic.base, "closing the microphone releases the capture");
 
+  /* Hold to talk asked for the microphone at every hold on an iPhone: each
+     hold was a new getUserMedia after the last capture had been stopped.
+     The capture is kept between holds now (vMicKeep), muted. */
+  console.log("-- hold to talk: the microphone asked for once, kept between holds --");
+  gum = 0;
+  var kpTok = pttToken;   // the key's route is not this suite's (test/ptt.py has it)
+  pttToken = function () { return Promise.resolve("aaaa.bbbb.cccc"); };
+  pttDown();
+  await settle(6);
+  eq(gum, 1, "the first hold opens the microphone");
+  ok(ptt.cur && ptt.cur.stream && ptt.cur.stream.base === vmic.base, "on a clone of the page's one capture");
+  pttUp(); pttDrop(ptt.cur);
+  ok(vmic.base && vmic.base.tracks[0].readyState === "live" && vmic.base.tracks[0].enabled === false && !vmic.users.size,
+     "let go: the capture kept, its track disabled (nothing heard)");
+  var kpPhone = convHoldForTts, kpSpeak = convSpeaking, kpOut = conv.out;   // (this suite has a say of its own)
+  convHoldForTts = true; conv.out = "speaker"; convSess.type = ""; convSpeaking = function () { return true; };
+  convRoute();
+  eq(convSess.type, "playback", "a kept capture is not a microphone open: a reply still goes to the speaker");
+  convHoldForTts = kpPhone; convSpeaking = kpSpeak; conv.out = kpOut; convSess.type = "";
+  pttDown();
+  await settle(6);
+  eq(gum, 1, "the second hold makes no getUserMedia call");
+  ok(ptt.cur && ptt.cur.stream && ptt.cur.stream.tracks[0].enabled === true && ptt.cur.stream.base === vmic.base,
+     "and hears on a new clone of the kept capture");
+  pttUp(); pttDrop(ptt.cur);
+  var kpBase = vmic.base;
+  runTimers(VMIC_KEEP_MS - 1000);
+  ok(vmic.base === kpBase && kpBase.tracks[0].readyState === "live", "kept within the idle window");
+  runTimers(1000);
+  ok(!vmic.base && kpBase.tracks[0].readyState === "ended", "and let go VMIC_KEEP_MS after the last hold");
+  pttDown();
+  await settle(6);
+  eq(gum, 2, "a hold after that asks again");
+  pttUp(); pttDrop(ptt.cur);
+  kpBase = vmic.base;
+  chatVoiceLeave();
+  ok(!vmic.base && kpBase.tracks[0].readyState === "ended", "the talk put away lets the kept capture go at once");
+  pttToken = kpTok;
+  hideToast();
+
   /* The tape is sent a second at a time while it records (tapeFeed), so the
      stop only has to attach what the server already holds. */
   console.log("-- dictation: the tape goes up while it is recorded --");
@@ -9360,6 +11448,185 @@ async function answerPrompt(text) {
   closeEditor();
   hideToast();
 
+  /* An entry read in the server's voice (ttsRead): the speech queue's run,
+     the computer's voice, a piece asked for only once the one before plays.
+     sayGet (the fetch and the PCM) is stood in for - test/speech.py has
+     the real one in Chromium - and the AudioContext with it. */
+  console.log("-- aloud: in the server's voice --");
+  var aw = { get: sayGet, prov: sayQ.prov, actx: actx, unlock: chatSayUnlock };
+  var srcs = [], gets = [];
+  actx = { currentTime: 0, state: "running", destination: {}, resume: function () { return Promise.resolve(); },
+           createGain: function () { return { gain: { value: 1 }, connect: function (x) { return x; } }; },
+           createBufferSource: function () {
+             var sc = { connect: function (x) { return x; }, start: function (at) { sc.at = at; srcs.push(sc); },
+                        stop: function () { sc.stopped = true; } };
+             return sc;
+           } };
+  chatSayUnlock = function () {};
+  sayGet = function (run, it) { gets.push({ run: run, it: it }); };
+  var sayLine = async function (g) { g.it.bufs.push({ duration: 1 }); g.it.done = true; sayFlush(g.run); await settle(2); };
+  var sayHeard = async function () { srcs.splice(0).forEach(function (x) { if (x.onended && !x.stopped) x.onended(); }); await settle(2); };
+  sayQ.prov = "elevenlabs";
+  var srvRow = await plant({ title: "Aloud by voice", content: aloudText + aloudText + aloudText + aloudText });
+  select(srvRow.id);
+  await settle(3);
+  st.read = true;
+  paintMode(true);
+  ok($("#bAloud").style.display !== "none", "no browser voice, but the server's: the button is offered");
+  click($("#bAloud"));
+  ok(tts.on && $("#bAloud").classList.contains("busy"), "the tap shows at once: lit and busy, before any audio");
+  has($("#bAloud").querySelector(".lg").innerHTML, "Voice", "saying its voice is coming");
+  await settle(3);
+  eq(gets.length, 1, "one piece asked for, not the whole entry");
+  var srvRun = gets[0].run;
+  eq(srvRun.who, "computer", "in the computer's voice");
+  eq(sayVoice(sayQ.prov, srvRun.who, srvRun.female), "Xb7hH8MSUJpSbSDYk0k2", "SAY_VOICES' computer for this provider");
+  ok(srvRun.always, "spoken with the chats' Voice off");
+  eq(gets[0].it.text, sayTrim(tts.chunks[0]), "the first piece first");
+  var nChunks = tts.chunks.length;
+  ok(nChunks > 1, "a long entry, in pieces (" + nChunks + ")");
+  await sayLine(gets[0]);
+  ok(!$("#bAloud").classList.contains("busy"), "its first words playing: no longer busy");
+  has($("#bAloud").querySelector(".lg").innerHTML, "Stop", "and offering Stop");
+  eq(gets.length, 2, "the next piece fetched while this one plays");
+
+  console.log("-- aloud: paused and resumed --");
+  ttsPause();
+  ok(tts.on && tts.paused, "paused mid-entry, the reading held");
+  ok(!sayLive(srvRun) && srcs.every(function (x) { return x.stopped; }), "its voice stopped, and the piece fetched dropped");
+  has($("#bAloud").querySelector(".lg").innerHTML, "Resume", "the button offers Resume");
+  click($("#bAloud"));
+  await settle(3);
+  ok(tts.on && !tts.paused, "the button goes on");
+  eq(gets.length, 3, "asking again");
+  eq(gets[2].it.text, sayTrim(tts.chunks[0]), "from the start of the piece it was in");
+  ttsPause();
+  ttsResume();
+  await settle(3);
+  eq(gets.length, 4, "and \"go on reading\" does the same");
+
+  console.log("-- aloud: the server's voice to the end, and stopped --");
+  var gi = 3, guard2 = 0;
+  while (tts.on && guard2++ < 50) {
+    if (gets[gi]) await sayLine(gets[gi++]);
+    await sayHeard();
+  }
+  ok(!tts.on, "the last piece heard ends the reading");
+  eq(gets.length - 3, nChunks, "every piece asked for once, after the resume");
+  has($("#toast").textContent, "finished reading", "and says so");
+  eq($("#bAloud").getAttribute("aria-pressed"), "false", "the button steps down");
+  click($("#bAloud"));
+  await settle(3);
+  var stopRun = gets[gets.length - 1].run;
+  click($("#bAloud"));
+  await settle(2);
+  ok(!tts.on && !sayLive(stopRun), "Stop mid-fetch ends it, the request with it");
+
+  console.log("-- aloud: the server refusing --");
+  var spoke2 = [], pend2 = [];
+  window.SpeechSynthesisUtterance = function (t) { this.text = t; };
+  window.speechSynthesis = { speak: function (u) { spoke2.push(u.text); pend2.push(u); }, cancel: function () { pend2 = []; } };
+  // saySynth speaks through the bare global, which the shim's window is not
+  globalThis.speechSynthesis = window.speechSynthesis;
+  sayGet = function (run, it) { gets.push({ run: run, it: it }); it.failed = it.done = true; run.failed = true; sayFlush(run); it.begin(); };
+  click($("#bAloud"));
+  await settle(4);
+  // the run failed at its first piece, so every piece is handed to the
+  // synthesiser at once (saySynth), which queues them itself
+  ok(tts.on && spoke2.length >= 1, "a refused piece is said in the browser's voice");
+  var guard3 = 0;
+  while (pend2.length && guard3++ < 50) { var u2 = pend2.shift(); if (u2.onstart) u2.onstart(); u2.onend(); await settle(2); }
+  eq(spoke2.length, nChunks, "and the rest of it too");
+  ok(!tts.on, "to the end");
+  window.speechSynthesis = null;
+  window.SpeechSynthesisUtterance = undefined;
+  delete globalThis.speechSynthesis;
+
+  console.log("-- aloud: no voice anywhere --");
+  sayQ.prov = null;
+  hideToast();
+  ttsAloud();
+  ok(!tts.on, "no browser voice and none on the server: nothing starts");
+  has($("#toast").textContent, "cannot speak", "it says why");
+  sayGet = aw.get; sayQ.prov = aw.prov; actx = aw.actx; chatSayUnlock = aw.unlock;
+  closeEditor();
+  unplant(srvRow);
+  hideToast();
+
+  /* The chats' voice idles off (chatVoiceIdle): five minutes with nothing
+     from him and Voice is off, what is being said finishing; the clock is
+     the test's (the `now` it takes), the reload chatVoiceLoad's. */
+  console.log("-- chat voice: off after five minutes idle --");
+  var cvWas = { on: chatVoice.on, at: chatVoice.at, idle: chatVoice.idle, get: sayGet, touch: chatVoiceTouch };
+  chatVoiceIdleSet(5);
+  eq(CHAT_VOICE_IDLE, 5, "five minutes by default");
+  hideToast();
+  chatVoiceSet(true);
+  var cv0 = chatVoice.at;
+  ok(chatVoice.on && sayOn() && cv0 > 0, "Voice on: the tap starts the window");
+  eq(lsGet("lcars.chat.voice", null).at, cv0, "lcars.chat.voice keeps the time of it");
+  ok(!chatVoiceIdle(cv0 + 4 * 60000) && chatVoice.on, "four minutes on: still on");
+  var cvTouches = 0;
+  chatVoiceTouch = function () { cvTouches++; return cvWas.touch(); };
+  chatSayStop();
+  eq(cvTouches, 1, "a tap on the speaking mark (Stop) is his");
+  ttsRead("A line read out.", "#0"); ttsStop(true);
+  eq(cvTouches, 2, "and so is reading aloud started");
+  chatVoiceTouch = cvWas.touch;
+  // a line being said when the window runs out
+  sayGet = function () {};
+  var cvRun = sayRun("computer", true, 0.9, null);
+  sayAdd(cvRun, "Still being said.");
+  eq(cvRun.items.length, 1, "a line on its way");
+  cv0 = chatVoice.at;
+  ok(chatVoiceIdle(cv0 + 5 * 60000 + 1), "five minutes with nothing from him: it goes off");
+  ok(!chatVoice.on && !sayOn(), "Voice off, the queue says nothing new");
+  has($("#toast").textContent, "voice off after 5 min idle", "said at once");
+  eq(lsGet("lcars.chat.voice", null).on, false, "and kept off");
+  ok(sayLive(cvRun), "the line being said is left to finish");
+  sayAdd(cvRun, "A line after it.");
+  eq(cvRun.items.length, 1, "and nothing more is added to it");
+  sayStop(); sayGet = cvWas.get;
+  ok(!chatVoiceIdle(cv0 + 10 * 60000), "already off: nothing more to do");
+  // a reload: the window honoured
+  console.log("-- chat voice: a reload after the window --");
+  var cvNow = Date.now();
+  lsSet("lcars.chat.voice", { on: true, at: cvNow - 6 * 60000 });
+  eq(chatVoiceLoad(cvNow).on, false, "a page loaded after the five minutes starts with Voice off");
+  lsSet("lcars.chat.voice", { on: true, at: cvNow - 60000 });
+  eq(chatVoiceLoad(cvNow).on, true, "one loaded inside them keeps it on");
+  lsSet("lcars.chat.voice", true);
+  eq(chatVoiceLoad(cvNow).on, false, "the old true, with no time, is off");
+  lsSet("lcars.chat.voiceIdle", 0);
+  lsSet("lcars.chat.voice", { on: true, at: cvNow - 3600000 });
+  eq(chatVoiceLoad(cvNow).on, true, "never: an hour later it is still on");
+  // the setting: Config, the palette, the orders
+  console.log("-- chat voice: the idle setting --");
+  chatVoiceIdleSet(15, true);
+  ok(chatVoice.idle === 15 && lsGet("lcars.chat.voiceIdle", 0) === 15, "15 minutes, kept");
+  has($("#toast").textContent, "15 minutes", "and said");
+  chatVoiceIdleSet(7);
+  eq(chatVoice.idle, 5, "a value it does not offer is the default");
+  [["voice off after one minute", 1], ["voice timeout fifteen minutes", 15], ["voice never times out", 0], ["voice off after five minutes", 5]].forEach(function (x) {
+    var h = vMatch(vWords(x[0]), 0);
+    ok(h && /^voice /.test(h.cmd.say), "\u201c" + x[0] + "\u201d is an order");
+    h.cmd.fn(h.arg);
+    eq(chatVoice.idle, x[1], "and sets " + x[1]);
+  });
+  eq(vMatch(vWords("voice off"), 0).cmd.say, "voice off", "\u201cvoice off\u201d is still the switch");
+  var cvPal = paletteRows().map(function (r) { return r.label; });
+  ok(cvPal.indexOf("chat: voice off after 1 min idle") >= 0 && cvPal.indexOf("chat: voice never turns off by itself") >= 0 &&
+     cvPal.indexOf("chat: voice off after 5 min idle") < 0, "the palette offers the others");
+  openCfg(); await settle(2);
+  // the shim's select reads its first option, not the selected attribute: the attribute is the check
+  ok($("#c_vidle") && $("#c_vidle").querySelector('option[value="5"]').getAttribute("selected") !== null, "Config's chat section has it");
+  $("#c_vidle").value = "1"; $("#c_vidle").onchange();
+  eq(chatVoice.idle, 1, "and sets it");
+  closeOv();
+  chatVoiceIdleSet(cvWas.idle);
+  chatVoice.on = cvWas.on; chatVoice.at = cvWas.at; chatVoiceSave(); chatVoicePaint();
+  hideToast();
+
   /* ---------- voice ----------
      There is no SpeechRecognition in here, and there does not need to be: the
      preprocessor is handed the transcript the recogniser would have produced,
@@ -9504,7 +11771,8 @@ async function answerPrompt(text) {
   has(nkRows[nkRows.length - 1].textContent, "new kind", "a name nobody used is offered as a new kind");
   click(nkRows[nkRows.length - 1]);
   eq($("#e_kind").value, "brand_new_kind", "taken, spaces as underscores");
-  eq($("#edkind").textContent, "brand_new_kind", "and the chip says it");
+  eq($("#edkind").textContent, "Brand new kind", "and the chip says it, by its name");
+  has($("#edkind").title, "brand_new_kind", "the slug in its tooltip");
   $("#e_kind").value = vrow.kind; markDirty();
   var vTitle = $("#e_head").value;
   voiceHeard("computer edit title");
@@ -9908,8 +12176,8 @@ async function answerPrompt(text) {
   var sdRow = st.view[0];
   select(sdRow.id);
   await settle(2);
-  eq($("#edtitle .edate").textContent, localOf(sdRow.created_at_utc),
-     "the plain local date and time, nothing made up");
+  eq($("#edtitle .edate").textContent, relStamp(sdRow.created_at_utc),
+     "the local date and time in words, nothing made up");
   closeEditor();
 
   console.log("-- the rail's numbers are real --");
@@ -10464,8 +12732,8 @@ async function answerPrompt(text) {
   runTimers(5000);
   await settle(2);
   ok(zPut === 0 && st.byId.get(zr.id).start_date === zsd, "opening it writes nothing");
-  $("#crsCalled").value = "Planned abroad, renamed";
-  dispatch($("#crsCalled"), "change");
+  $("#crsHeading").value = "Planned abroad, renamed";
+  dispatch($("#crsHeading"), "change");
   await settle(4);
   runTimers(5000);
   await settle(4);
@@ -10888,7 +13156,7 @@ async function answerPrompt(text) {
   eq($("#dlgh").textContent, "Tasks", "and it is the task board");
   ok(window.lcarsDeckView("month") === true && /\d{4}/.test($("#dlgh").textContent), "the month");
   ok(window.lcarsDeckView("readings") === true, "the readings");
-  has($("#dlgh").textContent, "explore", "in the explorer");
+  eq($("#dlgh").textContent, "Readings", "in the explorer");
   ok(window.lcarsDeckView("today") === true && $("#ov").classList.contains("on"), "today");
   ok(window.lcarsDeckView("stats") === true && $("#ov").classList.contains("on"), "the statistics");
   closeOv();
@@ -10946,6 +13214,10 @@ async function answerPrompt(text) {
   eq(dbFind(obEditRow.id).content, obOrig, "the server does not, yet");
   ok(!$("#hq").hidden, "the header says so");
   has($("#hq").textContent, "offline", "in a word");
+  // rule:dots: "offline" and "1 waiting" each a span, no middle dot
+  eq(Array.prototype.map.call($("#hq").querySelectorAll("span"), function (x) { return x.textContent; }).join("|"),
+     "offline|" + (ob.ops.size + ob.media.length) + " waiting", "its facts apart");
+  ok($("#hq").textContent.indexOf("·") < 0, "not dotted");
   var askedBefore = obAsked;
   $("#content").value = obOrig + "\nwritten offline, twice";
   markDirty();
@@ -11332,6 +13604,32 @@ async function answerPrompt(text) {
   chatsOpen = qOpenWas;
   eq(qOpened, "eng-obrien-c33", "a crew member's item opens their conversation");
 
+  // a shipped item with its release entry in the journal reads it; without
+  // one it is the engineer's chat, as before
+  var qRel = await plant({ kind: "release", title: "0.179.0",
+    content: "release:: 0.179.0 2026-10-20\n\n- **web** a live clock in the header" });
+  var qBox = document.createElement("div");
+  qBox.innerHTML = queueShipped(engQueue1.deploys, null);
+  var qShip = qBox.querySelectorAll(".qship");
+  eq(qShip[0].dataset.qrel, String(qRel.id), "a deployed item names its release entry, by its version");
+  ok(!qShip[1].dataset.qrel && !qShip[2].dataset.qrel && !qShip[3].dataset.qrel,
+     "a failed, a rolled-back and one without a release entry do not");
+  eq(queueRelease({ msg: "deployed kim-c32 as 0.179.0: 6 files", versions: [] }), qRel,
+     "the version read off \u201cdeployed <name> as X.Y.Z\u201d without versions");
+  var qSelWas = select, qCloseWas = closeOv, qSel = 0;
+  select = function (id) { qSel = id; return true; };
+  closeOv = function () {};
+  qOpened = "";
+  chatsOpen = function (id) { qOpened = id; };
+  queueTap({ target: qShip[0] });
+  ok(qShip[0].classList.contains("pressing"), "a tap on it shows at once");
+  eq(qSel, qRel.id, "and opens the release in the reader");
+  eq(qOpened, "", "not the chat");
+  queueTap({ target: qShip[3] });
+  eq(qOpened, "eng-yar-c36", "one without a release entry opens the chat as before");
+  select = qSelWas; closeOv = qCloseWas; chatsOpen = qOpenWas;
+  unplant(qRel);
+
   // reorder and take out: thumb-sized controls under each queued item
   var qLine0 = engQueue1.seat.queue.slice(), qEdits = [], qAnswer = null, qHold = null;
   var qNames = function () { return [].map.call($("#qtl").querySelectorAll(".qb-wait .qctl"), function (c) { return c.dataset.qn; }); };
@@ -11499,6 +13797,39 @@ async function answerPrompt(text) {
   ok(qj2 && qj2.cmd.say === "show the jobs" && vMatch(vWords("what jobs are running"), 0).cmd.say === "show the jobs", "\"show the jobs\" is an order");
   await qj2.cmd.fn(qj2.arg);
   ok(!qv.wantJobs && $("#qjobs"), "it paints the queue at its Jobs block");
+  ok(!$("#qjobs").querySelector(".qcores"), "no chip from a server that sends no limit");
+  // two at once (job-queue.md, "More than one"): every one in `runs`, each with its Cancel, the chip
+  engQueue1.seat.jobs = {
+    running: { id: "reyes-c20-20261022-100000", name: "reyes-c20", title: "Chief Ana Reyes", label: "test/buttons.py", t: nowS - 300, since: nowS - 240, elapsed: 240 },
+    runs: [{ id: "reyes-c20-20261022-100000", name: "reyes-c20", title: "Chief Ana Reyes", label: "test/buttons.py", t: nowS - 300, since: nowS - 240, elapsed: 240, cls: "browser" },
+           { id: "okafor-c30-20261022-100100", name: "okafor-c30", title: "Lieutenant Daniel Okafor", label: "test/recording.py", t: nowS - 120, since: nowS - 60, elapsed: 60, cls: "browser" }],
+    queue: [], recent: [], note: "", limit: { n: 2, max: 2, why: "" } };
+  await queueFetch();
+  qJobs = $("#qtl").querySelectorAll(".qb-jobs .qitem");
+  eq(qJobs.length, 2, "both running jobs are listed");
+  has(qJobs[0].innerHTML, "running 4m", "the first with how long it has run");
+  has(qJobs[1].innerHTML, "Lieutenant Daniel Okafor", "the second, whose");
+  has(qJobs[1].innerHTML, "running 1m", "and its own time");
+  ok(qjCtl("reyes-c20-20261022-100000") && qjCtl("okafor-c30-20261022-100100"), "each running job has its Cancel");
+  eq($("#qjobs").querySelector(".qcores").textContent, "cores 2/2", "the chip: running of how many may");
+  ok(!$("#qjobs").querySelector(".qcores.held"), "not marked held");
+  click(qjCtl("okafor-c30-20261022-100100").querySelector("[data-qjc]"));
+  ok($("#qtl").querySelector('.qcf[data-qj="okafor-c30-20261022-100100"]'), "the second's Cancel asks in its own row");
+  click($("#qtl").querySelector(".qcf [data-qjno]"));
+  var qcSeat = eng.seat;
+  eng.seat = Object.assign({}, qcSeat, { jobs: engQueue1.seat.jobs });
+  has(queueRowHtml(), "· jobs: " + esc(engSeatName("reyes-c20")) + ", " + esc(engSeatName("okafor-c30")), "the Queue row's preview names both");
+  eng.seat = qcSeat;
+  engQueue1.seat.jobs.runs.pop();
+  engQueue1.seat.jobs.limit = { n: 1, max: 2, why: "memory pressure 7%" };
+  await queueFetch();
+  eq($("#qjobs").querySelector(".qcores.held").textContent, "held at 1: memory pressure 7%", "a closed limit: held, and why");
+  var qc1 = vMatch(vWords("show the cores"), 0);
+  ok(qc1 && qc1.cmd.say === "show the cores" && vMatch(vWords("how many jobs can run"), 0).cmd.say === "show the cores", "\"show the cores\" is an order");
+  await qc1.cmd.fn(qc1.arg);
+  has($("#toast").textContent, "held at 1: memory pressure 7% · 1 running", "it says the chip");
+  engQueue1.seat.jobs = { running: null, queue: [], recent: [], note: "" };
+  await queueFetch();
   // the Crew list: a row's badge and the queue row's preview
   has(engRowHtml({ name: "okafor-c30", title: "Lieutenant Daniel Okafor", status: "off", job: { id: "j", label: "x", state: "queued", place: 2, since: nowS } }),
       "job #2", "a crew row waiting on a queued job wears its place");
@@ -11990,7 +14321,7 @@ async function answerPrompt(text) {
   ok($(".chth .chlog").innerHTML.indexOf("All quiet.") < 0 && $(".chth .chlog").innerHTML.indexOf("And main is fine.") < 0, "only deck's shown");
   has($(".chth .chlog").innerHTML, "Chairs done.", "deck's answer shown");
   ok(!engPosts.some(function (u) { return /^POST |thread=/.test(u); }), "a filter: nothing posted, nothing fetched by thread");
-  has($(".chth .chbox").placeholder, "to Deck redesign", "the box says whom it goes to");
+  has($(".chth .chbox").placeholder, "in Deck redesign", "the box says which thread it goes to (never \"to <someone>\": iOS AutoFill Contact)");
   has($(".chth .chhdr .chstat").textContent, "thread Deck redesign", "the header says which thread");
   $(".chth .chbox").value = "how are the chairs"; $(".chth .chbox").oninput();
   var thrSend = chatSend();
@@ -12016,11 +14347,15 @@ async function answerPrompt(text) {
   $("#chthren").value = "The bridge";
   click($(".chth .chsheet [data-act=thr-ren]")); await settle(2);
   eq(JSON.stringify(thrOps[thrOps.length - 1]), '{"op":"rename","id":"deck","name":"The bridge"}', "Rename posts op rename");
-  // +: the sheet, a new thread with its opening message, sent as any message
-  click($(".chth .chthr [data-thrplus]"));
-  ok($("#chthcall") && $("#chthseed"), "+ opens the sheet: a name and the opening message");
+  // +: the Rooms page's New room (rooms.md 6.1); the sheet stays (U, the voice)
+  click($(".chth .chthr [data-thrplus]")); await settle(3);
+  ok($("#rmnewhead") && !$("#rmnew").hidden, "+ opens the Rooms page at New room");
+  rmStop(); rm.newOpen = false;
+  chatsOpen(n1.id); await settle(2);
+  engThreadsSheet(); await settle(1);
+  ok($("#chthhead") && $("#chthseed"), "the sheet: a name and the opening message");
   ok(!$(".chth .chsheet [data-act=thr-fork]"), "no Branch");
-  $("#chthcall").value = "Web app"; $("#chthseed").value = "Look at the console's header.";
+  $("#chthhead").value = "Web app"; $("#chthseed").value = "Look at the console's header.";
   click($(".chth .chsheet [data-act=thr-new]"));
   ok($(".chth .chthr [data-thr=web-app]") && $(".chth .chthr [data-thr=web-app]").classList.contains("pend"), "its chip at once, pending");
   eq(n1.eng.thread, "web-app", "and picked");
@@ -12764,7 +15099,7 @@ async function answerPrompt(text) {
     ok(tc && tc.dataset.s === "working", "the thread, found by the alias in its title, sets the chip");
     has(tc.textContent, "Torres working", "naming them");
     click(tc); await settle(2);
-    has($("#rd_notes .ntq").getAttribute("placeholder"), "Reply to Lieutenant B'Elanna Torres", "the reply box names them");
+    eq($("#rd_notes .ntq").getAttribute("placeholder"), "your reply", "the reply box addresses no one (iOS AutoFill Contact); the thread shows whom");
     await api("/entries/" + pT.id, { method: "PUT", body: { done_bool: 1, content: pT.content.replace("status: working", "status: answered") +
       "\n### Lieutenant B'Elanna Torres · 2026-10-18 10:40\nReport: fixed in 0.256.1.\n" } });
     await refetchInto(pT); refresh(); await settle(3);
@@ -13335,7 +15670,7 @@ async function answerPrompt(text) {
       upd.at = 0;
       await updCheck(false); await settle(2);
       ok($("#appVer").classList.contains("upd"), "a newer version marks the header's version");
-      eq($("#appVer").textContent, "v" + APP_VERSION, "whose text stays this page's version");
+      eq($("#appVer").textContent, APP_VERSION + " · live " + served, "the header says this page's version and the live one");
       eq($("#appVer").getAttribute("role"), "button", "and makes it a button");
       has($("#toast").textContent, "v" + served + " is on the server", "told once, in a toast");
       eq($("#toast").querySelector(".tact") && $("#toast").querySelector(".tact").textContent, "Update",
@@ -13346,13 +15681,16 @@ async function answerPrompt(text) {
       ok(!$("#toast").classList.contains("on"), "the same version is not told twice");
 
       click($("#appVer")); await settle(1);
-      ok($("#ov").classList.contains("on") && $("#c_upd"), "a tap on the marked version opens the settings");
+      ok($("#ov").classList.contains("on") && $("#wnrows"), "a tap on the version opens What's new");
+      eq(st.route && st.route.v, "whatsnew", "at its own url");
+      eq(document.activeElement, $('#wn_upd [data-act="update"]'), "focused on its Update");
+      ok(!$('#wn_upd [data-act="news"]'), "which has no What's new button of its own");
+      openCfg(); await settle(1);
       var row = function () { return $("#c_upd").textContent; };
       var btn = function (a) { return $("#c_upd").querySelector('[data-act="' + a + '"]'); };
-      has(row(), "v" + APP_VERSION + " · server v" + served, "the row says both versions");
+      has(row(), "v" + APP_VERSION + " · server v" + served, "the settings' row says both versions");
       eq(btn("update").textContent, "Update to v" + served, "Update to the server's version");
-      ok(btn("check") && btn("reload") && btn("later"), "with Check now, Reload and Later");
-      eq(document.activeElement, btn("update"), "focused on Update");
+      ok(btn("check") && btn("reload") && btn("later") && btn("news"), "with Check now, Reload, Later and What's new");
 
       click(btn("later")); await settle(1);
       ok(!$("#appVer").classList.contains("upd"), "Later takes the mark down");
@@ -13409,6 +15747,77 @@ async function answerPrompt(text) {
         eq(hit && hit.cmd.say, x, "\u201c" + x + "\u201d is an order");
       });
       eq(vMatch(vWords("reload"), 0).cmd.say, "reload", "\u201creload\u201d is still the journal's");
+
+      console.log("\n-- releases: entries of kind release, What's new --");
+      closeOv(); await settle(1);
+      upd.leaving = false; upd.busy = ""; updPaint();
+      var vp = APP_VERSION.split(".").map(Number), vAt = function (d) { return vp[0] + "." + vp[1] + "." + (vp[2] + d); };
+      var rlOld = await plant({ kind: "release", title: APP_VERSION,
+        content: "release:: " + APP_VERSION + " 2026-10-23\n\n- **web** this page's own release" });
+      var rlNew1 = await plant({ kind: "release", title: vAt(1),
+        content: "release:: " + vAt(1) + " 2026-10-24\n\n- **web** The **first** newer one, [[LCARS UI]]\n- **ops** a second bullet" });
+      var rlNew2 = await plant({ kind: "release", title: vAt(2),
+        content: "release:: " + vAt(2) + " 2026-10-25\n\n- **web** The second newer one" });
+      var rlR = releaseOf(rlNew1);
+      eq(rlR && rlR.v, vAt(1), "the marker's version is read");
+      eq(rlR && rlR.date, "2026-10-24", "and its date");
+      eq(releaseOf({ kind: "personal_log", content: rlNew1.content }), null, "not in another kind");
+      eq(releaseFor(vAt(2)), rlNew2, "an entry is found by its version");
+
+      // the list's preview: the version and the first words, never the marker
+      eq(snippet(rlNew1).indexOf(vAt(1) + " · web The first newer one, LCARS UI"), 0, "a release's preview is its version and first words");
+      ok(snippet(rlNew1).indexOf("release::") < 0 && snippet(rlNew1).indexOf("**") < 0, "never the marker line or the source");
+
+      // the reader: the version and date as the head, the bullets as markdown
+      select(rlNew1.id);
+      var rlH = $("#rd_content").querySelector("h3.relh");
+      ok(rlH && rlH.textContent.indexOf(vAt(1)) >= 0 && rlH.textContent.indexOf(dayShort(dayDate("2026-10-24"))) >= 0,
+         "the reader heads it with its version and date");
+      ok(rlH && rlH.textContent.indexOf("2026-10-24") < 0, "the date in words, not ISO (rule:words)");
+      ok($("#rd_content").querySelectorAll("li").length === 2 && $("#rd_content").querySelector("b"), "and renders its bullets as markdown");
+      ok($("#rd_content").textContent.indexOf("release::") < 0, "without its marker");
+      setRead(false);
+      ok(/^release:: /.test($("#content").value), "the editor shows the raw text");
+      setRead(true);
+
+      // What's new: the newer releases, newest first, then the update row
+      openWhatsNew(); await settle(2);
+      var wn = $("#wnrows").querySelectorAll(".relrow");
+      eq(wn.length, releaseEntries().filter(function (e) { return verCmp(releaseVer(e), APP_VERSION) > 0; }).length,
+         "every release newer than this page, and only those");
+      var wnIds = [].map.call(wn, function (r) { return +r.dataset.relid; });
+      eq(wnIds[0], rlNew2.id, "newest first");
+      ok(wnIds.indexOf(rlNew1.id) > 0, "then the one before");
+      var wn1 = $("#wnrows").querySelector('[data-relid="' + rlNew1.id + '"]');
+      ok(!$("#wnrows").querySelector('[data-relid="' + rlOld.id + '"]'), "not this page's own");
+      ok(wn1 && wn1.querySelector("h3.relh") && wn1.querySelector("li b"), "each its head over its notes, as markdown");
+      has($("#wnnote").textContent, "newer than this page's v" + APP_VERSION, "the note says against what");
+      ok($('#wn_upd [data-act="reload"]'), "then the Reload button");
+      closeOv(); await settle(1);
+      // a body the sweep has not brought: fetched, then drawn
+      delete rlNew1.content;
+      openWhatsNew();
+      has($("#wnrows").textContent, "loading…", "a release not loaded yet says so");
+      await settle(3);
+      ok($("#wnrows").querySelector('[data-relid="' + rlNew1.id + '"] li'), "and is drawn once its body lands");
+      closeOv(); await settle(1);
+      [rlNew1, rlNew2].forEach(unplant);
+      var rlNone = releaseEntries().some(function (e) { return verCmp(releaseVer(e), APP_VERSION) > 0; });
+      openWhatsNew(); await settle(1);
+      if (!rlNone) has($("#wnnote").textContent, "nothing newer than this page's", "none newer: it says so");
+      closeOv(); await settle(1);
+      unplant(rlOld);
+      // the voice order and the palette row
+      ["what's new", "release notes", "what changed"].forEach(function (x) {
+        var hit = vMatch(vWords(x), 0);
+        eq(hit && hit.cmd.say, "what's new", "\u201c" + x + "\u201d is What's new");
+      });
+      vMatch(vWords("release notes"), 0).cmd.fn(); await settle(1);
+      ok($("#wnrows"), "and opens it");
+      closeOv(); await settle(1);
+      ok(paletteRows().some(function (r) { return r.label === "app · what's new, the releases since this page"; }), "a palette row too");
+      eq(vMatch(vWords("get new entries"), 0).cmd.say, "get new entries", "\u201cget new entries\u201d is still the sync");
+      eq(vMatch(vWords("catch up"), 0).cmd.say, "get new entries", "and \u201ccatch up\u201d");
     } finally {
       updFetchVersion = realFetchV; updShell = realShell; updReload = realReload;
       upd.leaving = false; upd.busy = ""; upd.failed = ""; upd.server = "";
@@ -13628,6 +16037,11 @@ async function answerPrompt(text) {
       eq(sh.map(function (x) { return x.role + ":" + (x.who || (x.via && x.via.tag) || ""); }).join("|"), "ship:okafor-c30|ship:obrien-c33|user:question",
          "the ship's lines are notices, his carried words his");
       eq(sh[1].text + "|" + sh[1].th, "deployed|deck", "the tag and the name the label gives off the text; the thread kept");
+      // the poll's names (rooms.md 8): `room`/`rooms` since 0.310, `th`/`threads` before, either read
+      var rn = engRoomNames({ rooms: [{ id: "deck", name: "Deck" }], events: [{ r: "me", t: "x", room: "deck" }, { r: "me", t: "y", th: "web" }] });
+      eq(rn.threads[0].id + "|" + rn.events.map(function (x) { return x.th; }).join(","), "deck|deck,web", "engRoomNames: the new names read as the old");
+      eq(engRoomNames({ threads: [{ id: "web" }], events: [] }).threads[0].id, "web", "engRoomNames: the old names kept");
+      eq(engRoomNames(null), null, "engRoomNames: no answer, none");
       eq(sh[0].text.slice(0, 32) + "|" + sh[2].text, "finished a turn. Last words: Rep|Go? Notes: yes",
          "a report's name and title, a ticked question's number: what the labels say, off the text");
       eq(engFromText("[captain] A note to you, written in entry #4 \"x\" (crew note #44): look at it", engFrom("[captain] A note to you, written in entry #4 \"x\" (crew note #44): look at it")),
@@ -13662,6 +16076,111 @@ async function answerPrompt(text) {
       has(rc, "rpcard", "an engineer's published report: a card");
       has(rc, "Weekly review", "with its title");
       has(rc, "View", "and View (the report viewer)");
+
+      // a report that is a picture or an MP4, in a chat: in place, not a card;
+      // one the words already show, once
+      var rh = "https://host.example/media/reports/2026/10/";
+      var rm = document.createElement("div");
+      rm.innerHTML = reportCards("Plot: " + rh + "plot-ab12cd34.png and the run " + rh + "run-ab12cd34.mp4; the page " + rh + "page-ab12cd34.html", "");
+      ok(rm.querySelector(".rpmedia .mdmedia.image img[data-light]"), "a picture report: a thumbnail, its tap the lightbox");
+      var rv = rm.querySelector(".rpmedia video");
+      ok(rv && rv.hasAttribute("muted") && rv.hasAttribute("playsinline") && rv.getAttribute("src").indexOf("run-ab12cd34.mp4") > 0, "an MP4: a muted player");
+      eq(rm.querySelectorAll(".rpcard").length + "|" + rm.querySelector(".rpcard .rptype").textContent, "1|HTML", "the HTML one still a card");
+      var shownH = chatMd("![plot](" + rh + "plot-ab12cd34.png)");
+      ok(reportCards(rh + "plot-ab12cd34.png", shownH).indexOf("<img") < 0, "a picture the words show already is not drawn twice");
+      eq(reportCards(rh + "plot-ab12cd34.png").indexOf("rpcard") > 0, true, "outside a chat (no html given) a card as before");
+      eq(reportLinks("see " + rh + "plot-ab12cd34.png, then " + rh + "page-ab12cd34.html.").map(function (l) { return l.rel.split("/").pop(); }).join("|"),
+         "plot-ab12cd34.png|page-ab12cd34.html", "a link's trailing comma or full stop is the sentence's, not the file's");
+
+      // the pictures an engineer's session saw (engineer.py's "img" events)
+      var ik = lsGet("lcars.deck.engkey", ""), realF = fetch, asked = [];
+      lsSet("lcars.deck.engkey", "k".repeat(24));
+      fetch = function (url, init) {
+        if (String(url).indexOf("/engineer/") < 0) return realF(url, init);
+        asked.push({ url: String(url), key: init && init.headers && init.headers["X-LCARS-Engineer-Key"] });
+        var gone = String(url).indexOf("k=s%3A9%3A0") > 0;
+        return Promise.resolve({ ok: !gone, status: gone ? 404 : 200, blob: function () { return Promise.resolve({ type: "image/png", size: 3 }); } });
+      };
+      var it = engThread("itest", "Lt. Pictures");
+      engFold(it.eng, [{ r: "them", t: "Taking a look.", k: "s:1:0" },
+                       { r: "tool", t: "Read: ~/shot.png", n: "Read", a: "shot.png", k: "s:2:0" },
+                       { r: "img", t: "", m: "image/png", w: 400, h: 200, k: "s:3:0", img: "s:3:0" },
+                       { r: "them", t: "The bar is cut off.", k: "s:4:0" },
+                       { r: "img", t: "", m: "image/png", k: "s:9:0", img: "s:9:0" }]);
+      var am = it.eng.done[it.eng.done.length - 1];
+      eq(am.parts.map(function (p) { return p.t; }).join(","), "text,tool,img,text,img", "engFold: the pictures in the answer at their place");
+      eq(am.parts[2].key + "|" + am.parts[2].eng + "|" + am.parts[2].w, "s:3:0|itest|400", "keyed, with its engineer and size");
+      eq(chatMsgText(am), "Taking a look.\n\nThe bar is cut off.", "a picture has no words: nothing of it said or quoted");
+      var ah = chatMsgHtml(am, 0);
+      ok(ah.indexOf("Taking a look.") < ah.indexOf("data-eimg=\"s:3:0\"") && ah.indexOf("data-eimg=\"s:3:0\"") < ah.indexOf("The bar is cut off."),
+         "drawn in order: the words, the picture, the words after it");
+      ok(ah.indexOf("--r:2.0000") > 0 && ah.indexOf("chimload") > 0, "its box at its own aspect at once, loading");
+      ok(ah.indexOf("/engineer/") < 0 && ah.indexOf("shot.png\"") < 0, "no URL or path in the markup: a key");
+      var ilog = document.createElement("div");
+      ilog.className = "chlog";
+      document.body.appendChild(ilog);
+      chatLogPaint(ilog, [am], "");
+      await settle(4);
+      eq(asked.length, 2, "both fetched (no IntersectionObserver here: at once)");
+      ok(/\/engineer\/itest\/image\?k=s%3A3%3A0$/.test(asked[0].url) && asked[0].key === "k".repeat(24), "by key, with the engineer key");
+      var b0 = ilog.querySelector("[data-eimg=\"s:3:0\"]"), b1 = ilog.querySelector("[data-eimg=\"s:9:0\"]");
+      ok(b0.classList.contains("ready") && /^blob:/.test(b0.querySelector("img").src || b0.querySelector("img").getAttribute("src")), "the picture in its box, from an object URL");
+      ok(b1.classList.contains("bad") && b1.textContent.indexOf("no longer in the transcript") >= 0, "one the server has not: says so in its box");
+      ok(chatMsgHtml(am, 0).indexOf("<img src=\"blob:") > 0, "a redraw has it at once (still held: it is on screen)");
+      engImgOpen(b0, ilog);
+      ok(b0.classList.contains("pressing"), "a tap shows at once");
+      await settle(2);
+      ok(media.light && media.light.querySelector(".mlclose"), "and opens it full screen, with a close");
+      click(media.light.querySelector(".mlclose"));
+      ok(!media.light, "close closes");
+      var nAsked = asked.length;
+      engImgOpen(b1, ilog);
+      await settle(2);
+      eq(asked.length, nAsked + 1, "a tap on one that failed asks again");
+      ok(paletteRows().some(function (r) { return r.label === "chat · show the last picture" && r.run === chatShowPicture; }), "a palette row: show the last picture");
+      ok(VCMDS.some(function (c) { return c.say === "show the picture" && c.alias.indexOf("show the image") >= 0; }), "and the voice order: show the image");
+      // the object URLs do not grow a long session (the captain's phone):
+      // one on screen kept, a thread left lets go of its pictures, the
+      // cache an LRU of ENG_IMG_MAX
+      var rURL = globalThis.URL, live = {}, nLive = function () { return Object.keys(live).length; }, nu = 0;
+      globalThis.URL = { createObjectURL: function () { var u = "blob:lru/" + (++nu); live[u] = 1; return u; },
+              revokeObjectURL: function (u) { delete live[u]; } };
+      engImgTrim(0);
+      ok(b0.classList.contains("ready") && ENG_IMG.has("itest/s:3:0"), "a picture on screen is not let go");
+      ilog.remove();
+      var tBefore = engImgTrimT;
+      engStop(it);
+      ok(engImgTrimT && engImgTrimT !== tBefore, "a thread left or stopped (engStop) asks for its pictures to be let go");
+      engImgTrim(0);
+      eq(ENG_IMG.size, 0, "a thread off screen: every picture let go");
+      var pics = [];
+      for (var pi = 0; pi < 6; pi++) pics.push({ r: "img", t: "", m: "image/png", w: 4, h: 3, k: "s:" + (20 + pi) + ":0", img: "s:" + (20 + pi) + ":0" });
+      var peaks = [];
+      for (var round = 0; round < 3; round++) {
+        var pt = engThread("itest", "Lt. Pictures");
+        pt.eng.done = []; pt.eng.events = [];
+        engFold(pt.eng, pics);
+        var plog = document.createElement("div");
+        plog.className = "chlog";
+        document.body.appendChild(plog);
+        chatLogPaint(plog, [pt.eng.done[pt.eng.done.length - 1]], "");
+        await settle(4);
+        peaks.push(nLive());
+        plog.remove();
+        engImgTrim(0);
+        peaks.push(nLive());
+      }
+      eq(peaks.join(","), "6,0,6,0,6,0", "a thread with six pictures opened and closed three times: six held while open, none after");
+      for (var li = 0; li < ENG_IMG_MAX + 8; li++) engImgGet("itest", "s:" + (100 + li) + ":0");
+      await settle(4);
+      eq(ENG_IMG.size + "|" + nLive(), ENG_IMG_MAX + "|" + ENG_IMG_MAX, "never more than ENG_IMG_MAX held: the oldest let go");
+      ok(!ENG_IMG.has("itest/s:100:0") && ENG_IMG.has("itest/s:" + (100 + ENG_IMG_MAX + 7) + ":0"), "the oldest went, the newest stayed");
+      engImgTrim(0);
+      globalThis.URL = rURL;
+      clearTimeout(engImgTrimT);
+      fetch = realF;
+      lsSet("lcars.deck.engkey", ik);
+      chats.list.splice(chats.list.indexOf(it), 1);
       // a dock window's live answer: a finished line with a picture is settled, not redrawn every frame
       var cut = dockLiveCut("Look:\n![p](media/chat/a.png)\nand then more");
       eq(cut, "Look:\n![p](media/chat/a.png)".length, "a picture's finished line is a cut in a dock window's stream");
@@ -13965,9 +16484,10 @@ async function answerPrompt(text) {
     eq(oqDraft(qA.id), "Ship it, after the phone check.", "typing is kept as the draft");
     oq.sig = ""; oqPaint();
     eq($("#oqrows").querySelector('[data-oqa="' + qA.id + '"]').value, "Ship it, after the phone check.", "and survives a repaint");
-    click($("#oqrows").querySelector('[data-oqlater="' + qA.id + '"]')); await settle(1);
-    ok(st.byId.get(qA.id).done_bool == 0, "Later keeps it open");
-    has($("#toast").textContent, "draft kept", "and says the draft is kept");
+    click($("#oqrows").querySelector('[data-oqlater="' + qA.id + '"]'));
+    ok($("#oqrows").querySelector('[data-oqsnz="' + qA.id + ':1h"]'), "Later shows its choices in the same frame");
+    click($("#oqrows").querySelector('[data-oqlater="' + qA.id + '"]'));
+    ok(!$("#oqrows").querySelector("[data-oqsnz]") && st.byId.get(qA.id).done_bool == 0, "a second tap folds them, the card left as it was");
     // Answer and close
     var was = DB.filter(function (r) { return r.id === qA.id; })[0].content;
     var pA = oqAnswer(qA.id);
@@ -14017,6 +16537,103 @@ async function answerPrompt(text) {
     oqDraftSet(qA.id, "");
     unplant(qA); unplant(qB); unplant(qOld);
     eq(oqCount(), n0, "and gone with the rows");
+  })();
+
+  console.log("\n-- open questions: Later snoozes one (lcars.oqSnooze) --");
+  await (async function () {
+    closeOv(); hideToast();
+    lsSet(OQ_SNOOZE_KEY, {});
+    var n0 = oqCount(), b0 = engAnswerCount(), k1 = no1Asks();
+    var qS = await plant({ kind: "task_no1", title: "Rename the deck's lounge?", done_bool: 0, content: "Q1: Rename it?\nOptions: A) yes B) no" });
+    var qT = await plant({ kind: "task_crew", title: "Rotate the backup key?", done_bool: 0, content: "ops asks" });
+    refresh();
+    eq(oqCount(), n0 + 2, "both counted");
+    eq(no1Asks(), k1 + 1, "Number One's counted on its own");
+    openQuestions(); await settle(2);
+    var cS = function () { return [].filter.call($("#oqrows").querySelectorAll('[data-oqid="' + qS.id + '"]'), function (c) { return !c.closest(".oqlrow"); })[0]; };
+    ok(cS(), "its card is in the list");
+    // the choices, and a choice
+    click($("#oqrows").querySelector('[data-oqlater="' + qS.id + '"]'));
+    var pick = [].filter.call($("#oqrows").querySelectorAll("[data-oqsnz]"), function (b) { return b.dataset.oqsnz.indexOf(qS.id + ":") === 0; });
+    eq(pick.length, 3, "an hour, three hours, tomorrow morning");
+    ok($("#oqrows").querySelector('[data-oqlater="' + qS.id + '"].on'), "Later pressed while they show");
+    var t0 = Date.now();
+    click($("#oqrows").querySelector('[data-oqsnz="' + qS.id + ':3h"]'));
+    ok(!cS(), "the card leaves the list at once");
+    var z = lsGet(OQ_SNOOZE_KEY, {})[qS.id];
+    ok(z && Math.abs(z.u - t0 - 3 * 3600e3) < 5000 && z.m === String(qS.last_modified_at_utc), "kept on the device: when it is back, the row's stamp");
+    eq(oqCount(), n0 + 1, "out of the count");
+    eq(no1Asks(), k1, "and Number One's");
+    eq(engAnswerCount(), b0 + 1, "and what waits on the captain");
+    has($("#bChat").textContent, String(chatUnreadTotal() + engAnswerCount()), "the Chats button follows");
+    has($("#oqstat").textContent, "1 later", "the header says one is later");
+    has($("#toast").textContent, "later, until", "a toast says until when");
+    var undo = $("#toast").querySelector(".tact");
+    ok(undo && undo.textContent === "Undo", "with Undo");
+    click(undo); await settle(1);
+    ok(cS() && oqCount() === n0 + 2 && !(qS.id in lsGet(OQ_SNOOZE_KEY, {})), "Undo puts it back, counted");
+    // tomorrow morning: 9:00 on the device's clock, the next day
+    var am = new Date(oqLaterAt("am", new Date(2026, 9, 22, 23, 30).getTime()));
+    ok(am.getDate() === 23 && am.getHours() === 9 && am.getMinutes() === 0, "tomorrow morning is 9:00 the next day");
+    // the Later row: folded, then a line, then the card itself, still snoozed
+    oqSnooze(qS.id, "1h"); await settle(1);
+    var lrow = $("#oqrows").querySelector(".oqlrow");
+    ok(lrow && /Later/.test(lrow.textContent) && /next back/.test(lrow.textContent), "a Later row at the bottom, saying when");
+    ok(lrow === $("#oqrows").lastElementChild || lrow === $("#oqrows").children[$("#oqrows").children.length - 1], "at the bottom");
+    ok(!lrow.querySelector("[data-oqpeek]"), "folded");
+    click(lrow.querySelector("[data-oqlrow]"));
+    var pk = $("#oqrows").querySelector('[data-oqpeek="' + qS.id + '"]');
+    ok(pk, "a tap unfolds it to a line per snoozed question");
+    click(pk);
+    ok($("#oqrows").querySelector('.oqlrow [data-oqid="' + qS.id + '"] [data-oqc]'), "a tap on one opens its card there, to answer");
+    eq(oqCount(), n0 + 1, "still snoozed while it is open");
+    click($("#oqrows").querySelector('[data-oqwake="' + qS.id + '"]'));
+    ok(cS() && oqCount() === n0 + 2, "Now brings it back");
+    // back on time: the timer, with the page left open
+    oqSnooze(qS.id, "1h"); await settle(1);
+    eq(oqCount(), n0 + 1, "snoozed again");
+    var realNow = Date.now;
+    Date.now = function () { return realNow() + 3601e3; };
+    runTimers(3601e3);
+    ok(cS(), "back in the list when its hour has passed, by the timer");
+    eq(oqCount(), n0 + 2, "counted again");
+    ok(!(qS.id in lsGet(OQ_SNOOZE_KEY, {})), "its mark dropped");
+    Date.now = realNow;
+    // and after a reload: only the mark and the clock, no timer
+    var m = {}; m[qS.id] = { u: Date.now() - 1000, m: String(qS.last_modified_at_utc) };
+    lsSet(OQ_SNOOZE_KEY, m);
+    ok(!oqSnoozed(qS) && oqCount() === n0 + 2, "a mark passed while the page was shut is no snooze");
+    // back on a change: the row written after the snooze
+    oqSnooze(qS.id, "am"); await settle(1);
+    eq(oqCount(), n0 + 1, "snoozed till tomorrow");
+    var r = dbFind(qS.id);
+    r.content += "\nadded: the captain's own line"; r.last_modified_at_utc = "2099-03-03 00:00:00";
+    await refetchInto(qS); refresh(); await settle(1);
+    ok(cS(), "back as soon as the entry changes");
+    eq(oqCount(), n0 + 2, "and counted");
+    ok(!(qS.id in lsGet(OQ_SNOOZE_KEY, {})), "the mark dropped with it");
+    // the chats list's row with only snoozed ones: there, unbadged
+    oqList().forEach(function (e) { oqSnooze(e.id, "1h"); });
+    eq(oqCount(), 0, "every one snoozed: none counted");
+    ok(/later, the next back/.test(oqRowHtml()) && !/chbadge/.test(oqRowHtml()), "the Chats row stays, saying when, no badge");
+    has($("#oqrows").textContent, "nothing waiting on you now", "the list says the rest is in Later");
+    // the orders and the palette
+    eq(vMatch(vWords("snooze this question"), 0).cmd.say, "snooze this question", "“snooze this question” is an order");
+    eq(vMatch(vWords("later"), 0).cmd.say, "snooze this question", "and “later”");
+    eq(vMatch(vWords("snooze this question for three hours"), 0).cmd.say, "snooze this question for {*}", "with a time");
+    eq(vMatch(vWords("show the snoozed questions"), 0).cmd.say, "the snoozed questions", "and the Later row's");
+    lsSet(OQ_SNOOZE_KEY, {}); oqWoke();
+    oqSnoozeSaid("three hours");
+    ok(Object.keys(lsGet(OQ_SNOOZE_KEY, {})).length === 1, "said, the top one snoozed");
+    var zz = lsGet(OQ_SNOOZE_KEY, {}), zid = Object.keys(zz)[0];
+    ok(zz[zid].u - Date.now() > 2.9 * 3600e3, "for three hours");
+    oqLaterSaid();
+    ok(oq.laterOpen && $("#oqrows").querySelector("[data-oqpeek]"), "“the snoozed questions” unfolds the Later row");
+    ok(paletteRows().some(function (p) { return /snooze the top one/.test(p.label); }), "a palette row");
+    closeOv();
+    lsSet(OQ_SNOOZE_KEY, {}); oq.laterOpen = false; oq.peek.clear();
+    unplant(qS); unplant(qT);
+    eq(oqCount(), n0, "gone with the rows");
   })();
 
   console.log("\n-- open questions: the social watch's notice (task_crew_social) --");
@@ -14854,6 +17471,449 @@ async function answerPrompt(text) {
     // nothing of the sheet without an entry
     closeEditor(); await settle(2);
     ok(!shareThis(), "with no entry open, Share says so");
+  })();
+
+  // ---------- the Rooms page (docs/design/rooms.md, section 6) ----------
+  await (async function () {
+    console.log("\n-- rooms: the list, a room, the box --");
+    if ($("#ov").classList.contains("on")) closeOv();
+    var rmKeyWas = lsGet("lcars.deck.engkey", ""), rmListWas = eng.list, rmFetchWas = fetch, rmSays = [], rmOps = [];
+    var rmSayAns = null, rmSayEnd = null;
+    lsSet("lcars.deck.engkey", "k");
+    eng.list = [{ name: NO1, title: "Number One", status: "idle", active: 1 },
+                { name: "obrien-x", title: "Chief O'Brien", status: "idle", active: 2 },
+                { name: "kim-x", title: "Ensign Kim", status: "off", active: 1 }];
+    eng.at = Date.now() + 1e9;   // no list fetch over these
+    var rmJson = function (o, code) { var t = JSON.stringify(o); return Promise.resolve({ ok: !code || code < 400, status: code || 200,
+      json: function () { return Promise.resolve(JSON.parse(t)); }, text: function () { return Promise.resolve(t); },
+      headers: { get: function () { return "application/json"; } } }); };
+    fetch = function (url, o) {
+      var u = String(url);
+      if (u.indexOf("/engineer") < 0) return rmFetchWas.apply(this, arguments);
+      if (/\/thread$/.test(u)) { rmOps.push(JSON.parse(o.body)); return rmJson({ ok: true, threads: [] }); }
+      if (/\/start$/.test(u)) { rmSays.push({ start: u.replace(/^.*\/engineer\//, "") }); return rmJson({ ok: true }); }
+      if (/\/say$/.test(u)) {
+        var b = JSON.parse(o.body);
+        b.who = u.replace(/^.*\/engineer\//, "").replace(/\/say$/, "");
+        rmSays.push(b);
+        if (rmSayAns === "hold") return new Promise(function (res) { rmSayEnd = function (a, c) { res(rmJson(a, c)); }; });
+        return rmSayAns ? rmJson(rmSayAns[0], rmSayAns[1]) : rmJson({ ok: true });
+      }
+      return rmJson({ ok: true });
+    };
+    var at = "2026-10-20 10:00:00";
+    var put = async function (kind, title, content, done, when) {
+      var r = await api("/entries", { method: "POST", body: { kind: kind, title: title, content: content, done_bool: done ? 1 : 0,
+                                                             created_at_utc: when || at } });
+      return r.id;
+    };
+    // the journal's own crew rows (the live one holds thousands) set aside
+    // for these checks, and put back at the end: they count rooms and orders
+    var rmIsCrew = function (r) { return r.kind === "crew_msg" || r.kind === "crew_room" || (r.kind === "settings" && r.title === "rooms"); };
+    var rmSetDb = DB.filter(rmIsCrew), rmSetSt = st.all.filter(rmIsCrew);
+    DB = DB.filter(function (r) { return !rmIsCrew(r); });
+    st.all = st.all.filter(function (r) { return !rmIsCrew(r); });
+    rmSetSt.forEach(function (r) { st.byId.delete(r.id); });
+    rm.gen++;
+    var long = []; for (var li = 1; li <= 20; li++) long.push("line " + li);
+    await put("crew_room", "Deck redesign", "id:: deck\nby:: captain", 0);
+    await put("crew_room", "Old work", "id:: old\nby:: no1", 1);
+    var rAsk = await put("crew_msg", "captain → no1 #deck: How are the chairs?", "room:: deck\nHow are the chairs?", 1);
+    var rOrd = await put("crew_msg", "no1 → obrien-x #deck: [No.1] Fix the chairs", "to:: obrien-x\n[No.1] Fix the chairs", 0);
+    var rRep = await put("crew_msg", "obrien-x → #deck: Report: done", "room:: deck\nReport: done\n" + long.join("\n"), 1);
+    var rShip = await put("crew_msg", "ship → no1 #deck: [deploy finished] obrien-x: 0.1.2", "room:: deck\n[deploy finished] obrien-x: 0.1.2", 1);
+    var rMis = await put("crew_msg", "obrien-x → #deck: Misfiled", "room:: deck\nmisrouted:: room:: deck2\nMisfiled", 1);
+    var rCan = await put("crew_msg", "[cancelled] no1 → obrien-x #deck: [No.1] Never mind", "to:: obrien-x\n[No.1] Never mind", 1);
+    var rMain = await put("crew_msg", "captain → no1 #main: Status?", "room:: main\nat:: 2026-10-01 08:09:10\nsrc:: s-old s-old:120\nStatus?", 1, "2026-10-23 12:00:00");
+    await put("crew_msg", "captain → obrien-x #obrien-x: One to one", "room:: obrien-x\nOne to one", 1);
+    await put("crew_msg", "kim-x → #old: Closed room's", "room:: old\nClosed room's", 1);
+    lsSet(RM_SEEN_KEY, {});
+    await openRooms(); await settle(4);
+    var rows = [].map.call($("#rmlist").querySelectorAll("[data-rm]"), function (b) { return b.dataset.rm; });
+    // the order of the rooms seeded here, among whatever else the list holds
+    var rmMine = ["deck", "main", "obrien-x", "kim-x"];
+    eq(rows.filter(function (id) { return rmMine.indexOf(id) >= 0; }).join(","), rmMine.join(","),
+       "the list: the project room first, then Number One's, then each engineer's");
+    ok(!!$("#rmlist").querySelector("details[data-rmclosed]") && $("#rmlist").querySelector("details[data-rmclosed] [data-rm=old]"), "a closed room behind Closed");
+    has($("#rmlist").querySelector("[data-rm=deck]").textContent, "Number One: Never mind", "a row: who spoke last and their first line (its tag off)");
+    ok(!$("#rmlist").querySelector("[data-rm=deck] [aria-label=unread]"), "a room first met is taken as read");
+    eq(pageOf(stateRel()), "rooms", "the page's url is rooms");
+    // a new row from the crew: the dot, by the poll
+    await put("crew_msg", "obrien-x → #deck: Second report", "room:: deck\nSecond report", 1);
+    await rmPoll(); await settle(2);
+    ok(!!$("#rmlist").querySelector("[data-rm=deck] [aria-label=unread]"), "a row past the one seen: the unread dot");
+    eq(rmUnreadCount(), 1, "one room unread");
+    // a room
+    click($("#rmlist").querySelector("[data-rm=deck]")); await settle(3);
+    eq(pageOf(stateRel()), "rooms/deck", "a room: rooms/<id>");
+    var log = $("#rmlog"), ms = log.querySelectorAll(".rmm");
+    has(ms[0].textContent, "How are the chairs?", "oldest at the top");
+    ok(ms[0].classList.contains("me"), "the captain's on the right");
+    has(ms[1].querySelector(".rmn").textContent, "Number One", "crew on the left with the speaker's name");
+    has(ms[1].innerHTML, "&rarr; Chief O'Brien", "an addressed message: the arrow and the name");
+    has(ms[1].textContent, "waiting for the seat", "a waiting one says so");
+    ok(ms[1].textContent.indexOf("to:: obrien") < 0, "the header line is not drawn");
+    has(ms[2].textContent, "line 11", "a long one: its first lines");
+    ok(ms[2].textContent.indexOf("line 15") < 0 && ms[2].querySelector("[data-rmfold]"), "folded at 12 lines, with More");
+    click(ms[2].querySelector("[data-rmfold]")); await settle(1);
+    has(log.querySelectorAll(".rmm")[2].textContent, "line 20", "More: the whole of it");
+    ok(log.querySelectorAll(".rmm")[3].classList.contains("ship"), "the ship's line small, its own");
+    has(log.querySelectorAll(".rmm")[4].textContent, "addressed to deck2, which does not exist", "a misrouted one marked");
+    ok(log.querySelectorAll(".rmm")[4].textContent.indexOf("misrouted::") < 0, "its line not drawn");
+    has(log.querySelectorAll(".rmm")[5].textContent, "cancelled", "a cancelled one marked");
+    ok($("#dlg").classList.contains("th-open") && !rmRooms().find(function (x) { return x.id === "deck"; }).unread, "opened: read");
+    // the chats' shell one level down (rooms.md 20): two panes, the list kept
+    ok($("#dlg").classList.contains("chshell") && $("#rmpage").classList.contains("chlistp") && $("#rmroom").classList.contains("chth"),
+       "the rooms in the chats' panes: the list's, and the thread's for the room");
+    ok(!!$("#rmlist [data-rm=deck]") && $("#rmlist [data-rm=deck]").classList.contains("on"), "the list kept beside the room, its row marked");
+    ok(!!$("#rmroom .chhdr .chav") && $("#rmname").textContent === "Deck redesign", "the room's header: the thread's, its avatar and name");
+    // the To chip and a send
+    eq($("#rmto").textContent, "To No.1", "the box goes to Number One in a project room");
+    click($("#rmto")); await settle(1);
+    var opts = [].map.call($("#rmtopick").querySelectorAll("[data-rmto]"), function (b) { return b.dataset.rmto; });
+    eq(opts.slice(0, 2).join(","), "no1,obrien-x", "To: the default, then who spoke in the room");
+    click($("#rmtopick").querySelector("[data-rmto=obrien-x]")); await settle(1);
+    eq($("#rmto").textContent, "To O'Brien", "picked");
+    rmSayAns = "hold";
+    $("#rmbox").value = "Check the table too";
+    click($("#rmsend")); await settle(1);
+    var pend = log.querySelectorAll(".rmm");
+    has(pend[pend.length - 1].textContent, "sending", "the bubble at once, sending");
+    has(pend[pend.length - 1].innerHTML, "&rarr; Chief O'Brien", "addressed");
+    eq(rmSays[0] && rmSays[0].who + "|" + rmSays[0].thread + "|" + rmSays[0].message, "obrien-x|deck|Check the table too",
+       "the say route of the one picked, with the room; the words alone (no header)");
+    rmSayEnd({ ok: true, queued: true, seat: { position: 2, holder: "kim-x" } }); await settle(3);
+    pend = log.querySelectorAll(".rmm");
+    has(pend[pend.length - 1].textContent, "waiting for the seat", "queued: waiting for the seat");
+    // its row lands: the bubble is the row
+    await put("crew_msg", "captain → obrien-x #deck: Check the table too", "to:: obrien-x\nCheck the table too", 0);
+    await rmPoll(); await settle(2);
+    eq(rm.pend.length, 0, "the send is its row once it lands");
+    eq([].filter.call(log.querySelectorAll(".rmm"), function (m) { return m.textContent.indexOf("Check the table too") >= 0; }).length, 1, "one bubble");
+    // a failure, Retry
+    rm.to.delete("deck");
+    rmSayAns = [{ error: "the journal does not answer" }, 500];
+    $("#rmbox").value = "Will this fail";
+    click($("#rmsend")); await settle(3);
+    pend = log.querySelectorAll(".rmm");
+    has(pend[pend.length - 1].textContent, "not sent", "a failure on the bubble");
+    ok(!!pend[pend.length - 1].querySelector("[data-rmresend]"), "with Retry");
+    eq($("#rmbox").value, "Will this fail", "the words given back");
+    rmSayAns = null;
+    click(pend[pend.length - 1].querySelector("[data-rmresend]")); await settle(3);
+    eq(rmSays[rmSays.length - 1].who + "|" + (rmSays[rmSays.length - 1].thread || ""), "number-one|deck", "Retry: to Number One, in the room");
+    has(log.querySelectorAll(".rmm")[log.querySelectorAll(".rmm").length - 1].textContent, "delivered", "delivered");
+    eq($("#rmbox").value, "", "and the box emptied of it");
+    // main rooms: at:: is the time, src:: links his conversation
+    rmShow("main"); await settle(2);
+    eq($("#rmto").textContent, "To No.1", "Number One's room: to him");
+    // the seeded row by its text, not "the first bubble"
+    var mm = [].filter.call($("#rmlog").querySelectorAll(".rmm"), function (m) { return m.textContent.indexOf("Status?") >= 0; })[0];
+    ok(mm.textContent.indexOf("at::") < 0 && mm.textContent.indexOf("src::") < 0, "a migrated row's lines not drawn");
+    var mAt = new Date(Date.UTC(2026, 9, 1, 8, 9, 10));
+    has(mm.textContent, String(mAt.getHours()).padStart(2, "0") + ":" + String(mAt.getMinutes()).padStart(2, "0"), "its own time (at::), not the migration's");
+    ok(!!mm.querySelector("[data-rmconv]"), "a link to its place in Number One's conversation");
+    rmShow("obrien-x"); await settle(1);
+    eq($("#rmto").textContent, "To O'Brien", "an engineer's room: to them");
+    rmSays.length = 0;
+    $("#rmbox").value = "Just us";
+    click($("#rmsend")); await settle(3);
+    eq(rmSays[0] && rmSays[0].who + "|" + ("thread" in rmSays[0]), "obrien-x|false", "1:1: their say, no room");
+    // a DM between engineers (rooms.md 16): filed in the addressee's room, shown in both
+    await put("crew_msg", "obrien-x → kim-x #kim-x: Can you rerun the suite?", "to:: kim-x\nCan you rerun the suite?", 0);
+    await put("crew_msg", "kim-x → obrien-x #deck: In the project room", "to:: obrien-x\nIn the project room", 1);
+    await rmPoll(); await settle(2);
+    has($("#rmlog").textContent, "Can you rerun the suite?", "a DM to Kim is in O'Brien's room too");
+    rmShow("kim-x"); await settle(1);
+    has($("#rmlog").textContent, "Can you rerun the suite?", "and in Kim's own");
+    ok($("#rmlog").textContent.indexOf("In the project room") < 0, "a project room's rows stay in it");
+    // the room's ‹: on a phone back to the list; on a desk, the list beside
+    // it, a level up to the chats (opened from the journal: closed)
+    var rmWasMob = TEST.mobile;
+    TEST.mobile = true; TEST.desk = false;
+    rmShow("deck"); await settle(1);
+    ok(/Back to the rooms/.test($("#rmroomback").getAttribute("aria-label")), "a phone's ‹ in a room: back to the rooms");
+    click($("#rmroomback")); await settle(1);
+    ok(!rm.open && !!$("#rmpage") && $("#ov").classList.contains("on"), "and it is the list");
+    TEST.mobile = false; TEST.desk = true;
+    rmShow("deck"); await settle(1);
+    ok(/Up to the chats/.test($("#rmroomback").getAttribute("aria-label")), "a desk's ‹ in a room: up to the chats");
+    var rmFromWas = rm.from; rm.from = "list";
+    click($("#rmroomback")); await settle(2);
+    ok($("#dlg").classList.contains("chats") && !!$("#chrows") && !$("#rmpage") && !rm.open, "and it is the chats list, the directory above");
+    TEST.desk = false; TEST.mobile = rmWasMob; rm.from = rmFromWas;
+    closeOv(); await settle(1);
+    await openRooms("kim-x"); await settle(2);
+    // Escape: the room to the list, the list out
+    ok(rmEscape() && !rm.open && !$("#dlg").classList.contains("th-open") && !!$("#rmroom .chnone"), "Escape: the room to the list");
+    // New room: at once, opening, then the room; its opening message to Number One
+    click($("#rmplus")); await settle(1);
+    ok(!$("#rmnew").hidden && $("#rmnewhead") && $("#rmnewseed"), "+ : a name and an opening message");
+    $("#rmnewhead").value = "Motion graphics"; $("#rmnewseed").value = "Start with the lift.";
+    rmSays.length = 0;
+    click($("[data-rmnewgo]"));
+    await settle(0);
+    eq(rm.open, "motion-graphics", "the room shown at once");
+    has($("#rmstat").textContent, "opening", "opening…");
+    await settle(4);
+    eq(JSON.stringify(rmOps[rmOps.length - 1]), '{"op":"new","id":"motion-graphics","name":"Motion graphics"}', "the thread route's new");
+    eq(rmSays[0] && rmSays[0].who + "|" + rmSays[0].thread + "|" + rmSays[0].message, "number-one|motion-graphics|Start with the lift.",
+       "the opening message to Number One in it");
+    // Rename, Close, Reopen: the ⋯ and the route
+    rmShow("deck"); await settle(1);
+    click($("#rmmore")); await settle(1);
+    $("#rmren").value = "The bridge";
+    click($("[data-rmren]")); await settle(3);
+    eq(JSON.stringify(rmOps[rmOps.length - 1]), '{"op":"rename","id":"deck","name":"The bridge"}', "Rename");
+    eq($("#rmname").textContent, "The bridge", "the name at once");
+    click($("#rmmore")); await settle(1);
+    click($("[data-rmclose]")); await settle(3);
+    eq(JSON.stringify(rmOps[rmOps.length - 1]), '{"op":"close","id":"deck"}', "Close");
+    ok(!rm.open && $("#rmlist").querySelector("details[data-rmclosed] [data-rm=deck]"), "back to the list, the room under Closed");
+    await rmCloseSaid("the bridge", true); await settle(2);
+    eq(JSON.stringify(rmOps[rmOps.length - 1]), '{"op":"new","id":"deck"}', "Reopen is new on a closed id");
+    // Archive (rooms.md 17): off the list at once, under Archived, kept in the journal
+    var rmArchRow = function () { return DB.filter(function (r) { return r.kind === "settings" && r.title === "rooms" && !r.deleted; })[0]; };
+    var rmArchIds = function () { var r = rmArchRow(); return r ? JSON.parse(r.content).archived.join(",") : ""; };
+    rmShow(""); await settle(1);
+    var rmFetches = TEST.fetches.length;
+    click($("#rmlist [data-rmarch=obrien-x]"));
+    ok([].every.call($("#rmlist").querySelectorAll("[data-rm=obrien-x]"), function (b) { return !!b.closest("details[data-rmarchd]"); }),
+       "Archive: the row leaves the list at once");
+    ok(!!$("#rmlist details[data-rmarchd]"), "an Archived fold");
+    await settle(4);
+    eq(rmArchIds(), "obrien-x", "the mark in the journal: a settings entry titled rooms");
+    has($("#rmlist details[data-rmarchd] summary").textContent, "Archived (1)", "the fold's count");
+    ok(!!$("#rmlist details[data-rmarchd] [data-rmunarch=obrien-x]"), "its row with Restore");
+    ok(TEST.fetches.slice(rmFetches).every(function (f) { return f.indexOf("/engineer") < 0; }), "no route of the crew's: Archive is the captain's view");
+    // a project room from its ⋯, and a closed one stays closed under Archived
+    rmShow("deck"); await settle(1);
+    click($("#rmmore")); await settle(1);
+    click($("[data-rmarchone]"));
+    ok(!rm.open && !$("#dlg").classList.contains("th-open"), "the room's ⋯ Archive: back to the list");
+    await settle(4);
+    eq(rmArchIds(), "obrien-x,deck", "both in the entry");
+    // a crew room's ⋯: Archive alone (Unarchive once archived)
+    rmShow("obrien-x"); await settle(1);
+    has($("#rmstat").textContent, "archived", "the room says it is archived");
+    click($("#rmmore")); await settle(1);
+    ok(!$("#rmren") && !$("[data-rmclose]") && $("[data-rmarchone]").textContent === "Unarchive", "a crew room's ⋯: Unarchive alone");
+    rmEscape(); rmShow(""); await settle(1);
+    // a new message into an archived room: still archived, its dot on the row and the fold
+    await put("crew_msg", "obrien-x → #obrien-x: While you were away", "room:: obrien-x\nWhile you were away", 1);
+    await rmPoll(); await settle(2);
+    ok(!!$("#rmlist details[data-rmarchd] [data-rm=obrien-x]"), "a message into an archived room keeps it archived");
+    ok(!!$("#rmlist details[data-rmarchd] summary [aria-label=unread]"), "the fold's summary has the dot");
+    ok(!!$("#rmlist details[data-rmarchd] [data-rm=obrien-x] [aria-label=unread]"), "and its row");
+    ok(rmRooms().find(function (x) { return x.id === "obrien-x"; }).unread && rmUnreadCount() === rmRooms().filter(function (x) {
+      return x.unread && !x.closed && !x.archived; }).length, "the Chats row's count leaves the archived out");
+    // a long press on a row: its Archive shown
+    var rowB = $("#rmlist [data-rm=main]");
+    $("#rmpage").oncontextmenu({ target: rowB, preventDefault: function () {} }); await settle(1);
+    ok(!!$("#rmlist .rmheld [data-rmarch=main]"), "a long press (a right click): the row's Archive shown");
+    ok(rmEscape() && !rm.held && !!$("#rmlist"), "Escape lets it go first");
+    // Restore: back on the list at once, then out of the entry
+    click($("#rmlist [data-rmunarch=obrien-x]"));
+    ok(!$("#rmlist details[data-rmarchd] [data-rm=obrien-x]"), "Restore: the row back at once");
+    await settle(4);
+    eq(rmArchIds(), "deck", "out of the entry");
+    // a failed save: back where it was, and a toast
+    var rmFetchOk = fetch;
+    fetch = function (url, o) { if (String(url).indexOf("/entries") >= 0 && o && (o.method === "PUT" || o.method === "POST")) return rmJson({ error: "the journal refused it" }, 500); return rmFetchOk.apply(this, arguments); };
+    click($("#rmlist [data-rmarch=main]"));
+    ok(!!$("#rmlist details[data-rmarchd] [data-rm=main]"), "archived at once, before the save");
+    await settle(4);
+    ok(!$("#rmlist details[data-rmarchd] [data-rm=main]"), "the save failed: back on the list");
+    has(($("#toast") || { textContent: "" }).textContent, "not archived", "and said");
+    fetch = rmFetchOk;
+    // another device's Archive: read back from the journal on the next open
+    var rmAr = rmArchRow();
+    await api("/entries/" + rmAr.id, { method: "PUT", body: { content: JSON.stringify({ v: 1, archived: ["deck", "kim-x"] }) } });
+    rm.archSeen = null; closeOv(); await settle(1);
+    await openRooms(); await settle(4);
+    ok($("#ov").classList.contains("on"), "opened again after a close: on screen (closeOv leaves the markup)");
+    ok(!!$("#rmlist details[data-rmarchd] [data-rm=kim-x]"), "the mark read back from the journal (another device's)");
+    // the voice orders
+    [["archive the bridge room", "archive the {*} room"], ["restore the bridge room", "restore the {*} room"],
+     ["unarchive the bridge room", "restore the {*} room"], ["archived rooms", "archived rooms"]].forEach(function (c) {
+      var h = vMatch(vWords(c[0]), 0);
+      eq(h && h.cmd.say, c[1], "\"" + c[0] + "\" is a room order");
+    });
+    var va = vMatch(vWords("restore the bridge room"), 0);
+    await va.cmd.fn(va.arg); await settle(4);
+    eq(rmArchIds(), "kim-x", "said: restored");
+    va = vMatch(vWords("archive the bridge room"), 0);
+    await va.cmd.fn(va.arg); await settle(4);
+    eq(rmArchIds(), "kim-x,deck", "said: archived");
+    rm.archOpen = false; closeOv(); await settle(1);
+    va = vMatch(vWords("archived rooms"), 0);
+    await va.cmd.fn(va.arg); await settle(3);
+    ok(!!$("#rmlist details[data-rmarchd][open]"), "\"archived rooms\": the list with the fold open");
+    var rmRest = rmArchRow(); await api("/entries/" + rmRest.id, { method: "PUT", body: { content: JSON.stringify({ v: 1, archived: [] }) } });
+    rm.archSeen = null; rm.archRead = false; await rmPoll(); await settle(2);
+    // the voice orders
+    [["rooms", "rooms"], ["show the rooms", "rooms"], ["my rooms", "unread rooms"], ["unread rooms", "unread rooms"],
+     ["open the bridge room", "open the {*} room"], ["go to the bridge room", "open the {*} room"], ["new room web", "new room {*}"],
+     ["in the bridge room, tell o'brien the chairs", "in the {*} room tell {*}"], ["in the bridge room how are the chairs", "in the {*} room {*}"],
+     ["tell kim run the tests", "tell {*}"], ["rename the bridge room to deck", "rename the {*} room to {*}"],
+     ["close the bridge room", "close the {*} room"]].forEach(function (c) {
+      var h = vMatch(vWords(c[0]), 0);
+      eq(h && h.cmd.say, c[1], "\"" + c[0] + "\" is a room order");
+    });
+    var ready = vMatch(vWords("go to the ready room"), 0);
+    ok(!ready || ready.cmd.say !== "open the {*} room", "\"go to the ready room\" is no room order: the deck's");
+    var tm = vMatch(vWords("tell me the time"), 0);
+    ok(tm && tm.cmd.say !== "tell {*}", "\"tell me the time\" stays the clock");
+    rmSays.length = 0;
+    var vh = vMatch(vWords("in the bridge room, tell o'brien check the chairs"), 0);
+    await vh.cmd.fn(vh.arg); await settle(3);
+    eq(rmSays[0] && rmSays[0].who + "|" + rmSays[0].thread + "|" + rmSays[0].message, "obrien-x|deck|check the chairs", "said: to him, in that room");
+    rmSays.length = 0;
+    vh = vMatch(vWords("tell kim run the tests"), 0);
+    await vh.cmd.fn(vh.arg); await settle(3);
+    eq(rmSays.map(function (x) { return x.start || x.who + ":" + x.message; }).join(","), "kim-x/start,kim-x:run the tests", "tell: one off duty started, then told 1:1");
+    eq(rm.open, "kim-x", "in their room");
+    // the doors: the chats' row, the palette
+    closeOv(); await settle(1);
+    ok(!rm.timer, "closed: the poll stops");
+    ok(ROUTES.rooms && typeof ROUTES.rooms.open === "function", "a route of its own");
+    // done
+    fetch = rmFetchWas; eng.list = rmListWas; lsSet("lcars.deck.engkey", rmKeyWas);
+    DB = DB.filter(function (r) { return !rmIsCrew(r); }).concat(rmSetDb);
+    st.all = st.all.filter(function (r) { return !rmIsCrew(r); }).concat(rmSetSt).sort(function (a, b) { return b.id - a.id; });
+    st.byId.forEach(function (r, id) { if (rmIsCrew(r)) st.byId.delete(id); });
+    rmSetSt.forEach(function (r) { st.byId.set(r.id, r); });
+    rm.gen++;
+  })();
+
+  /* ---------- the Share sheet: Post, the publisher (slice 2) ----------
+     docs/design/social-publish.md 3.2 and 3.8: Post and Dry run on a
+     network the ship can post to, off with the server's note when its
+     credential is not set; the tap's state in its frame; posted, dry,
+     already, a failure with Retry; the drafts kept before the route;
+     never through the outbox; the voice orders; the link's card. */
+  console.log("\n-- the Share sheet: Post (the publisher) --");
+  await (async function () {
+    eq(vMatch(vWords("post it"), 0).cmd.say, "post it", "voice: post it");
+    var pv = vMatch(vWords("post to mastodon"), 0);
+    eq(pv.cmd.say + "|" + pv.arg.text, "post to {*}|mastodon", "voice: post to mastodon");
+    eq(vMatch(vWords("dry run"), 0).cmd.say, "dry run", "voice: dry run");
+    eq(vMatch(vWords("do a dry run"), 0).cmd.say, "dry run", "voice: do a dry run");
+    ok(!socPostAll(false), "“post it” with no sheet open says so, and posts nothing");
+    localStorage.removeItem(SOC_MASTO); localStorage.removeItem(SOC_ON);
+    var featWas = FEATURES, asked = [], answer = null;
+    var fe = function (on, live) {
+      FEATURES = { features: [{ name: "publish_mastodon", on: on, needs: on ? [] : ["LCARS_PUB_MASTODON"], note: "Posting to Mastodon needs its token." },
+                              { name: "publish_live", on: live, needs: live ? [] : ["LCARS_PUB_DRY"], note: "Dry runs until LCARS_PUB_DRY=0." }] };
+    };
+    PUBLISH = function (id, body) { asked.push([id, body]); return answer(id, body); };
+    PUBLISH_CARD = { url: "https://example.com/blog/two", title: "Two: the card", description: "Its words.", image: "", site: "A Blog" };
+    fe(false, false); await featLoad(true);
+    shx = null;
+    var se = await plant({ title: "Software for Two", content: "A second post.\n\nhttps://example.com/blog/two" });
+    select(se.id); await settle(3);
+    click($("#bShare")); await settle(4);
+    var card = function (k) { return $("#soc_cards").querySelector('[data-card="' + k + '"]'); };
+    var say = function () { return card("mastodon").querySelector(".socst").textContent; };
+    var post = function () { return card("mastodon").querySelector("[data-post]"); };
+    var dry = function () { return card("mastodon").querySelector("[data-dry]"); };
+    ok(!!post() && !!dry(), "Mastodon's card has Post and Dry run");
+    ok(!card("hn").querySelector("[data-post]") && !card("x").querySelector("[data-post]"), "a hand-route card has none");
+    eq(post().getAttribute("aria-disabled"), "true", "no token on the server: Post off");
+    has(post().title, "LCARS_PUB_MASTODON", "naming what the server lacks");
+    click(post()); await settle(2);
+    has(say(), "not set on the server", "a tap says so on the card");
+    eq(asked.length, 0, "and nothing was asked");
+    ok(card("mastodon").classList.contains("off"), "no token and no instance: greyed, as before");
+    closeOv();
+    fe(true, false); await featLoad(true);
+    shx = null;
+    openShareSheet(se.id); await settle(4);
+    ok(!card("mastodon").classList.contains("off"), "a token on the server: not greyed, though no instance is kept here");
+    eq(say(), "", "and no instance complaint");
+    has(card("mastodon").textContent, "Dry runs only", "the card says posts are dry runs");
+    has($("#soc_og").textContent, "Two: the card", "the link's card, read by the server");
+    // a dry run: the state in the same frame, then its answer
+    var gate = null;
+    answer = function () { return { code: 200, data: { dry: true, dry_by: "switch", results: [{ network: "mastodon", status: "dry", record: 77, request: [] }] } }; };
+    var pr = socPost("mastodon", true, dry());
+    has(say(), "dry run: building it", "Dry run says so at once");
+    ok(dry().classList.contains("busy") && dry().disabled, "its button busy until the answer");
+    eq(dry().textContent, "Dry run…", "and says so");
+    await pr; await settle(2);
+    eq(JSON.stringify(asked[0] && asked[0][1]), JSON.stringify({ networks: ["mastodon"], dry_run: true }), "POST /publish/<id> {networks, dry_run}");
+    var sp = DB.filter(function (r) { return r.kind === "social_post" && r.id === asked[0][0]; })[0];
+    ok(!!sp && sp.content.indexOf('"from":' + se.id + ",") >= 0, "the id posted is the drafts', kept before the route ran");
+    has(say(), "dry run: built, nothing sent", "the dry run's answer on the card");
+    has(say(), "#77", "naming its record");
+    ok(!dry().classList.contains("busy") && !dry().disabled, "the button free again");
+    ok(!DBLOG.some(function (l) { return /outbox/.test(l); }), "never through the outbox");
+    // a failure: on the card, with Retry
+    answer = function () { return { code: 200, data: { dry: false, results: [{ network: "mastodon", status: "failed", error: "Mastodon refused the status: 503" }] } }; };
+    await socPost("mastodon", false, post()); await settle(2);
+    has(say(), "not posted: Mastodon refused the status: 503", "a failure on the card");
+    ok(card("mastodon").querySelector(".socst").classList.contains("bad"), "in red");
+    eq(post().textContent, "Retry", "Post is Retry");
+    answer = function () { return { code: 403, data: { error: "posting is the LCARS pages' only" } }; };
+    await socPost("mastodon", false, post()); await settle(2);
+    has(say(), "pages' only", "a refusal's words on the card");
+    // posted: the link, no Post again, kept in the drafts
+    answer = function () { return { code: 200, data: { dry: false, results: [{ network: "mastodon", status: "posted", url: "https://example.social/@c/1", id: "1" }] } }; };
+    var pp = socPost("mastodon", false, post());
+    eq(post().textContent, "Posting…", "Post says Posting… in the same frame");
+    has(say(), "posting to Mastodon", "and the card");
+    await pp; await settle(3);
+    has(say(), "posted to Mastodon", "posted");
+    ok(post().hidden && dry().hidden, "no Post or Dry run once posted");
+    has(card("mastodon").querySelector(".socpd").innerHTML, 'href="https://example.social/@c/1"', "the post's link on the card");
+    sp = DB.filter(function (r) { return r.kind === "social_post" && r.id === asked[0][0]; })[0];
+    has(sp && sp.content, "https://example.social/@c/1", "kept in the drafts' record");
+    closeOv(); shx = null;
+    openShareSheet(se.id); await settle(4);
+    ok(post().hidden && !card("mastodon").querySelector(".socpd").hidden, "opened again: still Posted, no Post");
+    var n = asked.length;
+    ok(!socPostAll(false) || asked.length === n, "“post it” on a posted card asks nothing");
+    closeOv();
+    // already: the publisher's own once-per-text answer, by voice
+    shx = null;
+    var se2 = await plant({ title: "Third", content: "Third words." });
+    select(se2.id); await settle(3);
+    click($("#bShare")); await settle(4);
+    answer = function () { return { code: 200, data: { dry: false, results: [{ network: "mastodon", status: "already", url: "https://example.social/@c/2", at: "2026-10-23T10:00:00Z" }] } }; };
+    voiceHeard("computer post it"); await settle(4);
+    eq(asked.length, n + 1, "“post it” is Post's tap");
+    has(say(), "posted already", "an already-posted text said so");
+    closeOv(); shx = null;
+    // two networks checked: "post it" asks once with both (the server runs
+    // one publish.py at a time, a second request would be its 429), and
+    // each card says so in the frame and gets its own result
+    FEATURES.features.push({ name: "publish_bluesky", on: true, needs: [], note: "" });
+    await featLoad(true);
+    var se3 = await plant({ title: "Fourth", content: "Fourth words." });
+    select(se3.id); await settle(3);
+    click($("#bShare")); await settle(4);
+    socNet("bluesky", true); socNet("mastodon", true);
+    var sayOf = function (k) { return card(k).querySelector(".socst").textContent; };
+    answer = function () {
+      return { code: 200, data: { dry: false, results: [
+        { network: "bluesky", status: "posted", url: "https://bsky.app/profile/c/post/3", id: "3" },
+        { network: "mastodon", status: "failed", error: "Mastodon refused the status: 503" }] } };
+    };
+    var n2 = asked.length;
+    ok(socPostAll(false), "“post it” with Bluesky and Mastodon checked");
+    has(sayOf("bluesky"), "posting to Bluesky", "Bluesky's card says posting… in the same frame");
+    has(sayOf("mastodon"), "posting to Mastodon", "and Mastodon's");
+    await settle(4);
+    eq(asked.length, n2 + 1, "one POST /publish for both, not two (no 429 between them)");
+    eq(JSON.stringify(asked[n2] && asked[n2][1].networks.slice().sort()), JSON.stringify(["bluesky", "mastodon"]), "naming both networks");
+    has(sayOf("bluesky"), "posted to Bluesky", "each card its own result: Bluesky posted");
+    has(sayOf("mastodon"), "not posted: Mastodon refused the status: 503", "Mastodon's failure on its card");
+    eq(card("mastodon").querySelector("[data-post]").textContent, "Retry", "with Retry");
+    ok(!card("bluesky").querySelector("[data-post]").classList.contains("busy") && !card("mastodon").querySelector("[data-post]").classList.contains("busy"), "neither left busy");
+    closeOv(); shx = null;
+    closeEditor(); await settle(2);
+    PUBLISH = null; PUBLISH_CARD = null; FEATURES = featWas; await featLoad(true);
+    localStorage.removeItem(SOC_MASTO); localStorage.removeItem(SOC_ON);
   })();
 
   console.log("\n-- the real database was never touched --");

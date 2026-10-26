@@ -595,9 +595,10 @@ list row, `clsReadLock` in the reader, `clsForm` in `setForm`
 - **CalDAV sees a Secret row as deleted**, through one masking subquery
   (`CALDAV_ENTRIES`) every read goes through, so a sync names it removed
   and a stale client's PUT to it writes nothing (it is refused).
-- **No `/say` route serves entries**: the console reads an entry aloud with
-  the browser's own voice (`ttsAloud`), which may be a service's too, so
-  that is what is refused for a Secret entry. Suggestions (`sugRun`'s
+- **No Secret entry reaches `/say`**: the console reads an entry aloud
+  through `/say`'s hosted voice when one is set, else the
+  browser's own (`ttsAloud`), which may be a service's too, so the
+  reading is what is refused for a Secret entry. Suggestions (`sugRun`'s
   `/embed` of the draft) are off in one as well.
 - **The chip is the editor's**, beside the kind's, so raising and lowering
   is from Edit; reading a locked entry offers Unlock.

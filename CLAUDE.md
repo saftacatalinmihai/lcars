@@ -51,23 +51,30 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
   and on a set one: docs/design/kinds.md),
   `test/deckboot.js` (node: the deck's script against stand-ins for three.js
   and the DOM — catches wiring errors, not rendering), `test/keyboard.py`
-  (`KB=0` skips it) and `test/perf.py`, the frame budget: every interaction
+  (`KB=0` skips it), the screens stage (`test/targets.py` and
+  `test/axe.py` on every view, the two at once; `SCREENS=0` skips it) and `test/perf.py`, the frame budget: every interaction
   must hold 60 fps at p99 (≤16.7ms of main-thread time per frame) against a
-  4000-row synthetic journal in headless Chromium (`PERF=0` skips it while
+  4000-row synthetic journal in headless Chromium, and its cold load
+  through `/dump` with 111 reports within 1.3x of none (`PERF=0` skips it while
   iterating; run it in full before committing a page change;
   `perf.py --profile <scenario>` names the heavy functions; a scenario
   over budget is rerun and compared with main's page, and passes if main is
   as slow - see "judging" in perf.py; one this change cannot reach, by
   `test/changed.py`, is not rerun, and main's numbers measured on this box
   are reused - the output says which, `--fresh` measures again). It also fails if
-  `APP_VERSION` and `CHANGELOG.md` disagree. The slow stages run in
+  `CHANGELOG.md`'s top and `APP_VERSION` disagree, or a fragment in
+  `changelog.d/` is malformed (`test/version.py`: a numbered top equal to
+  it, fragments beside it, or a retired placeholder on top with `APP_VERSION` left
+  at the number below), or the user manual no longer matches the page
+  (`site/manual/test/manual.py`, docs/design/manual.md: its landing build
+  stale, or an order, a key or a `**label**{ui}` it names gone). The slow stages run in
   parallel (~18s with `PERF=0`, ~50s in full on the laptop); `KB_JOBS=1`
   and `perf.py --jobs 1` run one at a time.
 - **`run.sh --changed`** runs only what this branch's change needs, from
   its diff against main (worktree included; `python3 test/changed.py` says
   what it would pick, and why): parse, structure and the version check
-  always; `deck.html` the deck; `index.html` the audit, behaviour and
-  keyboard, and perf only for the scenarios whose sections moved (the map
+  always; `deck.html` the deck; `index.html` the audit, behaviour,
+  keyboard and screens, and perf only for the scenarios whose sections moved (the map
   is in `test/changed.py`; a hunk that only bumps `APP_VERSION` does not
   count); docs, `scripts/` or C alone, none of the slow stages. It names
   the Chromium checks outside `run.sh` the touched sections call for.
@@ -82,16 +89,18 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
   deploy runs.
 - **Heavy commands go through the job line** (docs/design/job-queue.md):
   the cores take one heavy run at a time. Heavy: `run.sh` (full or
-  `PERF=0`; `--changed` too when it picks the behaviour, keyboard or perf
+  `PERF=0`; `--changed` too when it picks the behaviour, keyboard, screens or perf
   stages), `perf.py`, `buttons.py`, `qa_chat.py`, `keyboard.py`,
   `dates.sh`, `architect.py`, `deckvoice.py`, `editor.py`, `classified.py`,
-  `deckshots.py`, `deckmem.py`, `shots.py`, `scripts/deck-models/build.sh`, and `make
+  `deckshots.py`, `deckmem.py`, `shots.py`, `site/manual/pictures.sh`,
+  `scripts/deck-models/build.sh`, and `make
   lcars-release|lcars-one|lcars-embed|lcars-static`. Light, run bare: `make
   check`, `make lcars`, `make lcars-cli`, a `--changed` run of no slow
   stage, one functional test under ~30s, every `scripts/test_*.py`. A
   seated engineer runs a heavy one as `scripts/engineer.py job <name>
   [--label T] -- <command>` (a `PreToolUse` hook refuses it bare): inline
-  when nobody waits; "queued" means end the turn at once and edit nothing,
+  when nobody waits (its run detached: it outlives your turn and session,
+  and a result you did not see is typed to you); "queued" means end the turn at once and edit nothing,
   and the result comes back as a `[job]` message at the head of the seat's
   line. `engineer.py jobs` shows the line, `job-cancel <name>` takes it back.
 - Functional tests outside `run.sh`, each against a scratch server built
@@ -110,7 +119,8 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     the console in demo mode, edits, reloads, resets and loads the deck,
     with every request off the folder refused and counted. After touching
     `demo/static.js`, `static.py`, `fixture.py`, or the pages' `DEMO` paths.
-  - `site/landing/` (the hosted waitlist's page and Worker, its README):
+  - `site/landing/` (the hosted waitlist's page and Worker, its README;
+    the user manual's built page at `public/manual/`, from `site/manual/`):
     `node --test site/landing/test/` (~1s, the signup route's contract)
     and `python3 site/landing/test/page.py` (~15s, the page in Chromium
     at 393x852 and 1280x800 against `preview.mjs`), `test/deploy.py`
@@ -181,6 +191,38 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     a fit on a turned map, a drag, a pinch that does not turn, a two-finger
     turn about the fingers' middle, a long press's stop, shift and the
     wheel, an upright popup, a stop dragged. After touching "plot a course".
+  - `test/helpopen.py` (~20s, no server): the keyboard help (?) opened
+    as a person opens it - a phone upright and on its side, a desk: the
+    `? shortcuts` button, the ? key, the palette's row - in headless
+    Chromium against perf.py's fake API; the box empty, the rows drawn
+    under their headings, the route. After touching `openHelp` or a door to it.
+  - `test/targets.py` (~35s, no server; in run.sh since
+    slice G, its screens stage, beside axe.py): the phone's tap targets
+    (docs/design/ui-rules.md, "Targets") in headless Chromium at an
+    iPhone's size with touch, against perf.py's fake API - every control
+    on every view (the list, the reader, the editor, the ⋯ sheet, the
+    filters drawer, the month, a new entry, Tasks, Statistics, the
+    chats, the help, the palette, Reports, the graph) hit over 44px each
+    way (its `::before` hit area, a checkbox's label counted), none cut
+    short by a neighbour's, a few allowed less by name (`SHORT`, each
+    with why); the header's pills 44px tall; the rendered rules and
+    320px reflow on the same views. Run it bare after touching a
+    control's size or a hit area.
+  - `test/axe.py` (~30s, no server; in run.sh's screens stage too):
+    axe-core (`vendor/axe-core`, WCAG
+    2.2 A and AA, and its label-in-name rule) on the phone's six screens
+    and the desk's views in headless Chromium against perf.py's fake API
+    (ui-rules.md, "axe finds nothing"): every violation fails but
+    `AXE_LEFT`'s, each with why, and one of those no longer seen. After
+    touching the markup, a label, a role or an ARIA attribute.
+  - `test/acplace.py` (~20s, no server): where the editor's autocomplete
+    popup lands (`wikiPlace`, `wikiFit`, `wikiCaretXY`) in headless
+    Chromium against perf.py's fake API, measured against the browser's
+    own caret (`caretPositionFromPoint` into the textarea): a desk and a
+    phone, a deep line, the list narrowing, a wrapped line, focus mode,
+    the field and the editor scrolled; then WebKit at a phone's size
+    (`LCARS_WEBKIT=<launcher>` where Playwright's build lacks libraries;
+    one that cannot start is skipped). After touching the popup.
   - `test/quick.py` (~30s): `POST /quick` (`HandleQuick` in
     `lcars_chat.h`, voice-quick-answer.md 4), claude stood in for - the
     argv (haiku, `--tools ""`, `--system-prompt`, no `--resume`), stdin's
@@ -189,11 +231,22 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     the child killed), a closed connection killing it, a failed run's
     502, the limited logins' 403, and a log line with no word of the
     question.
+  - `test/publish.py` (~20s): `lcars_publish.h`, `POST /publish/<id>`
+    and `POST /publish/card` with publish.py stood in for
+    (`LCARS_PUBLISH_SCRIPT`) - the owner from the pages only (the
+    limited logins and a missing `X-LCARS-Client` 403), the argv and the
+    environment (no engineer key), the refusals before a run, the exit
+    status, one at a time (429), the timeout (504, the child killed), the
+    log. `python3 scripts/test_publish.py` (~2s) is publish.py itself:
+    Mastodon and Bluesky on recordings, dry run, once per text, the cap,
+    the card's public-hosts rule, no secret in any output.
   - `test/caldav.py` (~40s): `lcars_caldav.h`, with raw WebDAV.
   - `test/api.py` (~30s): the timestamps `POST /entries` and
     `PUT`/`PATCH /entries/<id>` take (`NormalizeStoredTimestamp` in
     `lcars_http.h`) - ISO 8601 with Z or an offset converted to UTC across
-    midnight, a month, a year and a leap day; a malformed one a 400. And
+    midnight, a month, a year and a leap day; a malformed one a 400; a
+    `report` entry cut to its first line in `/dump` and `report_body=0`,
+    whole by id. And
     `InitDB` (`lcars_db.h`) planting no seed: a new journal, or one
     emptied by hand, stays empty.
   - `test/config.py` (~30s): `lcars_config.h` - the version (`lcars
@@ -230,6 +283,13 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
   - `test/strava.py` (~15s): `lcars_strava.h`, `lcars-cli strava`, against
     a stand-in Strava (`LCARS_STRAVA_API`) and a temp HOME: the grant, a
     refresh with rotation, two pages, a re-pull, a 429.
+  - `test/say.py` (~40s): `POST /say`'s engines in `lcars_say.h`, against
+    a stand-in ElevenLabs and Deepgram (`LCARS_ELEVENLABS_URL`,
+    `LCARS_DEEPGRAM_URL`): ElevenLabs' request, Deepgram standing in for
+    it (a 5xx, no connection, a slow first byte; each seat's Aura voice,
+    the format kept, `X-LCARS-Say`, the log line), a quota and a 429
+    remembered, a bad voice still a 502, both failing, no Deepgram key,
+    `LCARS_TTS=deepgram`. No real credits spent.
   - `test/transcribe.py` (~40s): `POST /transcribe` in `lcars_say.h`,
     against a stand-in Deepgram (`LCARS_DEEPGRAM_URL`): what is sent, the
     answer's contract, the refusals, Deepgram failing, no key.
@@ -254,6 +314,13 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     `<task>_<owner>`, the steward and the `imported` role, the computer's
     prompts (a stand-in claude); and `lcars-cli roles` (list, `--json`,
     set, reset, the refusals, a server older than the route).
+  - `test/theme.py` (~40s): `lcars_theme.h`, `GET`/`PUT /theme` - a
+    built-in by name, a btop file or omarchy's `colors.toml` as text/plain
+    with `?name=` or as JSON, the `settings` entry titled `theme`, the
+    refusals (a name, a shape, 64 KB, a control byte), a hand-edited entry
+    (409), the lowest id, the logins (read, never write); `lcars-cli
+    theme`; and `scripts/omarchy/lcars-theme-set` in a scratch HOME (exit
+    0 at once, every failure one line on stderr).
   - `test/features.py` (~40s): `lcars_features.h`, `GET /features` - a
     bare server (every feature off but CalDAV, each naming exactly what
     it lacks), a full one with stand-ins (every feature on, no value, path
@@ -263,13 +330,22 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     a bare one, each door's note in its view (`featureOff`, `featNote`),
     Config's Server section, `W` and "what is off", and a limited login
     (403) losing nothing - after touching those or a door they guard.
+  - `test/rooms_ui.py` (~40s): the Rooms page (docs/design/rooms.md 6)
+    at 393x852 against a scratch server, engineer.py stood in by a script
+    writing the rows - the door, a send through to its row, To an
+    engineer and waiting for the seat, a failure and Retry, a room made,
+    closed and reopened, Back and Escape.
   - `test/questions_ui.py` (~40s): Open questions (`openQuestions`) at a
     phone's size against a scratch server - a task_no1 written by Number
     One's login and a task_crew, the Chats button's count and row, the
     cards, a Later draft across a reload, Answer and close (the real
     PATCH with `if_modified`: the answer at the top, done 1) and Undo.
   - `test/metrics.py` (~40s): `lcars_metrics.h`, `GET /metrics` - the
-    readings by the UI's rule, the text format, who may read it.
+    readings by the UI's rule, the text format, who may read it; the
+    crew's file appended (missing, stale, over its cap, off).
+    `python3 scripts/test_metrics_eng.py` (~1s) is the file's writer,
+    `scripts/eng_metrics.py`: counters and buckets through the seat's,
+    jobs' and deploys' events (docs/ops/seat-metrics.md).
   - `test/conncap.py` (~40s): the connection cap in `lcars_http.h`
     (`HTTPSlotAcquire`) - every slot an idle keep-alive and a new
     connection answered, the longest-idle one closed; every slot
@@ -282,7 +358,8 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     (Content-Length) and the streamed form (chunked), identity without
     gzip offered, for a HEAD and an index.html Range (206), never a png or a
     webp, a 304, a saved file never stale (same size and mtime included),
-    parallel gets across a save; the cache off and a small one starting over.
+    parallel gets across a save; the cache off and a small one starting over;
+    the manual at `/ui/manual/` and the 301s of `/manual` to it.
     Then an embedded build (`-DLCARS_EMBED_UI`, its pack in scratch): the
     start log's `UI:` line, every shipped file byte-equal to its source, the
     same checks, a 304 by ETag, `LCARS_UI_DIR` winning. After touching
@@ -338,19 +415,41 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     watcher's mark, quiet period and once-per-hash, threads queued to
     answered, a reply mid-turn, the lock, the fences; the write path's
     CHANGES (create, append and title only), applied by the steward or refused.
+  - `python3 scripts/test_housekeeping.py` (~1s): `scripts/housekeeping.py`,
+    the crew's `housekeeping` role, on a scratch HOME and /tmp - the
+    never-touch list (the journals, the media root, the Logseq graph, the
+    checkouts) offered as candidates and none deleted, a tree holding a
+    database, a symlink, a directory a process holds; the dry run; reap's
+    scratch (an idle engineer's session split, its notes moved to research), the logs, Playwright's builds, npx, crash dumps by age; the
+    thresholds and the note to Number One (crew.py's finish).
   - `python3 scripts/test_seat.py` (~7s): `scripts/seat.py` and the seat's
     use in `engineer.py`/`crew.py` - the crew's one Claude Code at a time.
-  - `python3 scripts/test_jobs.py` (~13s): the job queue
+  - `python3 scripts/test_jobs.py` (~60s): the job queue
     (docs/design/job-queue.md) - seat.py's job line (inline or queued,
-    held for the turn's end, one at a time, a deploy first, the result at
-    the head with the cap) and engineer.py's `job`, `job-run`,
+    held for the turn's end, a deploy first, the result at the head with
+    the cap); two at once ("As built: the jobs": the classes, two shared
+    together, an exclusive head holding the line, the memory reserve, the
+    limit closing and its five minutes to reopen, `LCARS_JOBS_MAX=1` as
+    one at a time, `cores.lock` shared and exclusive between two direct
+    runners) and engineer.py's `job`, `job-run`,
     `job-cancel` and the runner on scratch state and a stand-in journal,
     `job-run` a direct child (`LCARS_JOB_RUNNER=direct`,
     `LCARS_ENG_SPAWN=0`): the message, a huge log, a timeout, HEAD or the
-    tree moved, a runner killed, dismiss; `heavy_command`; crew.py's
-    `heavy: true`.
+    tree moved, a runner killed, dismiss; a job the block lost carried
+    over (mid-run, and its result), once, never an old one; the wait for
+    the cores not run time, and bounded; `heavy_command`; crew.py's
+    `heavy: true`; an inline job outliving its waiter (its result typed
+    to its engineer); and the watchdog (`engineer.py watch`): a dead job,
+    one past its limit, an untold result, a stuck order, the seat free, a
+    silent holder, each said to Number One once.
   - `python3 scripts/test_reap.py` (~5s): `engineer.py`'s `reap_scratch`,
-    which deletes ended Claude sessions' scratch, never a running one's;
+    which deletes ended Claude sessions' scratch, never a running one's, a
+    /cleared one's once known cleared (an engineer's `past`, no one's
+    `session`, no job naming it, old, unheld), an idle engineer's current
+    one after a day (its `scratchpad/` kept with a note), each split: the
+    regenerable deleted, the rest moved to `research/<engineer>/scratch-<date>/`
+    (`salvage`), Number One's never; and Claude Code's
+    `bash-edit-diff/` after a day;
     `reap_test_tmp`, killed test runs' scratch, and `reap_test_servers`,
     their scratch servers; and that a test killed by SIGTERM takes its
     scratch and its server with it (`test/killclean.py`, run.sh's traps).
@@ -368,7 +467,7 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     session-era state read into labels, the flusher typing every
     thread's notes at once under their `[thread <id>]` line, a say with a
     thread, each event's thread from a transcript (a message's tag, the
-    reply after it, a paragraph's override, `thread_at` reading back),
+    reply after it, a paragraph's override, `room_at` reading back),
     the turn's thread an order, an ask, a deploy and a refresh record,
     the poll's `th` and `thread=` filter, and the Stop hook switching
     nothing. `test_no1.py` has `no1.py thread`. Every test that imports
@@ -379,6 +478,14 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     one, 0.294.3's leak replayed leaves the real deploy.json alone, a real
     `LCARS_ENG_STATE` is replaced and a test's own kept, and every
     `scripts/test_*.py` that loads engineer.py guards the import first.
+  - `python3 scripts/test_engineer_image.py` (~20s, a scratch build): the
+    pictures in the chats - engineer.py's `img` events (`events_of`: the
+    key, the size, a pasted picture or a sidechain's skipped, no path),
+    `engineer.py image` (the key's session and line, the cap, the magic
+    bytes, the cache), and `GET`/`HEAD /engineer/<name>/image` on a
+    scratch server: the owner's bytes, type and cache header, Number One's
+    session and an earlier one, the limited logins and the steward 403,
+    the bad keys, the 404s, the 413.
   - `python3 scripts/test_engineer_model.py` (~40s; `LCARS_TEST_BIN`
     skips the build, `SKIP_ROUTE=1` the server): the model per engineer -
     `engineer.py model`/`model-apply` and `POST /engineer/<name>/model`;
@@ -390,6 +497,24 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     transcript, a deploy tied to its task, the cache, the work under way;
     and the estimate (`engineer.py eta`): its revisions, its end with the
     turn, its fields in list and the queue, a shipped item's own.
+  - `python3 scripts/test_release_import.py` (~10s, a scratch build;
+    `LCARS_TEST_BIN` skips it): `scripts/release-import.py`, the release
+    entries (docs/design/release-entries.md) - CHANGELOG's sections, the
+    entry's shape, noon in the captain's zone, and the import on a scratch
+    journal twice. The deploy's write is test_version_stamp.py's.
+  - `python3 scripts/test_version_stamp.py` (~2s): the version the deploy
+    gives (docs/design/version-at-deploy.md) - `scripts/version-stamp.py`'s
+    plan (patch, minor, the floor, an old-style number kept or renumbered,
+    the refusals), `scripts/changelog-merge.py` (entries stacked on top,
+    one-sided edits, a conflict's markers), and `do_deploy` on a scratch
+    live checkout and two worktrees: placeholders and fragments landing in
+    order (one alone, two, a fragment plus a placeholder, a fragment's
+    review fix, a bad one, none left after), TODO.md's union merge, the
+    old way colliding, a rolled-back floor, a conflict, a refused stamp or a
+    failed suite or rebuild leaving the branch as it was (and a retry landing), the checks, the outcome's number, the
+    release entries it writes (one, two, a failed write, none on a failed
+    deploy); and the readers under a placeholder: `lcars-ui/test/version.py` (run.sh's
+    version check), the explainer's `X.Y.Z+` and `deliver.sh`'s refusal.
   - `python3 scripts/test_deploy_suite.py` (~3s): the deploy's web suite
     (`web_suite`, `suite_scope`): a page deploy runs the full `PERF=0`
     run.sh, a deck-, test- or docs-only one `run.sh --changed` (an
@@ -431,6 +556,36 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
 - Run `clang-format` (config in `.clang-format`, LLVM-based, 2-space) on files you edit.
 - `compile_commands.json` is generated via `bear` (`make compile_commands.json`);
   `.clangd` adds the `LCARS_IMPLEMENTATION` etc. defines so clangd sees function bodies.
+
+## The web UI
+
+What the page looks like is ruled by `docs/design/ui-rules.md` (read it
+before a visual change); every rule there names its check, and
+`test/rules.py` holds most of them. How an engineer works on it (the
+research of 24 Oct 2026, "Good UIs with Claude Code", in Reports):
+
+1. **Screenshot before and after.** Before a visual change, `shots.py`
+   frames (or Playwright) of the touched view at 393x852 and 1280x800, and
+   again after: list the differences you see and fix the unintended ones.
+2. **Plan first for anything new.** Before code, five lines and an ASCII
+   wireframe naming the tokens and classes used, checked against ui-rules.md.
+3. **The builder does not grade.** A fresh-context reviewer (a subagent,
+   or the crew's critic) gets ui-rules.md, the diff and the screenshots,
+   one untouched neighbouring view among them, and flags only rule breaks,
+   as Blocker, High, Medium or Nit.
+4. **Name tells, never "avoid the AI look".** The reviewer checks a list of
+   named tells; a default that slips in is added to the list.
+5. **Grade in LCARS's own words.** Criteria quote ui-rules.md: no "bold",
+   "premium" or "polished". The brief's own devices (uppercase Antonio,
+   the black field, the numbered section bars) are not tells.
+6. **frontend-design for its process only.** Its plan, quality floor and
+   copy rules apply; its greenfield aesthetics do not: the brief wins.
+7. **Show the evidence.** The report links the screenshots the change was
+   checked with (`scripts/report.py publish`), and says "not checked on an
+   iPhone" when it touches the foot, sheets, the keyboard or safe areas.
+
+A new rule in ui-rules.md ships with its check, or says why none can be
+written ("Every rule ships with its check").
 
 ## Local rules
 
@@ -493,19 +648,62 @@ is the JSON scanner both programs share.
   pickers, the camera, the share sheet), say so in the commit and TODO.md.
   Check alias collisions with `vMatch` — longest phrase wins, and with
   dictation paused an order must match the whole utterance.
+- **A check on a dialog's or a toast's text compares against the entry's
+  own fields with its title taken out**, never against a bare pattern (a
+  hash and digits, a spaced middle dot): the deploy's suite reads the live
+  journal, whose real titles hold both (the join and bulk-delete checks
+  since 0.335.0).
+- **The manual follows the console.** A change to the web UI that the user
+  manual describes (a label, a step, a key, a spoken order) updates its
+  page in `site/manual/pages/` and rebuilds it (`python3
+  site/manual/build.py`: the landing's copy and the app's,
+  `lcars-ui/manual/` at `/ui/manual/`, both committed with the change); `site/manual/test/manual.py`,
+  in run.sh, fails until it does (docs/design/manual.md). A new feature a
+  newcomer would look for gets its lines there too.
 - **State the captain or the crew should see lives in the journal**, as
   entries of a kind the writer's login owns (`crew_*` for the crew,
   `no1_*` for Number One), not in files on the box: he can read and edit
   it, and a crew member can work with it. Files only for locks (the API
   has no compare-and-swap), secrets, and what a deploy needs while the
   server is down. The seat (`crew_seat`, `crew_inbox`) is the model.
-- **`CHANGELOG.md` holds the version.** Every commit that adds a feature bumps
-  the minor (fix/polish/internal: the patch), adds a dated entry at the top, and
-  sets `APP_VERSION` in `lcars-ui/index.html` to match — the web UI shows it
-  beside the LCARS badge so a stale cached page is visible.
+- **A feature keeps its data as journal entries wherever it can**
+  (configs, reference data, reports, lists, state): a kind of its own and,
+  where needed, a marker line first (`report:: <type> <rel>`). Files are
+  for media (images, video, audio, PDFs, zips) and huge text only. Why:
+  entries are in memory with the journal, searchable, backed up and shown
+  like any entry, where the Reports page read the NAS over NFS and was
+  slow. The first instance: docs/design/reports-as-entries.md.
+- **`CHANGELOG.md` holds the version, and the deploy gives it**
+  (docs/design/version-at-deploy.md). **Never edit CHANGELOG.md**: each
+  commit that needs an entry adds one file, `changelog.d/<name>-<slug>.md`
+  (`<name>` yours, as in your branch `eng/<name>`; `<slug>` a few lowercase
+  words of the change, `[a-z0-9._-]`), its first line the intent, `minor`
+  (a feature) or `patch` (fix, polish, internal), then the entry's text
+  (`- **web** ...`) as CHANGELOG.md has it; the subject ends `(minor)` or
+  `(patch)`. Two branches then never touch one file. **Leave
+  `APP_VERSION` alone**: the deploy, in its rebase, numbers each fragment
+  above everything deployed so far, puts it on top of CHANGELOG.md as
+  `## X.Y.Z — <date>`, deletes it, and writes `APP_VERSION` in
+  `lcars-ui/index.html` (the web UI shows it beside the LCARS badge, so a
+  stale cached page is visible) and the subject's number. Never pick a
+  number yourself; a report before the deploy says "patch, unnumbered",
+  after it the number in `[deploy finished]`. Each version it numbers
+  becomes a journal entry of kind `release` once the deploy has landed,
+  its ids in `[deploy finished]`; a failed write is said there, and
+  `scripts/release-import.py --apply` catches it up
+  (docs/design/release-entries.md). A review fix edits its
+  commit's own fragment. A major is the captain's, by hand. The old
+  `## next minor|patch — <date>` placeholder on top of CHANGELOG.md is
+  **retired**: still numbered through the transition, never written new.
+  `scripts/version-stamp.py` is the deploy's: it runs only inside its rebase.
 - Commit style: short imperative summary, e.g.
   `Harden the TODO macro: fprintf+newline to stderr, abort() (I2)`.
 - **`TODO.md` is the living backlog** (features, bugs, refactoring ideas) — check it
   when picking a task. Keep it current as part of the task: remove items you
   finish (CHANGELOG records them), add anything new worth tracking.
+  It merges with git's `union` driver (`.gitattributes`): when two
+  branches add items at the same place, both are kept, with no conflict -
+  but their order is not guaranteed, and an edit to one item on both sides
+  keeps both versions; read the spot after a rebase, and tidy it if two
+  items read wrong together.
   `REFACTORING.md` is a **closed** audit — history and rationale, not a to-do list.

@@ -109,6 +109,19 @@ db-prune.py, lcars-prune.service/timer; db-merge-window.py),
 `crew_shares` and `crew_share_<id>` (shares.py; index.html 17232),
 `no1_log` and `no1_report` (no1.py, engineer.py, lcars_logins.h).
 
+**What the console hides as the crew's** ("crew entries hidden", the
+page's `crewWritten`, the one place that lists them) is wider than the
+logins' namespaces: `crew_*`, `no1_*`, the reminders `<task>_crew*` and
+`<task>_no1`, and the kinds the crew writes under other names - `report`
+(scripts/report.py's published reports), `release` (the deploy's, one per
+version), `deck_patch` and `ui_patch` (the architect's code in the deck
+and the page), and the `work_log` role's kind, the architect's log here
+(resolved through the role, as the reminders are through `task`). The
+list, the search, the calendar, the day view, the stats and the task
+board leave them out; the Reports page, What's new, the queue, the crew
+reports view, the No.1 asks count and the deck read every row. A kind
+picked by name is shown regardless.
+
 Where: index.html 47+6, tests.js 66+4, crew_tool.py 24+2, crew.py 23+1,
 test_crew.py 24+4, test_crew_notes.py 23+6, test_prune.py 18+1,
 engineer.py 17+33, logins.py 15+6, seat.py 9, crew_notes.py 8+1,

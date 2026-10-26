@@ -141,26 +141,48 @@ dupes = sorted({i for i in all_ids if all_ids.count(i) > 1})
 if dupes: problems.append("duplicate id attributes: " + ", ".join(dupes))
 
 # ---------- no contact words on a text field (iOS AutoFill Contact) ----------
-# iOS Safari ignores autocomplete="off": its own form classifier (Safari's,
-# not WebKit's open source - WebKit only carries the autocomplete tokens and
-# the AutoFill button Safari asks for, _WKFormInputSession's
-# accessoryViewCustomButtonTitle) reads a field's id, name, placeholder,
-# aria-label and the label or text before it, and one field it takes for a
-# contact's (a job "title", a "name") makes the formless page a contact form:
-# the keyboard then offers AutoFill Contact, the captain's own name, instead of
-# word prediction on every text field, the entry's body included (0.241.1,
-# 0.256.1). So no field the page can render may carry one of these words in
-# any of them. Every <input> and <textarea> in the file is read, the script's
-# templates included; a ${...} counts by the string literals in it.
+# iOS Safari ignores autocomplete="off" and classifies the page's fields
+# itself. The classifier is Safari's own, not WebKit's open source; what WebKit
+# hands it for the focused field is its <label>'s text, title, aria-label,
+# placeholder, value and autocomplete token (FocusedElementInformation, filled
+# in WebPageIOS.mm's focusedElementInformation), and its injected bundle reads
+# the rest of the DOM. One field it takes for a contact's (a job "title", a
+# "name", a phone's "number" or "call", a message's "to <someone>") makes the
+# formless page a contact form, and the keyboard then offers AutoFill Contact
+# (the captain's own card) instead of word prediction on every text field, the
+# entry's body included (0.241.1, 0.256.3, again in 0.311: Rooms' composer).
+# A dialog's markup stays in the page after it closes (closeOv), so a field
+# anywhere in the file counts, open or not. So, for every <input> and
+# <textarea> the file can render (the script's templates included; a ${...}
+# counts by the string literals in it), and every one made by createElement:
+#  1. no contact word in its id, name, placeholder, aria-label, title or the
+#     label or text before it - the whole class: a person's names and titles,
+#     an organisation, the ways to reach one (mail, phone, number, call), an
+#     address, a birthday, an account or a recipient;
+#  2. no placeholder, aria-label or title addressing someone: "to ${who}",
+#     "Reply to " + who, a placeholder set in the script to "to " + a name -
+#     a message box with its recipient is a contact field to Safari;
+#  3. the opt-out Safari is known to honour: a name starting "search" with no
+#     dash in it (a dashed name is a phone field to Safari) on every text
+#     field. There is no <form>, so the name is sent nowhere.
+# A login's fields are the exception, and say so: autocomplete="username" or
+# a password token.
+# docs/design/editor.md, "AutoFill Contact", has the sources.
 CONTACT = ("name nick first last surname given family middle honorific title job "
            "company organisation organization org department email mail phone tel "
-           "telephone mobile cell fax address street city town zip postal postcode "
-           "province state country region birthday bday sex gender contact location").split()
+           "telephone mobile cell fax number call caller sms address street city town zip postal postcode "
+           "province state country region birthday bday sex gender contact location "
+           "user username login account member person people recipient sender addressee cc bcc").split()
 # inside an id or a name words run together (cpname): the unmistakable ones
 # are looked for anywhere in it
 CONTACT_IN = ("name title email phone address street city country company organi "
-              "postal zip surname birth contact").split()
+              "postal zip surname birth contact call number user login account person recipient").split()
 NOT_TEXT = {"checkbox", "radio", "file", "range", "hidden", "button", "color", "submit", "reset", "image"}
+# what the name rule (3) covers: the keyboard's text fields, not the pickers
+NAMED = {"", "text", "search", "url"}
+CREDENTIAL = {"username", "current-password", "new-password", "one-time-code"}
+# a literal that ends addressing someone, the name to follow: "to " + who, `to ${who}`
+ADDRESSED = re.compile(r"\bto\s*(?:\$\{|\"\s*\+|'\s*\+)", re.I)
 
 def lits(v):
     return re.sub(r"\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}",
@@ -181,14 +203,27 @@ def attr(tag, a):
     m = re.search(r'\s' + a + r'\s*=\s*"((?:[^"$]|\$\{[^}]*\})*)"', tag)
     return m.group(1) if m else ""
 
+def search_name(v):
+    return bool(re.fullmatch(r"search[A-Za-z0-9_]*(?:\$\{[^}]*\}[A-Za-z0-9_]*)*", v))
+
+# a field written in a comment (a "<input capture>" in prose) is no field
+quiet = [m.span() for m in re.finditer(r"<!--.*?-->|/\*.*?\*/|^\s*//[^\n]*", src, re.S | re.M)]
+def in_comment(at):
+    return any(a <= at < b for a, b in quiet)
+
 label_for = {m.group(1): m.group(2) for m in
              re.finditer(r'<label\b[^>]*\bfor="([^"]+)"[^>]*>(.*?)</label>', src, re.S)}
 fields = 0
 for m in re.finditer(r"<(input|textarea)\b(?:[^>\"]|\"(?:[^\"$]|\$\{[^}]*\})*\")*>", src):
     tag, at = m.group(0), src.count("\n", 0, m.start()) + 1
-    if re.match(r"<input\b", tag) and attr(tag, "type").lower() in NOT_TEXT:
+    kind = attr(tag, "type").lower() if tag.startswith("<input") else ""
+    if kind in NOT_TEXT or in_comment(m.start()):
         continue
     fields += 1
+    # a login's own fields say so (Config's basic auth): WebKit takes them for
+    # credentials (AutofillElements), the Passwords key, not a contact
+    if attr(tag, "autocomplete") in CREDENTIAL:
+        continue
     fid = attr(tag, "id")
     # the text a person reads beside it: its <label for>, the label it sits
     # in, or the text just before it, back to the last tag that is no label
@@ -201,22 +236,43 @@ for m in re.finditer(r"<(input|textarea)\b(?:[^>\"]|\"(?:[^\"$]|\$\{[^}]*\})*\")
     seen = {"id": contact_hits(fid, True), "name": contact_hits(attr(tag, "name"), True),
             "placeholder": contact_hits(attr(tag, "placeholder")),
             "aria-label": contact_hits(attr(tag, "aria-label")),
+            "title": contact_hits(attr(tag, "title")),
             "label": contact_hits(label_for.get(fid, "") + " " + near)}
     bad = [f"{k} ({', '.join(v)})" for k, v in seen.items() if v]
+    bad += [f"{k} addresses someone" for k in ("placeholder", "aria-label", "title")
+            if ADDRESSED.search(attr(tag, k))]
+    if kind in NAMED and not search_name(attr(tag, "name")):
+        bad.append(f'no name="search…" (got {attr(tag, "name") or "none"!r})')
     if bad:
-        problems.append(f"line {at}: a text field with a contact word, which iOS reads as a contact form: "
+        problems.append(f"line {at}: a text field iOS may read as a contact form: "
                         + "; ".join(bad) + " - " + " ".join(tag.split())[:120])
 # a field made by createElement: what its next lines give it
-for m in re.finditer(r'(\w+) = document\.createElement\("(?:input|textarea)"\);', src):
+for m in re.finditer(r'(\w+) = document\.createElement\("(input|textarea)"\);', src):
     v, at = m.group(1), src.count("\n", 0, m.start()) + 1
+    if in_comment(m.start()):
+        continue
     body = "\n".join(src[m.end():].split("\n")[1:16])
-    said = re.findall(r'\b' + v + r'\.(?:id|name|placeholder)\s*=\s*"([^"]*)"', body)
-    said += re.findall(r'\b' + v + r'\.setAttribute\("(?:id|name|placeholder|aria-label)",\s*"([^"]*)"', body)
+    said = re.findall(r'\b' + v + r'\.(?:id|name|placeholder|title)\s*=\s*"([^"]*)"', body)
+    said += re.findall(r'\b' + v + r'\.setAttribute\("(?:id|name|placeholder|aria-label|title)",\s*"([^"]*)"', body)
     hits = sorted({w for x in said for w in contact_hits(x, True)})
+    named = re.search(r'\b' + v + r'\.name\s*=\s*"([^"]*)"', body)
+    kind = re.search(r'\b' + v + r'\.type\s*=\s*"([^"]*)"', body)
     fields += 1
-    if hits:
-        problems.append(f"line {at}: a field made in the script with a contact word ({', '.join(hits)}), "
-                        "which iOS reads as a contact form")
+    bad = [f"a contact word ({', '.join(hits)})"] if hits else []
+    if (kind.group(1) if kind else "") in NAMED and not (named and search_name(named.group(1))):
+        bad.append('no name="search…"')
+    if bad:
+        problems.append(f"line {at}: a field made in the script iOS may read as a contact form: " + "; ".join(bad))
+# a placeholder the script sets later (a box's "to <whoever>"): every one in
+# the file, whichever field it lands on - fields are all a placeholder is for
+for m in re.finditer(r'\.placeholder\s*=\s*([^;\n]+)|setAttribute\("placeholder",\s*([^;\n]+)', script):
+    v = m.group(1) or m.group(2)
+    at = src.count("\n", 0, src.find(m.group(0))) + 1
+    hits = sorted({w for x in re.findall(r'"([^"]*)"', v) for w in contact_hits(x)})
+    bad = ([f"a contact word ({', '.join(hits)})"] if hits else []) + (["addresses someone"] if ADDRESSED.search(v) else [])
+    if bad:
+        problems.append(f"line {at}: a placeholder set in the script iOS may read as a contact field: "
+                        + "; ".join(bad) + " - " + m.group(0).strip()[:100])
 
 # ---------- the page's connect-src names every outside service it calls ----------
 # (the "csp" block in the head): a fetch, a WebSocket or a tile kept offline

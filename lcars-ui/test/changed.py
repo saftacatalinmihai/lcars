@@ -11,7 +11,8 @@ The change is the worktree (committed, staged, unstaged and untracked)
 against its merge-base with main, so it is what this branch would deploy.
 
 Stages: parse, structure and the version check always run (seconds). deck
-runs for deck.html; audit, behaviour and keyboard for index.html; perf only
+runs for deck.html; audit, behaviour, keyboard and screens (targets.py and
+axe.py on every view) for index.html; perf only
 for the scenarios whose code moved: each top-level section of the page (a
 `/* ===== name` header in the script, `/* ----- name` in the style) is
 mapped below to the scenarios that exercise it, SHARED ones to all of them.
@@ -53,7 +54,7 @@ PERF = {
     "what arrived while you were away": LIST, "activity heatmap": ["idle-desktop", "scroll-desktop"],
     "filter + search": ["search"] + LIST, "day view + dialogs": [], "the list": LIST + ["search", "open", "morph", "morph-desktop"],
     "date scrubber": LIST, "picking several entries": [], "editor": EDIT, "drafts": EDIT,
-    "stats": [], "the task board": [], "the media view": [], "the reports": [], "the server's features": [], "the blog post's shares": [], "the Share sheet": [], "the calendar": [],
+    "stats": [], "the task board": [], "the media view": [], "the reports": ["coldload"], "the server's features": [], "the blog post's shares": [], "the Share sheet": [], "the calendar": [],
     "topic trends": [], "templates": [], "measurements": [], "the series explorer": [],
     "quick capture": [], "saved views": [], "ambient mode": IDLE,
     "the rail's numbers": IDLE + ["rail"], "config dialog": [], "the app's own updates": [], "row swipe actions": LIST,
@@ -63,7 +64,7 @@ PERF = {
     "link graph": [], "stellar cartography": ["stars-chart", "stars-pan", "open"],
     "pickers": ["palette"], "voice": [], "reading aloud": [], "the computer": CHAT + DOCK,
     "the chat dock": DOCK, "voice in the chats": ["chat-thread"], "speech queue": [], "hold to talk": ["chat-thread"],
-    "plot a course": ["course-zoom", "course-turn"], "crew reports": [], "crew notes": [], "open questions": CHAT, "crew notes, the rule": [], "the yeoman's proposals": [], "engineers": ["eng-thread"],
+    "plot a course": ["course-zoom", "course-turn"], "crew reports": [], "crew notes": [], "open questions": CHAT, "crew notes, the rule": [], "the yeoman's proposals": [], "engineers": ["eng-thread", "rooms-room"],
     "alert conditions": IDLE,
     # Secret entries: its row flag and placeholder are drawn by the list, its chip by the editor
     "classified": LIST + EDIT,
@@ -93,9 +94,10 @@ ADVICE = {
     "editor": ["test/editor.py"], "drafts": ["test/editor.py"], "editor action bar": ["test/editor.py"],
     "read pane": ["test/editor.py"],
     "plot a course": ["test/turn.py"],
+    "[[link]] autocomplete": ["test/acplace.py"], "[[link]] autocomplete (css)": ["test/acplace.py"],
     "classified": ["test/classified.py"],
     "the computer": ["test/back.py", "test/qa_chat.py"], "one chat": ["test/qa_chat.py"],
-    "engineers": ["test/back.py", "test/qa_chat.py"], "voice in the chats": ["test/qa_chat.py"],
+    "engineers": ["test/back.py", "test/qa_chat.py", "test/rooms_ui.py"], "voice in the chats": ["test/qa_chat.py"],
     "the computer's marks, shared": ["test/qa_chat.py"],
     "speech queue": ["test/speech.py"], "hold to talk": ["test/ptt.py"],
     "the mirror": ["test/offline.py"], "offline: the outbox": ["test/offline.py"], "config / api": ["test/offline.py"],
@@ -162,7 +164,7 @@ def select(changes, page_lines=None):
     """changes: {path from the repo root: [(first, last) new-file line ranges]
     or None (the whole file, or a file gone)} -> (stages {name: bool},
     perf scenarios [] for all, reasons [str], advice [str])."""
-    st = dict(deck=False, audit=False, behaviour=False, keyboard=False, perf=False)
+    st = dict(deck=False, audit=False, behaviour=False, keyboard=False, screens=False, perf=False)
     scen, why, adv, full = set(), [], [], None
     page = sections(page_lines) if page_lines is not None else None
 
@@ -185,14 +187,24 @@ def select(changes, page_lines=None):
             need("behaviour", reason=f"{path}: behaviour")
         elif path == "lcars-ui/test/keyboard.py":
             need("keyboard", reason=f"{path}: keyboard")
-        elif path == "lcars-ui/test/audit.py":
+        elif path in ("lcars-ui/test/targets.py", "lcars-ui/test/axe.py") or path.startswith("vendor/axe-core/"):
+            need("screens", reason=f"{path}: screens")
+        # rules.py reads ui-rules.md: each rule's Check line is checked there;
+        # and targets.py reads rules.py's CASE_OK
+        elif path == "lcars-ui/test/rules.py":
+            need("audit", "screens", reason=f"{path}: audit, and screens (targets.py reads CASE_OK)")
+        elif path in ("lcars-ui/test/audit.py", "docs/design/ui-rules.md"):
             need("audit", reason=f"{path}: audit")
-        elif path in ("lcars-ui/test/perf.py", "lcars-ui/test/synth.py"):
+        # targets.py and axe.py run on perf.py's fake API
+        elif path == "lcars-ui/test/perf.py":
+            need("perf", "screens", reason=f"{path}: all of perf, and screens (its fake API)")
+            scen.add(ALL)
+        elif path == "lcars-ui/test/synth.py":
             need("perf", reason=f"{path}: all of perf")
             scen.add(ALL)
         elif path == "lcars-ui/index.html":
             if ranges is None or page is None:
-                need("audit", "behaviour", "keyboard", "perf", reason=f"{path}: the whole page")
+                need("audit", "behaviour", "keyboard", "screens", "perf", reason=f"{path}: the whole page")
                 scen.add(ALL)
                 continue
             names = []
@@ -202,7 +214,7 @@ def select(changes, page_lines=None):
                         names.append(page[i - 1])
             if not names:
                 continue
-            need("audit", "behaviour", "keyboard", reason=f"{path}: " + ", ".join(names))
+            need("audit", "behaviour", "keyboard", "screens", reason=f"{path}: " + ", ".join(names))
             for n in names:
                 adv.extend(ADVICE.get(n, []))
                 p = PERF.get(n)
@@ -282,7 +294,7 @@ def main():
     except (subprocess.CalledProcessError, OSError) as e:
         say(f"   cannot diff against {a.base} ({e}): the full run")
         if a.shell:
-            print("SEL_DECK=1 SEL_AUDIT=1 SEL_BEHAVIOUR=1 SEL_KB=1 SEL_PERF=1 SEL_PERF_ONLY=''")
+            print("SEL_DECK=1 SEL_AUDIT=1 SEL_BEHAVIOUR=1 SEL_KB=1 SEL_SCREENS=1 SEL_PERF=1 SEL_PERF_ONLY=''")
         if a.json:
             print(json.dumps({"full": True, "why": [f"cannot diff against {a.base}: {e}"]}))
         return

@@ -26,7 +26,11 @@ LCARS_UI_DIR on a scratch copy of a few lcars-ui files, and checks:
      byte-equal to its source, with its type and an ETag; 1-5 above against
      it; a 304 by If-None-Match (either form) and by If-Modified-Since, and
      a 200 for another tag; a file not shipped (test/) a 404; and
-     LCARS_UI_DIR, when set, winning over it.
+     LCARS_UI_DIR, when set, winning over it;
+  9. the user manual (lcars-ui/manual/, site/manual/build.py's app copy),
+     from disk and from the embedded copy: /ui/manual/ its index.html with
+     the manual's title, a picture beside it, and /manual, /manual/ and
+     /ui/manual (a query or not) a 301 to /ui/manual/.
 
     python3 test/uigzip.py            # builds two servers first (~40s)
     LCARS_TEST_BIN=/path/to/lcars python3 test/uigzip.py   # 8 builds its own
@@ -52,7 +56,9 @@ from metrics import Server  # noqa: E402
 UI = pathlib.Path(__file__).resolve().parent.parent
 REPO = UI.parent
 FILES = ["deck.html", "index.html", "icon-192.png", "deck/bridge.glb",
-         "deck/bridge_base.webp", "vendor/leaflet-1.9.4.css"]
+         "deck/bridge_base.webp", "vendor/leaflet-1.9.4.css",
+         "manual/index.html", "manual/img/" + min(p.name for p in (UI / "manual" / "img").glob("*.webp"))]
+MANUAL_TITLE = b"<title>The console: a user manual</title>"
 
 fails = []
 checks = [0]
@@ -176,6 +182,28 @@ def basics(port, ui):
               f"deck.html If-Modified-Since its Last-Modified ({what}): 304, Vary ({st})")
 
 
+def manual(port, ui):
+    print("\nthe user manual")
+    st, h, body = get(port, "/ui/manual/", GZ)
+    try:
+        body = inflate(body) if h.get("content-encoding") == "gzip" else body
+    except zlib.error:
+        pass
+    check(st == 200 and h.get("content-type", "").startswith("text/html") and MANUAL_TITLE in body
+          and body == (ui / "manual" / "index.html").read_bytes(),
+          f"/ui/manual/: 200, its index.html with the manual's title ({st}, {len(body)} bytes)")
+    pic = FILES[-1]
+    st, h, body = get(port, "/ui/" + pic)
+    check(st == 200 and h.get("content-type") == "image/webp" and body == (ui / pic).read_bytes(),
+          f"/ui/{pic}: the picture, image/webp ({st})")
+    for path in ("/manual", "/manual/", "/manual?from=help", "/ui/manual", "/ui/manual?x=1"):
+        st, h, body = get(port, path)
+        check(st == 301 and h.get("location") == "/ui/manual/" and body == b"",
+              f"{path}: 301 to /ui/manual/ ({st}, {h.get('location')})")
+    st, h, _ = get(port, "/manualx")
+    check(st != 301, f"/manualx is no redirect ({st})")
+
+
 def saves(port, ui, rounds=3):
     print("\na saved file is never served stale")
     f = ui / "deck.html"
@@ -296,6 +324,7 @@ def embedded(binary, tmp, servers):
     check(st2 == 404, f"test/ is not shipped: 404 ({st2})")
 
     basics(s.port, UI)
+    manual(s.port, UI)
 
     print("\nthe ETag")
     for hdrs, what in ((GZ, "gzip"), ({}, "identity")):
@@ -347,6 +376,7 @@ def main():
         s, ui = start(binary, tmp, "default")
         servers.append(s)
         basics(s.port, ui)
+        manual(s.port, ui)
         saves(s.port, ui)
 
         print("\n== the cache off (LCARS_UI_GZ_BYTES=0)")

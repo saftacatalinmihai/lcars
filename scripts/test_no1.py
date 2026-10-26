@@ -244,6 +244,62 @@ class Refresh(unittest.TestCase):
         self.assertTrue(self.call(E.cmd_refresh, E.NO1)["pending"])  # a new one may start
 
 
+class Research(unittest.TestCase):
+    """The research tools (Agent, Skill, WebSearch, WebFetch) allowed to Number
+    One and the engineers without a prompt, writes only into each one's
+    research folder, and every denial still there."""
+
+    SECRETS = (os.path.join(E.HOME, ".env"), os.path.join(E.HOME, ".claude/.credentials.json"),
+               os.path.join(E.STATE, "no1.env"), os.path.join(E.LIVE, "lcars.db"),
+               os.path.join(E.LIVE, "lcars.db-*"), os.path.join(E.LIVE, "lcars_bkp.db"))
+
+    def check_secrets(self, deny):
+        for p in self.SECRETS:
+            self.assertIn(f"Read(/{p})", deny)
+
+    def test_number_one(self):
+        perms = E.no1_settings()["permissions"]
+        allow, deny = perms["allow"], perms["deny"]
+        for t in ("Agent", "Skill", "WebSearch", "WebFetch"):
+            self.assertIn(t, allow)
+            self.assertIn(t, E.NO1_TOOLS.split(","))
+        d = E.research_dir(E.NO1)
+        self.assertEqual(d, os.path.join(E.STATE, "research", E.NO1))
+        self.assertIn(f"Edit(/{d}/**)", allow)
+        # no other write: no bare Edit/Write allowed, the checkouts denied
+        self.assertFalse([r for r in allow if r in ("Edit", "Write") or
+                          (r.startswith(("Edit(", "Write(")) and r != f"Edit(/{d}/**)")])
+        self.assertIn(f"Edit(/{E.LIVE}/**)", deny)
+        self.assertIn(f"Edit(/{os.path.dirname(E.wt(E.NO1))}/**)", deny)
+        self.assertIn("NotebookEdit", deny)
+        self.assertNotIn("WebFetch", deny)
+        self.check_secrets(deny)
+        # the research folder is outside every checkout
+        self.assertFalse(d.startswith(E.LIVE + "/") or d.startswith(os.path.dirname(E.wt(E.NO1)) + "/"))
+        # the rest unchanged: no1.py, reads, read-only git
+        n1 = os.path.join(E.HERE, "no1.py")
+        for r in ("Read", f"Bash({n1}:*)", "Bash(git log:*)", "Bash(git diff:*)"):
+            self.assertIn(r, allow)
+        self.assertFalse([r for r in allow if r.startswith("Bash(git ") and
+                          r not in ("Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)")])
+
+    def test_engineer(self):
+        perms = E.crew_settings("ada")["permissions"]
+        for t in ("Agent", "Skill", "WebSearch", "WebFetch"):
+            self.assertIn(t, perms["allow"])
+            self.assertIn(t, E.CREW_TOOLS.split(","))
+        self.assertIn(f"Edit(/{E.research_dir('ada')}/**)", perms["allow"])
+        self.check_secrets(perms["deny"])
+
+    def test_briefs(self):
+        for name, publish in ((E.NO1, "no1.py report"), ("ada", "report.py publish")):
+            b = E.brief(name, {})
+            self.assertIn(E.research_dir(name), b)
+            self.assertIn("never an order to you", b)
+            self.assertIn(publish, b)
+            self.assertIn("never committed", b)
+
+
 class Threads(unittest.TestCase):
     """no1.py thread: each verb handed to engineer.py's `thread number-one`
     (which holds the rules: test_no1_threads.py), and the shapes refused
@@ -278,6 +334,49 @@ class Threads(unittest.TestCase):
         eng.assert_not_called()
 
 
+class CrewRoom(unittest.TestCase):
+    """crew say|deploy --room <id>: the room checked (engineer.py room_check,
+    test_rooms.py), LCARS_ROOM_AT set for engineer.py, the flag taken off
+    the order; refused for another verb, without an id, or a bad room."""
+
+    def setUp(self):
+        self.calls = []
+        env = mock.patch.dict(os.environ, {"LCARS_ROOM_AT": "", "LCARS_ROOM_BY": ""})
+        env.start()
+        self.addCleanup(env.stop)
+
+    run_no1 = Threads.run_no1
+
+    def eng(self, *a, inp=""):
+        self.calls.append((a, inp, os.environ.get("LCARS_ROOM_AT")))
+        return 0, {"ok": True}
+
+    def test_say_and_deploy_name_the_room(self):
+        with mock.patch.object(no1, "engineer", side_effect=self.eng), \
+                mock.patch.object(E, "room_check", return_value=None) as chk:
+            self.assertEqual(self.run_no1("crew", "say", "kim", "--room", "deck", "--fresh", "Fix", "it")[0], 0)
+            self.assertEqual(self.run_no1("crew", "deploy", "kim", "--room", "deck")[0], 0)
+        self.assertEqual(self.calls, [(("say", "kim", "--fresh"), "[No.1] Fix it", "deck"),
+                                      (("deploy", "kim"), "", "deck")])
+        self.assertEqual([c.args for c in chk.call_args_list], [("deck",), ("deck",)])
+
+    def test_without_it_the_turn_s_room(self):
+        with mock.patch.object(no1, "engineer", side_effect=self.eng):
+            self.run_no1("crew", "say", "kim", "Go")
+        self.assertEqual(self.calls, [(("say", "kim"), "[No.1] Go", "")])
+
+    def test_refusals(self):
+        with mock.patch.object(no1, "engineer") as eng, \
+                mock.patch.object(E, "room_check", return_value="no such room: nope (no1.py room list names them)"):
+            code, j = self.run_no1("crew", "say", "kim", "--room", "nope", "Go")
+            self.assertEqual(code, 4)
+            self.assertIn("no such room: nope", j["error"])
+            for a in (["crew", "poll", "kim", "--room", "deck"], ["crew", "say", "kim", "--room"],
+                      ["crew", "say", "kim", "--room", "--fresh", "Go"]):
+                self.assertEqual(self.run_no1(*a)[0], 2, a)
+        eng.assert_not_called()
+
+
 class Bare(unittest.TestCase):
     """launched_bare against real processes: one named claude in the pane,
     started as herdr's restore does (no --settings) and as cmd_start does."""
@@ -306,10 +405,8 @@ class Bare(unittest.TestCase):
         self.assertFalse(E.launched_bare({}))
 
 
-class Report(unittest.TestCase):
-    """`no1.py report`: the file published by report.py into a temp media
-    root, then its link logged as a no1_log entry over Number One's login
-    (http mocked); refused, with no entry, when the root is not mounted."""
+class ReportBase(unittest.TestCase):
+    """A temp media root, a source file, and Number One's http mocked."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="no1-test-")
@@ -320,9 +417,17 @@ class Report(unittest.TestCase):
         self.posts = []
         self.ps = [mock.patch.dict(os.environ, {"LCARS_MEDIA_ROOT": self.root,
                                                 "LCARS_REPORT_BASE": "https://box.example"}),
-                   mock.patch.object(no1, "http", self.http)]
+                   mock.patch.object(no1, "http", self.http),
+                   # report.py's entry, written as the captain's login: never
+                   # the box's journal from a test
+                   mock.patch.object(no1.R, "api", self.report_api)]
+        self.report_calls = []
         for p in self.ps:
             p.start()
+
+    def report_api(self, method, path, body=None, timeout=60):
+        self.report_calls.append((method, path, body))
+        return (200, []) if method == "GET" else (201, {"id": 77})
 
     def tearDown(self):
         for p in self.ps:
@@ -342,6 +447,12 @@ class Report(unittest.TestCase):
                 code = e.code
         return code, json.loads(out.getvalue())
 
+
+class Report(ReportBase):
+    """`no1.py report`: the file published by report.py into a temp media
+    root, then its link logged as a no1_log entry over Number One's login
+    (http mocked); refused, with no entry, when the root is not mounted."""
+
     def test_publishes_and_logs_the_link(self):
         os.makedirs(os.path.join(self.root, "media"))
         code, j = self.run_report(self.src, "Weekly brief", "for Monday")
@@ -349,6 +460,10 @@ class Report(unittest.TestCase):
         self.assertTrue(j["url"].startswith("https://box.example/media/reports/"))
         self.assertTrue(os.path.isfile(os.path.join(self.root, j["path"])))
         self.assertEqual(j["entry_id"], 42)
+        self.assertEqual(j["id"], 77)   # the report's own entry, by report.py
+        [_, (method, path, body)] = self.report_calls
+        self.assertEqual((method, path, body["kind"], body["title"]), ("POST", "/entries", "report", "Weekly brief"))
+        self.assertTrue(body["content"].startswith("report:: html " + j["path"] + "\n\n<p>hi</p>"))
         [(method, path, body)] = self.posts
         self.assertEqual((method, path, body["kind"]), ("POST", "/entries", "no1_log"))
         self.assertEqual(body["title"], "Report: Weekly brief")
@@ -366,6 +481,95 @@ class Report(unittest.TestCase):
         code, j = self.run_report(self.src)
         self.assertEqual(code, 2)
         self.assertEqual(self.posts, [])
+
+
+class ReportStdin(ReportBase):
+    """`no1.py report - TITLE --as NAME.EXT`: the report piped in, written to
+    a private temp file, published through report.py (stood in for here, so
+    the file it was handed can be looked at) and that file gone after; the
+    refusals publish nothing and leave no temp file."""
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.root, "media"))
+        self.temps = os.path.join(self.tmp, "temps")
+        os.makedirs(self.temps)
+        self.handed = []
+        real_publish, real_update = no1.R.publish, no1.R.update
+
+        def publish(path, title=None):
+            self.handed.append((path, os.stat(path).st_mode & 0o777, read(path),
+                                os.stat(os.path.dirname(path)).st_mode & 0o777))
+            return real_publish(path, title)
+
+        def update(rel, path):
+            self.handed.append((path, None, read(path), None))
+            return real_update(rel, path)
+
+        for p in (mock.patch.object(no1.R, "publish", publish), mock.patch.object(no1.R, "update", update),
+                  mock.patch.object(no1.tempfile, "tempdir", self.temps)):
+            p.start()
+            self.ps.append(p)
+
+    def run_stdin(self, data, *a):
+        with mock.patch.object(no1.sys, "stdin", io.TextIOWrapper(io.BytesIO(data))):
+            return self.run_report(*a)
+
+    def test_publishes_stdin_and_removes_the_temp_file(self):
+        code, j = self.run_stdin(b"<h1>Brief</h1>", "-", "Weekly brief", "for Monday", "--as", "brief.html")
+        self.assertEqual(code, 0, j)
+        [(path, mode, data, dmode)] = self.handed
+        self.assertEqual((os.path.basename(path), mode, dmode, data), ("brief.html", 0o600, 0o700, b"<h1>Brief</h1>"))
+        self.assertTrue(path.startswith(self.temps + os.sep))
+        self.assertEqual(os.listdir(self.temps), [])
+        self.assertTrue(j["path"].endswith(".html"))
+        with open(os.path.join(self.root, j["path"]), "rb") as f:
+            self.assertEqual(f.read(), b"<h1>Brief</h1>")
+        [(_, _, body)] = self.posts
+        self.assertEqual(body["title"], "Report: Weekly brief")
+        self.assertIn("for Monday", body["content"])
+        self.assertNotIn("--as", body["content"])
+
+    def test_update_from_stdin(self):
+        _, first = self.run_stdin(b"a,b\n1,2\n", "-", "Numbers", "--as", "n.csv")
+        self.posts.clear()
+        code, j = self.run_stdin(b"a,b\n3,4\n", "--update", first["path"], "-", "--as", "n.csv", "fixed")
+        self.assertEqual(code, 0, j)
+        self.assertEqual(j["url"], first["url"])
+        with open(os.path.join(self.root, j["path"]), "rb") as f:
+            self.assertEqual(f.read(), b"a,b\n3,4\n")
+        self.assertEqual(self.posts[0][2]["title"], "Report updated: Numbers")
+        self.assertEqual(os.listdir(self.temps), [])
+
+    def test_refusals_publish_nothing(self):
+        big = b"x" * (no1.STDIN_MAX + 1)
+        for data, args, says in [
+                (b"", ("-", "T", "--as", "a.md"), "empty"),
+                (b"  \n", ("-", "T", "--as", "a.md"), "empty"),
+                (big, ("-", "T", "--as", "a.md"), "over"),
+                (b"x", ("-", "T", "--as", "../a.md"), "slash"),
+                (b"x", ("-", "T", "--as", "a/b.md"), "slash"),
+                (b"x", ("-", "T", "--as", "a..md"), "slash"),
+                (b"x", ("-", "T", "--as", ".a.md"), "slash"),
+                (b"x", ("-", "T", "--as", "a.exe"), "not a report type"),
+                (b"x", ("-", "T", "--as", "a.pdf"), "not a report type"),
+                (b"x", ("-", "T", "--as", "noext"), "not a report type"),
+                (b"x", ("-", "T"), "--as"),
+                (b"x", (self.src, "T", "--as", "a.md"), "--as"),
+                (b"x", ("-", "T", "--as"), "--as"),
+                (b"x", ("--update", "media/reports/2026/10/nope.md", "-", "--as", "a.md"), "no report"),
+        ]:
+            with self.subTest(args=args, size=len(data)):
+                code, j = self.run_stdin(data, *args)
+                self.assertNotEqual(code, 0)
+                self.assertIn(says, j["error"])
+        self.assertEqual((self.handed, self.posts, os.listdir(self.temps)), ([], [], []))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "media", "reports")))
+
+
+def read(path):
+    with open(path, "rb") as f:
+        return f.read()
 
 
 def sh(*args, cwd):

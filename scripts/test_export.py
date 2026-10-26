@@ -51,6 +51,7 @@ PATTERNS = """# made-up names
 the fixture's name :: (?i)zorblax
 a key :: sk-ant-[A-Za-z0-9_-]{8}
 the owner as he :: \\b[Hh]e\\b :: crew/*.md
+a short term :: \\bQRX\\b :: !*.bin
 """
 
 
@@ -186,6 +187,40 @@ class Export(unittest.TestCase):
         rc, out = self.export()
         self.assertIn("1 lines hit", rc)
         self.assertIn("crew/yeoman.md:1: the owner as he:", out)
+
+    def test_a_rule_left_out_of_some_files(self):
+        # "!*.bin" keeps the short term's rule out of a binary, whose bytes
+        # may spell it by chance; anywhere else it hits
+        (self.src / "lcars-ui" / "tex.bin").write_bytes(b"\x00QRX\x01\n")
+        (self.src / "lcars-ui" / "notes.txt").write_text("the QRX list\n", encoding="utf-8")
+        sh(self.src, "git", "add", "-A")
+        sh(self.src, "git", "commit", "-qm", "short term")
+        rc, out = self.export()
+        self.assertIn("1 lines hit", rc)
+        self.assertIn("lcars-ui/notes.txt:1: a short term:", out)
+        self.assertNotIn("tex.bin", out)
+
+    def test_a_fragment_refused(self):
+        # changelog.d/'s fragments are unnumbered too; its README is not one
+        (self.src / "changelog.d").mkdir()
+        (self.src / "changelog.d" / "README.md").write_text("the format\n")
+        (self.src / "changelog.d" / "ada-x.md").write_text("patch\n- mine\n")
+        sh(self.src, "git", "add", "-A")
+        sh(self.src, "git", "commit", "-qm", "fragment")
+        rc, _ = self.export()
+        self.assertIn("changelog.d/ada-x.md is a fragment the deploy has not numbered", str(rc))
+        self.assertEqual(list(self.dest.iterdir()), [self.dest / ".git"])
+
+    def test_a_placeholder_refused(self):
+        # main is always numbered: a branch's `## next patch` never ships
+        self.commit_src("CHANGELOG.md", "# Changelog\n\n## next patch — 2026-10-22\n\n- mine\n\n"
+                                        "## 1.2.3 — 2026-10-19\n\n- the private history\n")
+        rc, _ = self.export()
+        self.assertIn("CHANGELOG.md has a placeholder (## next patch — 2026-10-22)", str(rc))
+        self.assertEqual(list(self.dest.iterdir()), [self.dest / ".git"])
+        # the audit alone runs on a branch
+        rc, out = run("--src", str(self.src), "--patterns", str(self.pat), "--audit-only")
+        self.assertIn("files would ship", out)
 
     def test_dirty_tree_refused(self):
         (self.src / "lcars.c").write_text("int main(void) { return 1; }\n")

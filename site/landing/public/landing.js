@@ -71,6 +71,9 @@ async function send(form) {
     form.classList.add("done");
     label.textContent = "On the list ✓";
     say(form, "ok", SAY.ok);
+    // the Signup goal, when the deploy turned Plausible on (no stub, no call):
+    // the event's name and the page only, nothing of what was typed
+    if (window.plausible) window.plausible("Signup");
     // every form on the page says it: the second one is not asked again
     for (const f of document.querySelectorAll(".signup")) if (f !== form) markDone(f);
   } else {

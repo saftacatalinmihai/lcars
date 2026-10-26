@@ -13,7 +13,12 @@ drives a scratch build of the real server over an empty database and checks:
   4. the text parses as Prometheus' exposition format: label values
      escaped, every metric's samples together under its # TYPE;
   5. loopback needs no password; another address of this box does
-     (skipped when it has none), a wrong one is 401; POST is 405.
+     (skipped when it has none), a wrong one is 401; POST is 405;
+  6. the crew's file (scripts/eng_metrics.py's metrics.prom) appended as it
+     stands under lcars_eng_metrics_timestamp_seconds, its mtime: missing
+     (nothing appended, no timestamp), present, stale, without its final
+     newline, over the size cap (skipped), LCARS_ENG_METRICS="" (off); and
+     a real render of eng_metrics.py passing through intact.
 
     python3 test/metrics.py            # builds the server first (~30s)
     LCARS_TEST_BIN=/path/to/lcars python3 test/metrics.py
@@ -63,14 +68,16 @@ def lan_address():
 
 
 class Server:
-    def __init__(self, binary, tmp):
+    def __init__(self, binary, tmp, eng=None):
         self.port = free_port()
+        # never the box's own crew file (~/.local/state/lcars-eng): a scratch path
         env = dict(os.environ, LCARS_EMBED="0", LCARS_CHAT="0", LCARS_BIND="0.0.0.0",
-                   LCARS_AUTH_USER=USER, LCARS_AUTH_PASS=PASS)
+                   LCARS_AUTH_USER=USER, LCARS_AUTH_PASS=PASS,
+                   LCARS_ENG_METRICS=str(tmp / "eng.prom") if eng is None else eng)
         for k in ("LCARS_NO1_USER", "LCARS_NO1_PASS", "LCARS_CREW_USER",
                   "LCARS_CREW_PASS", "LCARS_ENGINEER", "DEEPGRAM_API_KEY"):
             env.pop(k, None)
-        self.log = open(tmp / "server.log", "w")
+        self.log = open(tmp / "server.log", "a")
         pre = ["stdbuf", "-oL", "-eL"] if shutil.which("stdbuf") else []
         self.proc = killclean.child(subprocess.Popen(pre + [str(binary), "--http-only", "--port", str(self.port)],
                                                      cwd=tmp, env=env, stdout=self.log,
@@ -143,6 +150,75 @@ def parse(text):
     return out
 
 
+ENG_TS = "# HELP lcars_eng_metrics_timestamp_seconds"
+
+
+def journal_part(text):
+    """The journal's own numbers: everything before the crew's file."""
+    return text.split(ENG_TS, 1)[0]
+
+
+def eng_part(text):
+    """(timestamp, the file as appended) or (None, None) when nothing was."""
+    if ENG_TS not in text:
+        return None, None
+    rest = text.split(ENG_TS, 1)[1].split("\n", 3)
+    ok = (len(rest) == 4 and rest[0].endswith("written.")
+          and rest[1] == "# TYPE lcars_eng_metrics_timestamp_seconds gauge")
+    m = re.match(r"^lcars_eng_metrics_timestamp_seconds (\d+)$", rest[2]) if ok else None
+    check(m is not None, "the timestamp: HELP, TYPE gauge, one sample")
+    return (int(m.group(1)) if m else None), (rest[3] if m else "")
+
+
+def eng_checks(s, tmp):
+    print("\nthe crew's file")
+    eng = tmp / "eng.prom"
+    st, text, _ = s.req("GET", "/metrics", auth=None)
+    check(st == 200 and ENG_TS not in text and "lcars_eng" not in text,
+          "missing: nothing appended, no timestamp")
+    body = ("# HELP lcars_seat_held 1 while someone holds the seat.\n# TYPE lcars_seat_held gauge\n"
+            "lcars_seat_held 1\n")
+    eng.write_text(body)
+    stamp = int(time.time()) - 7
+    os.utime(eng, (stamp, stamp))
+    st, text, _ = s.req("GET", "/metrics", auth=None)
+    ts, got = eng_part(text)
+    check(st == 200 and ts == stamp, f"present: the timestamp is the file's mtime ({ts} vs {stamp})")
+    check(got == body and text.endswith(body), "the file appended verbatim, at the end")
+    parse(journal_part(text))  # the journal's part still parses on its own
+    old = stamp - 3 * 86400
+    os.utime(eng, (old, old))
+    ts, got = eng_part(s.req("GET", "/metrics", auth=None)[1])
+    check(ts == old and got == body, "stale: its age shows (the old mtime), the values still there")
+    eng.write_text(body.rstrip("\n"))
+    text = s.req("GET", "/metrics", auth=None)[1]
+    check(text.endswith(body), "a file without its last newline is given one")
+    eng.write_text("x" * (256 * 1024 + 1))
+    st, text, _ = s.req("GET", "/metrics", auth=None)
+    check(st == 200 and ENG_TS not in text and "xxx" not in text, "over 256KB: skipped, not cut")
+    eng.write_text("y" * (256 * 1024 - 1) + "\n")
+    st, text, _ = s.req("GET", "/metrics", auth=None)
+    check(st == 200 and text.endswith("y\n") and text.count("y") >= 256 * 1024 - 1,
+          "a file at the cap is appended whole")
+    eng.unlink()
+    check(ENG_TS not in s.req("GET", "/metrics", auth=None)[1], "deleted again: nothing appended")
+
+    # a real render, through the server
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
+    import eng_metrics as M
+    with M.changing(str(tmp / "state")) as m:
+        M.inc(m, "lcars_jobs_total", "passed")
+        M.observe(m, "lcars_task_seconds", 1500)
+        M.gauge(m, "lcars_engineer_ctx_tokens", {"sato-c31": 120000})
+    real = (tmp / "state" / "metrics" / "metrics.prom").read_text()
+    eng.write_text(real)
+    ts, got = eng_part(s.req("GET", "/metrics", auth=None)[1])
+    check(got == real and 'lcars_jobs_total{outcome="passed"} 1\n' in got
+          and 'lcars_task_seconds_bucket{le="1800"} 1\n' in got,
+          "eng_metrics.py's render passes through intact")
+    eng.unlink()
+
+
 def utc(s):
     return calendar.timegm(time.strptime(s, "%Y-%m-%d %H:%M:%S"))
 
@@ -156,6 +232,8 @@ def main():
     s = Server(binary, tmp)
     try:
         print("\nempty journal")
+        eng_checks(s, tmp)
+
         st, text, ctype = s.req("GET", "/metrics", auth=None)
         check(st == 200, "GET /metrics answers 200 on an empty journal")
         check(ctype.startswith("text/plain; version=0.0.4"), f"the text format's type ({ctype})")
@@ -228,6 +306,13 @@ def main():
             check(s.req("GET", "/metrics", host=lan)[0] == 200, "the password: 200")
     finally:
         s.stop()
+    print("\nLCARS_ENG_METRICS set empty")
+    (tmp / "eng.prom").write_text("lcars_seat_held 1\n")
+    off = Server(binary, tmp, eng="")
+    try:
+        check(ENG_TS not in off.req("GET", "/metrics", auth=None)[1], "turned off: nothing appended")
+    finally:
+        off.stop()
     if fails:
         print(f"\nmetrics: {len(fails)} of {checks[0]} checks failed; server log in {tmp}")
         sys.exit(1)

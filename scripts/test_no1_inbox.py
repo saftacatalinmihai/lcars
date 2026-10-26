@@ -118,8 +118,9 @@ class Inbox(unittest.TestCase):
         self.assertEqual(self.inbox(), [])
 
     def test_every_thread_s_notes_go_at_once_tagged(self):
-        # threads are tags (no1-threads.md section 13): nothing is held, a
-        # note for a thread other than main is typed under its tag line
+        # threads are tags (no1-threads.md section 13), now rooms (rooms.md):
+        # nothing is held, a note for a room other than main is typed under
+        # its header line
         with open(os.path.join(self.state, "number-one.json"), "w") as f:
             json.dump({"name": "number-one", "session": "s2", "threads": [
                 {"id": "main", "name": "Main"}, {"id": "deck", "name": "Deck"}]}, f)
@@ -131,7 +132,7 @@ class Inbox(unittest.TestCase):
         o, e = p.communicate(timeout=30)
         self.assertEqual(p.returncode, 0, e)
         self.assertEqual(json.loads(o), {"ok": True, "sent": 4, "left": 0})
-        self.assertEqual(self.prompts(), ["for main", "anyone's", "[thread deck]\nfor deck", "[thread gone]\na closed one's"])
+        self.assertEqual(self.prompts(), ["for main", "anyone's", "room:: deck\nfor deck", "room:: gone\na closed one's"])
         self.assertEqual(self.inbox(), [])
 
     def test_a_note_s_thread_is_on_its_title(self):

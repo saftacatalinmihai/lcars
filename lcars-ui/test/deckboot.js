@@ -127,11 +127,12 @@ try {
   if (!problems.length) socialFlash();
   if (!problems.length) crouching();
   if (!problems.length) nightWatching();
+  if (!problems.length) announcing();
   if (problems.length) {
     for (const p of problems) console.log("   FAIL " + p);
     process.exit(1);
   }
-  console.log("   ok (top level, demo boot, " + loops.length * 3 + " frames, " + reading + "; " + baked + "; " + walked + "; " + peopled + "; " + spoken + "; " + faced + "; " + culled + "; " + patched + "; " + socialed + "; " + crouchd + "; " + nightd + ")");
+  console.log("   ok (top level, demo boot, " + loops.length * 3 + " frames, " + reading + "; " + baked + "; " + walked + "; " + peopled + "; " + spoken + "; " + faced + "; " + culled + "; " + patched + "; " + socialed + "; " + crouchd + "; " + nightd + "; " + announced + ")");
 })();
 
 // The crouch (Z, the Crouch pill, "crouch"): the eye eases down to
@@ -215,6 +216,28 @@ function nightWatching() {
       if (!on && !pools.every((s, i) => s.intensity === day[i])) return fail("by day the pools are " + pools.map(s => s.intensity) + ", not " + day);
     }
     nightd = "night watch: the pools " + day + " cut and back, kept, 4 orders";
+  } catch (e) { fail(e.message + "\n      " + String(e.stack || "").split("\n").slice(1, 3).join("\n      ")); }
+}
+
+// The announcements (the captain's order of 2026-10-23): off by default, a
+// switch of their own with two orders that each say what they want, kept;
+// the deck has no road to POST /say any more (sayAloud gone).
+let announced = "";
+function announcing() {
+  const D = ctx.window.__deck, fail = m => problems.push("announcements: " + m);
+  try {
+    if (D.announceOn !== false) return fail("on by default");
+    if ("sayAloud" in D) return fail("the deck still has sayAloud, the server's voice");
+    const order = said => D.DVCMDS.filter(c => c.fn && [c.say, ...(c.alias || [])].includes(said));
+    for (const [w, on] of [["announcements on", true], ["announcements off", false], ["make announcements", true], ["no announcements", false]]) {
+      const o = order(w);
+      if (o.length !== 1) return fail("\"" + w + "\" is " + o.length + " orders, not one");
+      o[0].fn({}); o[0].fn({});
+      if (D.announceOn !== on) return fail("\"" + w + "\" twice left them " + (D.announceOn ? "on" : "off"));
+      const kept = ctx.localStorage.getItem("lcars.deck.announce");
+      if (kept !== String(on)) return fail("\"" + w + "\" kept " + kept + " in localStorage");
+    }
+    announced = "announcements: off by default, 4 orders, kept, no /say";
   } catch (e) { fail(e.message + "\n      " + String(e.stack || "").split("\n").slice(1, 3).join("\n      ")); }
 }
 

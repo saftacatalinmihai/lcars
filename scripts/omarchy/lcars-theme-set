@@ -1,0 +1,82 @@
+#!/bin/sh
+# lcars-theme-set - omarchy's theme-set hook: the LCARS console takes the
+# theme omarchy has just set (docs/design/theming.md 6).
+#
+# Install: copy or link this file into ~/.config/omarchy/hooks/theme-set.d/
+# and make it executable:
+#
+#   mkdir -p ~/.config/omarchy/hooks/theme-set.d
+#   ln -s "$PWD/scripts/omarchy/lcars-theme-set" ~/.config/omarchy/hooks/theme-set.d/
+#   chmod +x scripts/omarchy/lcars-theme-set
+#
+# (An omarchy whose hook is the single file ~/.config/omarchy/hooks/theme-set
+# runs it from there: add the line `/path/to/lcars-theme-set "$1"` to it.)
+#
+# omarchy runs it with the theme's name as its first argument. It hands the
+# server the theme's colors.toml (omarchy 3), or its btop.theme when there
+# is no colors.toml, through `lcars-cli theme load FILE --name NAME`; the
+# console follows within a second or two, on every device.
+#
+# Needs: lcars-cli on PATH, or LCARS_CLI set to its path (an lcars-one
+# binary is one too: LCARS_CLI="/path/to/lcars-one cli"). The server's
+# address and login as lcars-cli takes them: LCARS_URL, LCARS_AUTH_USER,
+# LCARS_AUTH_PASS. omarchy's hooks do not see a terminal's environment, so
+# they may also be put in ~/.config/lcars/env (or $LCARS_HOOK_ENV), lines of
+# NAME=value, read here if it is there.
+#
+# It never holds omarchy up: the request runs in the background with a five
+# second limit, and a server that cannot be reached or refuses is one line
+# on stderr, nothing else. It always exits 0.
+
+name=${1:-}
+
+env_file=${LCARS_HOOK_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/lcars/env}
+if [ -r "$env_file" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$env_file"
+  set +a
+fi
+
+# the current theme's folder: omarchy 3 keeps it under ~/.local/state, the
+# older ones under ~/.config
+dir=
+for d in "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/current/theme" \
+  "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/current/theme"; do
+  if [ -d "$d" ]; then
+    dir=$d
+    break
+  fi
+done
+file=
+if [ -n "$dir" ] && [ -r "$dir/colors.toml" ]; then
+  file=$dir/colors.toml
+elif [ -n "$dir" ] && [ -r "$dir/btop.theme" ]; then
+  file=$dir/btop.theme
+fi
+if [ -z "$file" ]; then
+  echo "lcars-theme-set: no colors.toml or btop.theme in omarchy's current theme" >&2
+  exit 0
+fi
+if [ -z "$name" ]; then
+  # no argument: the folder's own name (a link's target names the theme)
+  name=$(basename "$(readlink -f "$dir" 2>/dev/null || echo "$dir")")
+fi
+
+cli=${LCARS_CLI:-lcars-cli}
+# LCARS_CLI may be a command with words ("lcars-one cli"): its first is
+# what must exist
+set -- $cli
+if ! command -v "$1" >/dev/null 2>&1; then
+  echo "lcars-theme-set: $1 not found (put lcars-cli on PATH or set LCARS_CLI)" >&2
+  exit 0
+fi
+
+(
+  out=$("$@" --timeout 5 theme load "$file" --name "$name" 2>&1 >/dev/null)
+  if [ $? -ne 0 ]; then
+    echo "lcars-theme-set: the LCARS server did not take $name: $(printf '%s\n' "$out" | head -n 1)" >&2
+  fi
+) </dev/null &
+
+exit 0

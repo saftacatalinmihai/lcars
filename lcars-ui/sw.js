@@ -77,7 +77,12 @@ self.addEventListener("fetch", ev => {
   // journal itself out of this cache — and /dump, /kinds and the rest were
   // not on the list: a boot's full load could be answered by a stale cached
   // dump. Whatever is not under this worker's scope is the server's.
-  if (!url.pathname.startsWith(new URL(self.registration.scope).pathname)) return;
+  const scope = new URL(self.registration.scope).pathname;
+  if (!url.pathname.startsWith(scope)) return;
+  // The user manual (manual/, docs/design/manual.md) is the network's: a
+  // navigation missing from the cache is answered with "./" below, so its
+  // first opening would be the console. It need not work offline.
+  if (url.pathname.startsWith(scope + "manual/")) return;
   if (/^\/(entries|stats)\b/.test(url.pathname)) return;   // always live
   // Attachments: photos and video off the NAS. Too big to keep a second copy
   // of in the cache, and a <video>'s Range requests would be answered with a

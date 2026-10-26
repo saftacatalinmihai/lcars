@@ -61,10 +61,13 @@ SECRETS = {
     "LOGSEQ_URL": "http://logseq.example:12315",
     "LOGSEQ_TOKEN": "logseqTOKEN98765",
     "LCARS_ENGINEER_KEY": "engineerKEY1234567890",
+    "LCARS_PUB_MASTODON": "masto.example:mastoTOKEN1234567890",
+    "LCARS_PUB_BLUESKY": "captain.bsky.example:bskyAPPPASS1234567890",
 }
 
 ALL = ["media", "media_ffmpeg", "computer", "navigator", "maps", "transcription", "speech",
-       "embeddings", "caldav", "strava", "logseq", "engineers", "number_one", "crew", "reports"]
+       "embeddings", "caldav", "strava", "logseq", "engineers", "number_one", "crew", "reports",
+       "publish_mastodon", "publish_bluesky", "publish_live"]
 
 fails = []
 checks = [0]
@@ -228,6 +231,11 @@ def bare(binary, tmp):
             "number_one": ["LCARS_NO1_USER", "LCARS_NO1_PASS"],
             "crew": ["LCARS_CREW_USER", "LCARS_CREW_PASS", "LCARS_STEWARD_USER", "LCARS_STEWARD_PASS"],
             "reports": ["LCARS_MEDIA_ROOT"],
+            "publish_mastodon": ["LCARS_PUB_MASTODON", "LCARS_CREW_USER", "LCARS_CREW_PASS",
+                                 "LCARS_PUBLISH_SCRIPT", *py],
+            "publish_bluesky": ["LCARS_PUB_BLUESKY", "LCARS_CREW_USER", "LCARS_CREW_PASS",
+                                "LCARS_PUBLISH_SCRIPT", *py],
+            "publish_live": ["LCARS_PUB_DRY"],
         }
         got = by_name(doc)
         for name in ALL:
@@ -251,12 +259,14 @@ def full(binary, tmp):
     ffmpeg = stub(d / "tools" / "ffmpeg")
     claude = stub(d / "tools" / "claude")
     script = stub(d / "tools" / "engineer.py", "print('stand-in')\n")
+    publisher = stub(d / "tools" / "publish.py", "print('stand-in')\n")
     port = free_port()
     emb = http.server.ThreadingHTTPServer(("127.0.0.1", port), Embedder)
     threading.Thread(target=emb.serve_forever, daemon=True).start()
     env = dict(SECRETS, HOME=str(d / "home"), PATH=str(bindir), LCARS_MEDIA_ROOT=str(d / "root"),
                LCARS_FFMPEG_BIN=str(ffmpeg), LCARS_CLAUDE_BIN=str(claude), LCARS_ENGINEER="1",
                LCARS_ENGINEER_SCRIPT=str(script), LCARS_EMBED="1",
+               LCARS_PUBLISH_SCRIPT=str(publisher), LCARS_PUB_DRY="0",
                LCARS_EMBED_URL=f"http://127.0.0.1:{port}/v1/embeddings", LCARS_EMBED_MODEL="stand-in",
                LCARS_NO1_USER=NO1[0], LCARS_NO1_PASS=NO1[1], LCARS_CREW_USER=CREW[0], LCARS_CREW_PASS=CREW[1],
                LCARS_STEWARD_USER=STEWARD[0], LCARS_STEWARD_PASS=STEWARD[1])

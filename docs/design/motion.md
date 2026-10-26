@@ -14,6 +14,8 @@ touched - and none of it ever makes him wait.
    only moves what is already drawn, and nothing is held back until one
    ends. (The swipe page turn used to land its entry after a 140 ms slide
    out; it lands at once now.)
+   A theme's fade (theming.md 7) is the one longer one, 350 ms at the
+   captain's word: colours over a page already in place, nothing waits.
 3. **What comes, moves where it is; what goes, by a view transition.** A
    pane or a page that has just come on screen is animated in place, in
    the same task as the tap: transform, opacity, a clip. Something that

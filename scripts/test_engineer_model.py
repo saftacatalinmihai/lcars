@@ -353,6 +353,7 @@ class Say(unittest.TestCase):
                   mock.patch.object(E, "agent", return_value="pane"),
                   mock.patch.object(E, "submit_if_left"), mock.patch.object(E, "sync_to_base"),
                   mock.patch.object(E, "task_begins"),
+                  mock.patch.object(E, "msg_post"),  # the message's row (rooms.md): test_rooms.py's
                   mock.patch.object(E, "herdr", side_effect=lambda *a, **k: (self.typed.append(a[3]), ({}, None))[1]),
                   mock.patch.dict(os.environ, {"LCARS_MEDIA_ROOT": "/mnt/nas", "LCARS_REPORT_BASE": "https://box.ts.net/"})]
         for p in self.p:

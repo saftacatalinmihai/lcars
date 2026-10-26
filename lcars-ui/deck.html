@@ -552,8 +552,14 @@ function mirrorRead() {
 }
 
 // Number One's questions to the captain (kind task_no1, see "engineers"):
-// each open one is said on the HUD once, when it is first seen
+// each open one is said on the HUD once, when it is first seen - unless the
+// console has it snoozed on this device (its Later, lcars.oqSnooze: id -> {
+// u: back at, ms; m: the row's stamp then}), which keeps it out of the
+// readings' count too, until u passes or the row is written again
 const no1Seen = new Set();
+const OQ_SNOOZE_KEY = "lcars.oqSnooze";
+const oqSnoozed = (r, m) => { const z = (m || lsGet(OQ_SNOOZE_KEY, {}) || {})[r.id];
+  return !!z && Date.now() < z.u && String(r.last_modified_at_utc || "") <= String(z.m || ""); };
 // The social watch's notice (task_crew_social, scripts/social.py: "3 new
 // comments: HN 2, GitHub 1"), said the same way, once per row - and once
 // on this device, not on every boot: it waits in the console's Open
@@ -564,7 +570,7 @@ const socialSeen = new Set([].concat(lsGet(SOCIAL_SEEN_KEY, [])));
 function takeRows(list) {
   if (list.length) rowsGen++;          // the view pads are drawn from all of them
   for (const r of list) {
-    if (r.kind === "task_no1" && !r.done_bool && !r.deleted && !no1Seen.has(r.id)) {
+    if (r.kind === "task_no1" && !r.done_bool && !r.deleted && !no1Seen.has(r.id) && !oqSnoozed(r)) {
       no1Seen.add(r.id);
       flashHint("Number One asks: " + (r.title || "a decision"), 9000);
     }
@@ -786,8 +792,25 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.setSize(VW(), VH(), false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.9;
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.25;
+// Khronos PBR Neutral, the captain's pick (docs/design/deck-remodel.md slice
+// 3): ACES skewed a bright orange toward yellow-white, and LCARS is saturated
+// orange, peach and lilac. 1.25 gives the corridor's walls the mean ACES gave
+// them at 0.9. ?tone=agx|neutral|aces and ?exposure=N pick another for a look
+// on a phone, __deck.setTone(name, exposure) for deckshots' --tone; neither
+// is kept, and with neither the deck is as above. Three recompiles a program
+// whose mapper changed and OutputPass rebuilds its own, so a switch at run
+// time needs nothing more. On low (no composer) the LCARS panels are
+// toneMapped: false and keep their sRGB whatever the mapper; on medium and
+// high OutputPass maps the whole frame, panels and all.
+const TONES = { aces: THREE.ACESFilmicToneMapping, agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping };
+function setTone(name, exposure) {
+  if (TONES[name] !== undefined) renderer.toneMapping = TONES[name];
+  if (exposure > 0) renderer.toneMappingExposure = exposure;
+  return { tone: Object.keys(TONES).find(k => TONES[k] === renderer.toneMapping), exposure: renderer.toneMappingExposure };
+}
+{ const q = new URLSearchParams(location.search); setTone(q.get("tone"), parseFloat(q.get("exposure"))); }
 renderer.xr.enabled = true;
 // The ship does not move, so its shadows are drawn once and again only when
 // something that casts one does (a door parting): a shadow map costs a render
@@ -1578,15 +1601,18 @@ const shipNews = { eng: null, deploy: null, outbox: 0, net: true, gen: 0 };
 let readCache = null;
 function readings() {
   const stamp = rowsGen + "|" + dayOf(new Date());
-  if (readCache && readCache.stamp === stamp) return readCache;
+  // the snoozed ones are counted on every read: a snooze ends with no row moving
+  const no1Now = c => { const m = lsGet(OQ_SNOOZE_KEY, {}) || {}; c.no1 = c.no1s.filter(r => !oqSnoozed(r, m)).length; return c; };
+  if (readCache && readCache.stamp === stamp) return no1Now(readCache);
   const live = liveRows(), now = new Date(), today = dayOf(now);
   const kinds = new Map(), perDay = new Array(40).fill(0), d0 = new Date(now); d0.setHours(0, 0, 0, 0);
   const wk0 = new Date(d0); wk0.setDate(wk0.getDate() - (wk0.getDay() + 6) % 7);
-  let week = 0, last = "", no1 = 0;
+  let week = 0, last = "";
+  const no1s = [];
   const todays = [];
   for (const r of live) {
     kinds.set(r.kind, (kinds.get(r.kind) || 0) + 1);
-    if (r.kind === "task_no1" && !r.done_bool) no1++;
+    if (r.kind === "task_no1" && !r.done_bool) no1s.push(r);
     const d = utcDate(r.created_at_utc); if (isNaN(d)) continue;
     if ((r.created_at_utc || "") > last) last = r.created_at_utc;
     if (d >= wk0) week++;
@@ -1597,8 +1623,8 @@ function readings() {
   todays.sort((a, b) => a.created_at_utc < b.created_at_utc ? -1 : 1);
   const tasks = openTasks(), marks = {};
   for (const t of tasks) marks[t.w] = (marks[t.w] || 0) + 1;
-  readCache = { stamp, total: live.length, kinds: [...kinds].sort((a, b) => b[1] - a[1]), perDay, week, today: todays, last, no1, tasks, marks };
-  return readCache;
+  readCache = { stamp, total: live.length, kinds: [...kinds].sort((a, b) => b[1] - a[1]), perDay, week, today: todays, last, no1s, tasks, marks };
+  return no1Now(readCache);
 }
 const hhmm = d => String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
 // TNG's scale, a thousand units a year, anchored so this century reads in
@@ -1674,7 +1700,8 @@ function linkCount() {
 function panelKey(kind) {
   if (kind === "status") return panelRows("status", readings()).map(r => r[1]).join("|");
   if (kind === "engineering") return panelRows("engineering", readings()).map(r => r[0]).join("|");
-  return readings().stamp + (kind === "activity" ? "|" + place.pins.length : "");
+  const R = readings();
+  return R.stamp + (kind === "activity" ? "|" + place.pins.length : kind === "tasks" ? "|" + R.no1 : "");
 }
 // the queue: one panel a frame, so a sync never costs a frame thirty canvases
 const panelQueue = new Set();
@@ -3193,12 +3220,78 @@ function capAtlas(t) {
   t.image = c; t.needsUpdate = true;
   return t;
 }
+// The atlases as KTX2 (docs/design/deck-remodel.md, slice 1): a webp is
+// decoded to RGBA8 on the GPU, ~5.6 MB a 1024² map with its mips, three a
+// room and every room seen kept, which is most of what an iPhone's tab
+// holds at a walk's end; a KTX2 is transcoded (Basis, in a worker) to a
+// format the GPU keeps compressed, ETC2 or ASTC on a phone, a quarter to an
+// eighth of that. scripts/deck-model-assets.mjs writes them beside the
+// webps, at most 1024² (the phone's ATLAS_MAX), and lists them in
+// atlases.json: a room not listed, or bigger than that off a phone (Ten
+// Forward's 2048 on a desktop, which has the memory and shows it), loads its
+// webp; and so does any room whose KTX2 fails (no transcoder, no wasm, a
+// GPU with none of the formats: three's loader then gives RGBA8, which still
+// works). The loader (60 kB) and the transcoder (~590 kB, gzipped on the
+// wire) are fetched once, with the first room's atlas, the transcoder at
+// once (init) beside the KTX2s rather than after the first of them lands.
+// Four workers (three's default): one made the boot's 30 maps wait on each
+// other's trips through the main thread, ~80 s in headless Chromium, where a
+// frame takes a second, against main's webps' 7 s; transcoding itself is
+// ~0.5 s in all. Each worker holds its own wasm heap, so the loader is
+// disposed (its workers ended) once no KTX2 is in flight - every room's
+// atlas is loaded at boot - and made again if one is ever wanted later.
+let atlasList = null, ktx2 = null, ktx2Busy = 0, ktx2Idle = 0;
+const atlasVia = new Map();   // room -> "ktx2" or "webp", what its atlas came as (the tests read it)
+const atlasJson = () => atlasList ??= fetch(DECK_MODELS + "atlases.json").then(r => r.ok ? r.json() : {}).catch(() => ({}));
+const atlases = () => atlasJson().then(j => j.rooms || {});
+const ktx2Loader = () => ktx2 ??= import("./vendor/ktx2loader-0.186.1.mjs").then(({ KTX2Loader }) => {
+  const l = new KTX2Loader().setTranscoderPath("./vendor/basis-0.186.1/").setWorkerLimit(4).detectSupport(renderer);
+  l.init();
+  return l;
+});
+const ktx2Get = async url => {
+  ktx2Busy++;
+  try { return await (await ktx2Loader()).loadAsync(url); } finally { ktx2Done(); }
+};
+// The bridge's own maps (its tiles and the coffer's skylight: deck-remodel
+// slice 1's second half), by name: the KTX2 when atlases.json lists it
+// under `maps` (each at most 1024², so on a desktop too), else or when it
+// fails the webp, with three's default flipY - which a KTX2 cannot have,
+// so the encoder writes those flipped and each texel keeps its uv. A KTX2
+// brings its own colour space; a webp's is `srgb`'s.
+async function deckMap(name, srgb) {
+  if ((await atlasJson()).maps?.[name]) {
+    try { return await ktx2Get(`${DECK_MODELS}${name}.ktx2`); }
+    catch (err) { console.warn(`[deck] ${name}'s KTX2 failed, loading its webp:`, err); }
+  }
+  const t = await new THREE.TextureLoader().loadAsync(`${DECK_MODELS}${name}.webp`);
+  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  return t;
+}
+const ktx2Done = () => {
+  if (--ktx2Busy) return;
+  clearTimeout(ktx2Idle);
+  ktx2Idle = setTimeout(() => { if (ktx2Busy || !ktx2) return; const p = ktx2; ktx2 = null; p.then(l => l.dispose(), () => {}); }, 5000);
+};
 function modelAsset(room) {
   if (modelAssets.has(room)) return modelAssets.get(room);
   const tl = new THREE.TextureLoader();
   const tex = async (f, srgb) => { const t = capAtlas(await tl.loadAsync(DECK_MODELS + f)); t.flipY = false; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; };
-  const pr = (async () => Promise.all([gltfRooms().then(l => l.loadAsync(DECK_MODELS + room + ".glb")), tex(room + "_base.webp", true), tex(room + "_norm.webp"), tex(room + "_orm.webp")]))()
-    .then(([doc, base, norm, orm]) => {
+  const webps = () => { atlasVia.set(room, "webp"); return Promise.all(["base", "norm", "orm"].map(k => tex(`${room}_${k}.webp`, k === "base"))); };
+  // the KTX2 carries its own colour space (sRGB for the base, linear for
+  // the others) and is never flipped (a compressed texture cannot be)
+  const ktx2s = async () => {
+    const e = (await atlases())[room];
+    if (!e || !(TOUCH || e.size <= e.base.size)) return webps();
+    try {
+      const ts = await Promise.all(["base", "norm", "orm"].map(k => ktx2Get(`${DECK_MODELS}${room}_${k}.ktx2`)));
+      for (const t of ts) t.anisotropy = 4;
+      atlasVia.set(room, "ktx2");
+      return ts;
+    } catch (err) { console.warn(`[deck] ${room}'s KTX2 failed, loading its webp:`, err); return webps(); }
+  };
+  const pr = (async () => Promise.all([gltfRooms().then(l => l.loadAsync(DECK_MODELS + room + ".glb")), ktx2s()]))()
+    .then(([doc, [base, norm, orm]]) => {
       doc.scene.updateMatrixWorld(true);
       // the atlas: glTF's ORM, ambient occlusion in red, roughness green,
       // metalness blue; three reads each from its channel of the one texture
@@ -3540,18 +3633,17 @@ function buildShip() {
   // wainscot was made and tied with T.grooves at the phone's distance: not
   // worth its 33 kB, so the wainscot keeps its canvas set.)
   function bridgeTiles(name, base, ...mats) {
-    const b = new THREE.Color(base), got = {}, tl = new THREE.TextureLoader();
+    const b = new THREE.Color(base), got = {};
     const tints = mats.map(m => new THREE.Color(m.color.r / b.r, m.color.g / b.g, m.color.b / b.b));
-    for (const k of ["base", "norm", "rough"]) tl.load(DECK_MODELS + `bridge_${name}_${k}.webp`, t => {
+    for (const k of ["base", "norm", "rough"]) deckMap(`bridge_${name}_${k}`, k === "base").then(t => {
       t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = maxAniso;
-      t.colorSpace = k === "base" ? THREE.SRGBColorSpace : THREE.NoColorSpace;
       got[k] = t;
       if (Object.keys(got).length < 3) return;
       mats.forEach((m, i) => {
         Object.assign(m, { map: got.base, normalMap: got.norm, roughnessMap: got.rough });
         m.color.copy(tints[i]); m.needsUpdate = true;
       });
-    }, undefined, () => {});
+    }, () => {});
   }
   bridgeTiles("carpet", 0x4e4548, M.carpetBridge, M.carpetWell);
 
@@ -4476,10 +4568,10 @@ function dressShip({ gap }) {
   // the coffer's picture (bridge-redesign.md slice 6: one generated image,
   // deck/LICENSE.txt), in place of the canvas drawing once it lands; the
   // drawing is shown until then, and kept if it never does
-  new THREE.TextureLoader().load(DECK_MODELS + "bridge_skylight.webp", t => {
-    t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = maxAniso;
+  deckMap("bridge_skylight", true).then(t => {
+    t.anisotropy = maxAniso;
     skyMat.map.dispose(); skyMat.map = t; skyMat.needsUpdate = true;
-  }, undefined, () => {});
+  }, () => {});
   const sky = new THREE.Mesh(new THREE.CircleGeometry(3.85, 96), skyMat);
   sky.rotation.x = Math.PI / 2; sky.position.set(0, BH - 0.012, BZ); root.add(sky);
   // the viewscreen: a light around its edge and a step below it
@@ -4763,9 +4855,11 @@ function lamp(x, y, z, h, shadeR, lightK, dist) {
   const shade = new THREE.Mesh(new THREE.CylinderGeometry(shadeR * 0.62, shadeR, shadeR * 1.1, 28, 1, true), M.shade); shade.position.y = h;
   const bulb = new THREE.Mesh(new THREE.SphereGeometry(shadeR * 0.22, 12, 8), M.bulb); bulb.position.y = h - shadeR * 0.2;
   add(base, true, g); g.add(stem, shade, bulb);
+  shade.userData.over = bulb.userData.over = true;   // the lit part, kept over a cabin's lamp model (quarters.py's)
   root.add(grounded(g));
   if (!y) block(x - shadeR * 0.8, z - shadeR * 0.8, x + shadeR * 0.8, z + shadeR * 0.8);
   light(x, y + h - shadeR * 0.35, z, 0xffb46a, lightK, dist);
+  return g;
 }
 
 // A model of the ship on a stand: saucer, neck, secondary hull, nacelles.
@@ -4791,8 +4885,9 @@ function shipModel(x, y, z, rot, k = 1, parent = root) {
 
 // A painting for over the sofa: a ringed planet rising over a lake at dusk,
 // in soft bands of colour.
+// One material, made at the first and kept (wallFrame hangs it too).
 let paintingMat = null;
-function painting(x, y, z, rotY, w, h) {
+function paintMat() {
   if (!paintingMat) paintingMat = new THREE.MeshStandardMaterial({ roughness: 0.85, map: canvasTex(768, 432, (g, W, Hh) => {
     const sky = g.createLinearGradient(0, 0, 0, Hh * 0.62);
     sky.addColorStop(0, "#1c1840"); sky.addColorStop(0.55, "#7a3f6a"); sky.addColorStop(1, "#f0a060");
@@ -4815,7 +4910,10 @@ function painting(x, y, z, rotY, w, h) {
     g.fillStyle = lake; g.fillRect(0, Hh * 0.8, W, Hh * 0.2);
   }) });
   paintingMat.userData.keep = true;
-  const pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), paintingMat);
+  return paintingMat;
+}
+function painting(x, y, z, rotY, w, h) {
+  const pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), paintMat());
   pic.position.set(x, y, z); pic.rotation.y = rotY; add(pic);
   const fr = new THREE.Mesh(rgeo(w + 0.1, h + 0.1, 0.04, 0.012), M.rail);
   fr.position.set(x, y, z); fr.rotation.y = rotY; fr.translateZ(-0.022); add(fr);
@@ -6368,6 +6466,27 @@ function screen(w, h, x, y, z, rotY, seed) {
   add(frame); add(m);
   return m;
 }
+// A framed plane flat on a wall, for the bare walls of the generated rooms
+// (deck-polish.md, slice 5): `mat` (a shared one: paintMat(), the panel
+// pool, viewMat) in a frame of four plain boxes in `fm`, 50 triangles where
+// painting()'s and screen()'s rounded frame is 300, since every room on a
+// deck has one or two. (x, z) is on the room's edge (shell's walls stand
+// 6 cm in from it), rotY turns the face into the room (0 faces +z), and
+// `off` is how far in from the edge it hangs (screen()'s 0.13).
+function wallFrame(mat, fm, w, h, x, y, z, rotY, off = 0.13, t = 0.05) {
+  const c = Math.cos(rotY), s = Math.sin(rotY);
+  const put = (geo, m, lx, ly, lz, pin) => {
+    const o = new THREE.Mesh(geo, m);
+    o.position.set(x + lx * c + lz * s, y + ly, z - lx * s + lz * c); o.rotation.y = rotY;
+    return add(o, pin);
+  };
+  const p = put(new THREE.PlaneGeometry(w, h), mat, 0, 0, off + 0.005, true);
+  for (const k of [-1, 1]) {
+    put(new THREE.BoxGeometry(w + 2 * t, t, 0.04), fm, 0, k * (h + t) / 2, off, false);
+    put(new THREE.BoxGeometry(t, h, 0.04), fm, k * (w + t) / 2, 0, off, false);
+  }
+  return p;
+}
 
 /* ----- turbolifts ----- */
 // A lift is a small car behind a door in some room's wall: the caller leaves
@@ -6735,6 +6854,7 @@ function finishCell(g) {
     const m = new THREE.Mesh(merged, mat);
     standinRanges(list, counts, m);
     dressCut(m, cut, counts);
+    m.userData.cellMerge = true;   // batchDeck may take it into the deck's batch
     m.receiveShadow = list[0].receiveShadow;
     m.matrixAutoUpdate = false;
     g.add(m);
@@ -6770,6 +6890,12 @@ function dropCell(g) {
   for (const d of dressing) if (d.frame === g) dressing.delete(d);
   g.traverse(o => {
     dressing.delete(o);
+    // an InstancedMesh's instanceMatrix (and instanceColor) are buffers of
+    // the mesh's, not its geometry's: only the mesh's dispose frees them,
+    // or every room of crates or bushes passed kept them (+3 a loop of
+    // deckmem's walk until 0.299.3)
+    // (a BatchedMesh's matrices and indirection textures too: batchDeck)
+    if (o.isInstancedMesh || o.isBatchedMesh) o.dispose();
     if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
     for (const m of [].concat(o.material || [])) {
       if (sharedMats.has(m) || m.userData.keep) continue;
@@ -6960,6 +7086,7 @@ function bed(x, z, rot, wd, r) {
   g.position.set(x, 0, z); g.rotation.y = rot; root.add(grounded(g));
   const c = Math.abs(Math.cos(rot)), s = Math.abs(Math.sin(rot)), hx = (wd * c + L * s) / 2, hz = (wd * s + L * c) / 2;
   block(x - hx, z - hz, x + hx, z + hz);
+  return g;
 }
 // A tall cabinet against a wall, local +z its doors, returned: sickbay's
 // (1.4 x 2.0) is the stand-in of sickbay.py's wall_cabinet, whose slot
@@ -7053,12 +7180,29 @@ function gymMat(x, z) {
   }
 }
 
+// A cabin's box of furniture (a nightstand, the coffee table, the low
+// cabinet), w across its local x, d along z, h high, turned `rot`: the
+// stand-in of a quarters.py prop, so a group (`model` looks for its
+// stand-in's parts under one), blocked as the plain box was.
+function qPiece(w, h, d, x, z, rot, rr = 0.02) {
+  const g = new THREE.Group();
+  add(new THREE.Mesh(rgeo(w, h, d, rr), M.wood), true, g).position.y = h / 2;
+  g.position.set(x, 0, z); g.rotation.y = rot; root.add(grounded(g));
+  const c = Math.abs(Math.cos(rot)), s = Math.abs(Math.sin(rot)), hx = (w * c + d * s) / 2, hz = (w * s + d * c) / 2;
+  block(x - hx, z - hz, x + hx, z + hz);
+  return g;
+}
+
 // Room kinds. Each gets (rm, r): the room and its seeded random.
 const ROOM_T = {
   // Crew quarters: a suite. The bed's head against a side wall at the
   // window end, armchairs by the glass; a sitting area in the middle round a
   // rug, facing a screen; by the door a desk, a wardrobe, a shelf for PADDs.
-  // Which side is which comes from the seed.
+  // Which side is which comes from the seed. Its furniture is quarters.py's
+  // (deck-remodel.md slice 5), one atlas for every cabin: the code-built
+  // pieces below are the stand-ins (qPiece's boxes, the bed, the sofas,
+  // the lamps' bases), collapsed when the glb lands; a lamp's lit shade,
+  // the sofas' pillows, the screens and the lights stay the page's.
   quarters(rm, r) {
     const { W, D, h } = rm, sx = r() < 0.5 ? -1 : 1, wz = rm.win ? 0.45 : 0, pz = D / 2 - 3.9;
     const qDress = dressGroup(root, [-W / 2, -D / 2, W / 2, D / 2]);   // the mugs and the ship model: the cabin's code-built dressing
@@ -7067,62 +7211,76 @@ const ROOM_T = {
     for (const s of [-1, 1]) glowBox(0.03, 0.03, D - 0.6, M.glowWarm, s * (W / 2 - 0.2), h - 0.12, 0);
     // sleeping
     const bw = W > 7 ? 1.6 : 1.2, bz = -D / 2 + wz + 0.35 + bw / 2 + 0.55, bx = sx * (W / 2 - 0.12 - 1.1);
-    bed(bx, bz, -sx * Math.PI / 2, bw, r);
+    model(bed(bx, bz, -sx * Math.PI / 2, bw, r), "quarters", bw > 1.2 ? "quarters_bed" : "quarters_bed_narrow");
     for (const dz of [-1, 1]) {
       const nz = bz + dz * (bw / 2 + 0.32), nx = sx * (W / 2 - 0.36);
-      rbox(0.42, 0.5, 0.42, M.wood, nx, 0.25, nz, 0.02); block(nx - 0.21, nz - 0.21, nx + 0.21, nz + 0.21);
-      if (dz < 0 || r() < 0.5) lamp(nx, 0.5, nz, 0.34, 0.11, 1.0, 4);
+      model(qPiece(0.42, 0.5, 0.42, nx, nz, -sx * Math.PI / 2), "quarters", "quarters_nightstand");
+      if (dz < 0 || r() < 0.5) model(lamp(nx, 0.5, nz, 0.34, 0.11, 1.0, 4), "quarters", "quarters_table_lamp");
     }
     painting(sx * (W / 2 - 0.075), 1.75, bz, -sx * Math.PI / 2, 1.2, 0.68);
     // two chairs by the window, a small table between
     if (W > 5.8) {
       const cz = -D / 2 + wz + 1.2;
-      // (lounge.py's armchair over them, built at 0.95)
+      // (quarters.py's armchair over them, built at 0.95)
       for (const k of [-1, 1]) model(sofa(-sx * (W / 2 - 1.0) + k * 0.55, cz, Math.PI + k * 0.35, 0.92, [[0, pick(r, [M.pillowA, M.pillowB, M.pillowC]), 0]]),
-                                     "lounge", "lounge_armchair", { scale: [0.92 / 0.95, 1, 1] });
-      const tt = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.04, 24), M.wood); tt.position.set(-sx * (W / 2 - 1.0), 0.55, cz - 0.1); add(tt);
-      const tl = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.1, 0.53, 10), M.metal); tl.position.set(-sx * (W / 2 - 1.0), 0.27, cz - 0.1); add(tl);
+                                     "quarters", "quarters_armchair", { scale: [0.92 / 0.95, 1, 1] });
+      const tg = new THREE.Group(); tg.position.set(-sx * (W / 2 - 1.0), 0, cz - 0.1); root.add(tg);
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.04, 24), M.wood), true, tg).position.y = 0.55;
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.1, 0.53, 10), M.metal), true, tg).position.y = 0.27;
+      model(tg, "quarters", "quarters_side_table");
     }
     // the sitting area: a rug, a sofa, a low table, facing a screen on the wall
     const lz = -D / 2 + D * 0.53;
     if (!inAisle(rm, 0, lz, 1.6) && D > 9) {
       rug(-sx * 0.2, lz, Math.min(1.5, W / 2 - 1.2));
-      // the observation lounge's sofa over it (lounge.py's, built at 2.3;
-      // the armchairs by the window take lounge.py's armchair, above: the
-      // sofa squeezed to 0.92 would have arms 6 cm thick)
+      // quarters.py's sofa over it (built at 2.3; the armchairs by the
+      // window take its armchair, above: the sofa squeezed to 0.92 would
+      // have arms 6 cm thick)
       const sw = Math.min(2.2, D * 0.2);
       model(sofa(sx * (W / 2 - 1.8), lz, -sx * Math.PI / 2, sw, [[-0.5, pick(r, [M.pillowA, M.pillowB, M.pillowC]), 0.1], [0.55, pick(r, [M.pillowA, M.pillowB, M.pillowC]), -0.1]]),
-            "lounge", "lounge_sofa", { scale: [sw / 2.3, 1, 1] });
-      rbox(0.6, 0.38, 1.1, M.wood, sx * (W / 2 - 3.0), 0.19, lz, 0.03); block(sx * (W / 2 - 3.0) - 0.3, lz - 0.55, sx * (W / 2 - 3.0) + 0.3, lz + 0.55);
+            "quarters", "quarters_sofa", { scale: [sw / 2.3, 1, 1] });
+      model(qPiece(1.1, 0.38, 0.6, sx * (W / 2 - 3.0), lz, -sx * Math.PI / 2, 0.03), "quarters", "quarters_coffee_table");
       if (r() < 0.6) mug(sx * (W / 2 - 3.0) + 0.1, 0.38, lz + 0.2, qDress);
       screen(1.6, 0.9, -sx * (W / 2 - 0.13), 1.55, lz, sx * Math.PI / 2, rm.seed);
-      rbox(0.4, 0.5, 1.8, M.wood, -sx * (W / 2 - 0.34), 0.25, lz, 0.02); block(-sx * (W / 2 - 0.12), lz - 0.9, -sx * (W / 2 - 0.54), lz + 0.9);
+      model(qPiece(1.8, 0.5, 0.4, -sx * (W / 2 - 0.34), lz, sx * Math.PI / 2), "quarters", "quarters_credenza");
       if (r() < 0.7) shipModel(-sx * (W / 2 - 0.34), 0.5, lz + 0.5, r() * 6, 0.7, qDress);
-      lamp(sx * (W / 2 - 0.5), 0, lz - Math.min(1.1, D * 0.1) - 0.4, 1.45, 0.2, 1.3, 5.5);
+      model(lamp(sx * (W / 2 - 0.5), 0, lz - Math.min(1.1, D * 0.1) - 0.4, 1.45, 0.2, 1.3, 5.5), "quarters", "quarters_floor_lamp");
     }
     // by the door: the desk, the wardrobe, the shelf
     const dz = D / 2 - 2.2;
     const dx = sx * (W / 2 - 0.5);
     if (!inAisle(rm, dx, dz, 0.4)) {
-      rbox(0.8, 0.05, 1.5, M.wood, dx, 0.75, dz, 0.015);
-      rbox(0.76, 0.72, 0.05, M.wood, dx, 0.36, dz - 0.71, 0.01); rbox(0.76, 0.72, 0.05, M.wood, dx, 0.36, dz + 0.71, 0.01);
+      // its sitter toward the room (-sx): the model's local +z; its books
+      // (in the model) at its local +x, so the mug at its -x
+      const dg = new THREE.Group(); dg.position.set(dx, 0, dz); dg.rotation.y = -sx * Math.PI / 2; root.add(dg);
+      add(new THREE.Mesh(rgeo(1.5, 0.05, 0.8, 0.015), M.wood), true, dg).position.y = 0.75;
+      for (const k of [-1, 1]) add(new THREE.Mesh(rgeo(0.05, 0.72, 0.76, 0.01), M.wood), true, dg).position.set(k * 0.71, 0.36, 0);
+      model(dg, "quarters", "quarters_desk");
       block(dx - 0.4, dz - 0.75, dx + 0.4, dz + 0.75);
       screen(0.55, 0.34, dx + sx * 0.28, 1.02, dz, -sx * Math.PI / 2, rm.seed + 3);
-      deskChair(dx - sx * 0.75, dz, sx * Math.PI / 2);
-      if (r() < 0.6) mug(dx - sx * 0.15, 0.775, dz + 0.45, qDress);
-      const books = [[0.05, 0x6a2020], [0.04, 0x203a6a], [0.035, 0x5a4a2a]];
-      let y = 0.775;
-      for (const [hh, c] of books) { rbox(0.22, hh, 0.16, std(c, { roughness: 0.7 }), dx + sx * 0.1, y + hh / 2, dz - 0.5, 0.004); y += hh; }
+      model(deskChair(dx - sx * 0.75, dz, sx * Math.PI / 2), "quarters", "quarters_desk_chair");
+      if (r() < 0.6) mug(dx - sx * 0.15, 0.775, dz - sx * 0.4, qDress);
     }
-    // the wardrobe, lounge.py's over it (built at 1.4, squeezed to the 1.2
+    // the wardrobe, quarters.py's over it (built at 1.4, squeezed to the 1.2
     // one where the aisle leaves less: its one lit slot stays in the middle)
-    if (!inAisle(rm, -sx * (W / 2 - 0.4), D / 2 - 1.5, 0.8)) model(cabinet(-sx * (W / 2 - 0.4), D / 2 - 1.5, sx * Math.PI / 2, 1.4, 2.25), "lounge", "cabin_wardrobe");
-    else model(cabinet(-sx * (W / 2 - 0.4), lz + 1.9, sx * Math.PI / 2, 1.2, 2.25), "lounge", "cabin_wardrobe", { scale: [1.2 / 1.4, 1, 1] });
-    // lounge.py's shelf over it, one of the ready room's two arrangements
+    if (!inAisle(rm, -sx * (W / 2 - 0.4), D / 2 - 1.5, 0.8)) model(cabinet(-sx * (W / 2 - 0.4), D / 2 - 1.5, sx * Math.PI / 2, 1.4, 2.25), "quarters", "quarters_wardrobe");
+    else model(cabinet(-sx * (W / 2 - 0.4), lz + 1.9, sx * Math.PI / 2, 1.2, 2.25), "quarters", "quarters_wardrobe", { scale: [1.2 / 1.4, 1, 1] });
+    // quarters.py's shelf over it, one of the ready room's two arrangements
     // (by the seed, not r(): a draw here would move every one after it)
-    model(padShelf(sx * (W / 2 - 0.3), pz, -sx * Math.PI / 2), "lounge", rm.seed % 2 ? "cabin_padd_shelf_b" : "cabin_padd_shelf_a");
+    model(padShelf(sx * (W / 2 - 0.3), pz, -sx * Math.PI / 2), "quarters", rm.seed % 2 ? "quarters_padd_shelf_b" : "quarters_padd_shelf_a");
     plant(-sx * (W / 2 - 0.5), -D / 2 + wz + 2.5, 1.0 + r() * 0.4);
     if (r() < 0.5) plant(sx * (W / 2 - 0.5), D / 2 - 0.55, 0.8 + r() * 0.3);
+    // the bare walls (deck-polish.md, slice 5): an inner cabin's far wall a
+    // starfield viewport over the chairs (+1 call, viewMat), a hull one's
+    // side wall the picture over them (paintMat, the bed's: +0); an LCARS
+    // plaque by the door, the desk's display (+0). The frames are in
+    // M.rail or M.console, which every wall's rail and kick plate already
+    // draw: +0. By the seed, not r(): a draw here would move every one
+    // after it.
+    if (rm.win) wallFrame(paintMat(), M.rail, 1.0, 0.56, -sx * W / 2, 1.7, -D / 2 + wz + 1.2, sx * Math.PI / 2);
+    else wallFrame(viewMat, M.console, Math.min(1.8, W / 2 - 0.6), 0.8, -sx * (W / 4), 1.6, -D / 2, 0);
+    const px = rm.dx + (rm.dx > 0 ? -1 : 1) * 1.45;
+    if (Math.abs(px) < W / 2 - 0.9) wallFrame(panelMat(rm.seed + 3), M.console, 0.4, 0.55, px, 1.45, D / 2, Math.PI, 0.13, 0.03);
   },
 
   // A science lab: rows of work benches with their displays, a holographic
@@ -7292,26 +7450,29 @@ const ROOM_T = {
     shell(rm, { floor: pick(r, MX.carpets), lc: 0xffe0c0 });
     const spots = [];
     for (let x = -W / 2 + 1.8; x < W / 2 - 1.2; x += 2.6) for (let z = -D / 2 + 1.8 + (rm.win ? 0.4 : 0); z < D / 2 - 2.2; z += 2.6) if (!inAisle(rm, x, z, 1.0)) spots.push([x, z]);
-    // Ten Forward's tables over every table; its tub chairs (976 triangles)
-    // over the chairs while the room keeps its +40 k budget, and a big
-    // hall's (four tub chairs to a table would be 60 k and more) its mess
-    // chair (210), the tub's family at a quarter of it, while that does;
-    // one kind of chair a hall, never two
-    const fits = n => spots.length * (480 + 4 * n) <= 38000;
-    const chairProp = fits(976) ? "tub_chair" : fits(210) ? "mess_chair" : null;
+    // the tables, chairs and replicators mess.py's (deck-remodel.md, slice
+    // 7): one atlas for every mess, where the tables and chairs were Ten
+    // Forward's (its 2048 atlas loaded for them on any deck, and its tub
+    // chairs 976 triangles each) and the replicators trim boxes. A table
+    // and its four chairs are 856 triangles: the biggest hall's 15 and its
+    // nine bays 14.7 k, under slice 5's 15 k a room.
     for (const [x, z] of spots) {
-      model(table(x, z, 1.0, 1.0, M.console, true), "tenforward", "tf_table");
+      model(table(x, z, 1.0, 1.0, M.console, true), "mess", "mess_table");
       for (let i = 0; i < 4; i++) {
-        const a = i * Math.PI / 2 + 0.4, c = deskChair(x + Math.sin(a) * 0.8, z + Math.cos(a) * 0.8, a + Math.PI, M.fabric);
-        if (chairProp) model(c, "tenforward", chairProp);
+        const a = i * Math.PI / 2 + 0.4;
+        model(deskChair(x + Math.sin(a) * 0.8, z + Math.cos(a) * 0.8, a + Math.PI, M.fabric), "mess", "mess_chair");
       }
     }
     const rz = rm.win ? D / 2 - 0.6 : -D / 2 + 0.35;
     for (let x = -W / 2 + 1; x < W / 2 - 1; x += 1.6) {
       if (inAisle(rm, x, rz, 0.4)) continue;
-      rbox(1.3, 1.9, 0.25, M.trim, x, 1.45, rz + (rm.win ? 0.1 : -0.1), 0.03, true);
+      // a bay in a group at the wall's line facing the room, its lit niche
+      // kept over the model (mess.py's mess_replicator)
+      const g = new THREE.Group(); g.position.set(x, 0, rz); g.rotation.y = rm.win ? Math.PI : 0; root.add(g);
+      add(new THREE.Mesh(rgeo(1.3, 1.9, 0.25, 0.03), M.trim), true, g).position.set(0, 1.45, -0.1);
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.7), MX.niche); p.position.set(0, 1.45, 0.03); p.userData.over = true; g.add(p);
+      model(g, "mess", "mess_replicator");
       block(x - 0.65, rz - 0.2, x + 0.65, rz + 0.2);
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.7), MX.niche); p.position.set(x, 1.45, rz + (rm.win ? -0.03 : 0.03)); p.rotation.y = rm.win ? Math.PI : 0; root.add(p);
     }
     plant(-W / 2 + 0.6, -D / 2 + 0.6, 1.2); plant(W / 2 - 0.6, -D / 2 + 0.6, 1.1);
   },
@@ -7345,6 +7506,9 @@ const ROOM_T = {
     }
     // and one at the mirror, clear of the way in
     if (!inAisle(rm, W / 2 - 1.1, 0, 0.4)) workSpot(W / 2 - 1.1, 0, W / 2, 0);
+    // the bare wall facing the mirror (deck-polish.md, slice 5): the
+    // gym's board, a pooled display (+1 call)
+    wallFrame(panelMat(rm.seed), M.console, Math.max(1.0, Math.min(2.0, D - 5)), 1.0, -W / 2, 1.7, 0.4, Math.PI / 2);
     void r;
   },
 
@@ -7353,18 +7517,27 @@ const ROOM_T = {
     const { W, D } = rm;
     shell(rm, { floor: pick(r, MX.carpets), lc: 0xffe6cc });
     const L = Math.min(D - 4.2, 6), tz = -0.4 + (rm.win ? 0.4 : -0.4);
-    rbox(1.4, 0.06, L, M.wood, 0, 0.75, tz, 0.02);
-    for (const s of [-1, 1]) rbox(0.4, 0.72, 0.6, M.console, 0, 0.36, tz + s * L / 4, 0.03);
+    // the table and its chairs conference.py's (deck-remodel.md, slice 7:
+    // one atlas for every conference room, where the stand-ins drew in
+    // M.wood, M.console, M.leather and M.grey, and the chairs took the
+    // lounge's glb); the table is built at L 6 and stretched to the room's
+    const tg = new THREE.Group(); tg.position.set(0, 0, tz); root.add(tg);
+    add(new THREE.Mesh(rgeo(1.4, 0.06, L, 0.02), M.wood), true, tg).position.y = 0.75;
+    for (const s of [-1, 1]) add(new THREE.Mesh(rgeo(0.4, 0.72, 0.6, 0.03), M.console), true, tg).position.set(0, 0.36, s * L / 4);
+    model(tg, "conference", "conf_table", { scale: [1, 1, L / 6] });
     glowBox(0.03, 0.005, L - 0.4, M.glowAmber, 0, 0.783, tz);
     block(-0.7, tz - L / 2, 0.7, tz + L / 2);
     for (let z = tz - L / 2 + 0.6; z < tz + L / 2 - 0.3; z += 1.0) for (const s of [-1, 1]) {
-      // the observation lounge's chair over each, as deck 8's lounge has
       const g = chair(s * 1.1, z, 0.85);
       g.rotation.y = s * Math.PI / 2;
-      model(g, "lounge", "lounge_chair", { rot: Math.PI, scale: [0.85, 1, 1] });
+      model(g, "conference", "conf_chair", { rot: Math.PI, scale: [0.85, 1, 1] });
     }
     screen(Math.min(W - 1.5, 3.4), 1.5, 0, 1.8, rm.win ? D / 2 - 0.2 : -D / 2 + 0.13, rm.win ? Math.PI : 0, rm.seed);
     plant(W / 2 - 0.6, D / 2 - 0.6, 1.1);
+    // the long bare walls (deck-polish.md, slice 5): the picture down one
+    // (paintMat, +1 call), the room's own display, small, down the other (+0)
+    wallFrame(paintMat(), M.rail, 1.3, 0.73, -W / 2, 1.75, tz, Math.PI / 2);
+    wallFrame(panelMat(rm.seed), M.console, 0.9, 0.55, W / 2, 1.7, tz, -Math.PI / 2, 0.13, 0.03);
   },
 
   // Hydroponics: long troughs of plants under pink grow lights, pipes.
@@ -7473,6 +7646,12 @@ const ROOM_T = {
     for (let x = -W / 2 + 1.6; x < W / 2 - 1.2; x += 2.8) if (!inAisle(rm, x, z, 1)) model(sofa(x, z, Math.PI, 2.0, [[0.5, pick(r, [M.pillowA, M.pillowB, M.pillowC]), 0.1]]), "lounge", "lounge_sofa", { scale: [2.0 / 2.3, 1, 1] });
     for (let x = -W / 2 + 0.6; x < W / 2; x += W - 1.2) plant(x, -D / 2 + 0.7, 1.4);
     lamp(-W / 2 + 0.6, 0, D / 2 - 1.6, 1.5, 0.22, 1.6, 6);
+    // the wall the sofas face (deck-polish.md, slice 5): an inner lounge
+    // looks out on a viewport of the windows' sky (viewMat), framed in the
+    // kick plates' M.console; a hull one's bare side wall takes the
+    // picture. +1 call.
+    if (!rm.win) wallFrame(viewMat, M.console, Math.max(1.6, W - 3.2), Math.min(1.8, h - 1.6), 0, 0.9 + Math.min(1.8, h - 1.6) / 2, -D / 2, 0, 0.13, 0.08);
+    else wallFrame(paintMat(), M.rail, 1.4, 0.79, W / 2, 1.7, 0, -Math.PI / 2);
   },
 
   // A classroom: small desks in rows before a big screen, pictures on the walls.
@@ -7480,17 +7659,31 @@ const ROOM_T = {
     const { W, D } = rm;
     shell(rm, { floor: pick(r, MX.carpets), lk: 1.1 });
     const sz = rm.win ? D / 2 - 0.2 : -D / 2 + 0.13;
-    screen(Math.min(W - 2, 3), 1.4, 0, 1.7, sz, rm.win ? Math.PI : 0, rm.seed);
+    // the screen, its desks and stools school.py's (deck-remodel.md, slice
+    // 7): one atlas for every classroom; the screen's display (the room's
+    // panel) stays over its frame. Its width is min(W - 2, 3): 3 in every
+    // classroom TYPE_W makes, which the frame is built to.
+    const sw = Math.min(W - 2, 3), sg = new THREE.Group();
+    sg.position.set(0, 0, sz); sg.rotation.y = rm.win ? Math.PI : 0; root.add(sg);
+    const disp = add(new THREE.Mesh(new THREE.PlaneGeometry(sw, 1.4), panelMat(rm.seed)), true, sg); disp.position.y = 1.7; disp.userData.over = true;
+    add(new THREE.Mesh(rgeo(sw + 0.08, 1.48, 0.04, 0.015), M.console), true, sg).position.set(0, 1.7, -0.025);
+    model(sg, "school", "school_screen", { scale: [sw / 3, 1, 1] });
+    const tops = [[M.pillowA, "a"], [M.pillowB, "b"], [M.pillowC, "c"], [M.wood, "w"]];
     for (let x = -W / 2 + 1.5; x < W / 2 - 1; x += 1.6) for (let z = -D / 2 + 2.4; z < D / 2 - 2.6; z += 1.6) {
       const sd = rm.win ? 1 : -1, stz = z - sd * 0.5;
       if (inAisle(rm, x, z, 0.6) || inAisle(rm, x, stz, 0.3)) continue;
-      rbox(0.9, 0.04, 0.55, pick(r, [M.pillowA, M.pillowB, M.pillowC, M.wood]), x, 0.6, z, 0.02);
-      rbox(0.04, 0.58, 0.04, M.metal, x, 0.3, z, 0.01);
+      const [tm, tk] = pick(r, tops), dg = new THREE.Group();
+      dg.position.set(x, 0, z); root.add(dg);
+      add(new THREE.Mesh(rgeo(0.9, 0.04, 0.55, 0.02), tm), true, dg).position.y = 0.6;
+      add(new THREE.Mesh(rgeo(0.04, 0.58, 0.04, 0.01), M.metal), true, dg).position.y = 0.3;
+      model(dg, "school", "school_desk_" + tk, { rot: sd > 0 ? Math.PI : 0 });
       // its stool, on the side away from the screen (a pupil faces it): a
       // shared plain cylinder, ~50 triangles where a rounded box is ~300,
-      // since a room has twenty desks
-      const st = add(new THREE.Mesh(stoolGeo, M.fabric)); st.position.set(x, 0.21, stz);
-      seatable([st], [[x, stz]], 0.42, sd);
+      // since a room has twenty desks; school.py's stool over it
+      const stg = new THREE.Group(); stg.position.set(x, 0, stz); root.add(stg);
+      const st = add(new THREE.Mesh(stoolGeo, M.fabric), true, stg); st.position.y = 0.21;
+      seatable([st], [[0, 0]], 0.42, sd);
+      model(stg, "school", "school_stool");
       block(x - 0.45, z - 0.28, x + 0.45, z + 0.28); block(x - 0.17, stz - 0.17, x + 0.17, stz + 0.17);
     }
     // the teacher, at the screen's side, facing the class
@@ -7505,6 +7698,9 @@ const ROOM_T = {
       const p = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.45), new THREE.MeshStandardMaterial({ map: t, roughness: 0.9 }));
       p.position.set(-W / 2 + 0.075, 1.6, -D / 2 + 1.5 + i * 0.9); p.rotation.y = Math.PI / 2; add(p);
     }
+    // the bare wall facing the pictures (deck-polish.md, slice 5): the
+    // lesson's display, the big screen's own (+0 calls)
+    wallFrame(panelMat(rm.seed), M.console, 1.4, 0.8, W / 2, 1.6, 0, -Math.PI / 2);
   },
 
   // Main engineering: the warp core, floor to ceiling, pulsing, ringed; the
@@ -7513,18 +7709,23 @@ const ROOM_T = {
     const { W, D, h } = rm;
     shell(rm, { floor: MX.deckPlate, lc: 0xa8c8ff, lk: 1.1, pw: 1.8, skin: MX.skinInd });
     const cx = 0, cz = -D * 0.1;
-    const core = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, h + 0.2, 48, 1, true), coreMat); core.position.set(cx, h / 2, cz); core.userData.dynamic = true; root.add(core);
-    for (let y = 0.6; y < h; y += 1.7) {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(1.08, 0.12, 12, 48), M.trim); ring.rotation.x = Math.PI / 2; ring.position.set(cx, y, cz); add(ring, false);
-    }
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.8, 0.6, 48), M.console); base.position.set(cx, 0.3, cz); add(base);
+    warpCore(cx, cz, h);
     const rail = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.05, 8, 64), M.metal); rail.rotation.x = Math.PI / 2; rail.position.set(cx, 1.0, cz); add(rail, false);
+    for (let i = 0; i < 4; i++) { const a = Math.PI / 4 + i * Math.PI / 2, post = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.0, 8), M.metal); post.position.set(cx + Math.cos(a) * 2.6, 0.5, cz + Math.sin(a) * 2.6); add(post, false); }
     block(cx - 2.6, cz - 2.6, cx + 2.6, cz + 2.6);
     for (let i = 0; i < 6; i++) light(cx + Math.cos(i * 2.1) * 1.4, 1.5 + i * 1.6, cz + Math.sin(i * 2.1) * 1.4, 0x6a9cff, 3.5, 9);
     // the master systems display, between the core and the door
     const mx = rm.dx * 0.5, mz = D / 2 - 4.4;
-    rbox(3.4, 0.95, 1.6, M.console, mx, 0.475, mz, 0.04);
+    // its table engineering.py's msd_table (the stand-in a plain box): the
+    // display and the amber strip under the top's edge are kept over it
+    const tg = new THREE.Group(); tg.position.set(mx, 0, mz); root.add(tg);
+    add(new THREE.Mesh(rgeo(3.4, 0.95, 1.6, 0.04), M.console), true, tg).position.y = 0.475;
     const msd = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.4), new THREE.MeshBasicMaterial({ toneMapped: false, map: msdTex() })); msd.rotation.x = -Math.PI / 2; msd.position.set(mx, 0.956, mz); add(msd);
+    for (const k of [-1, 1]) {
+      glowBox(3.24, 0.014, 0.006, M.glowAmber, 0, 0.84, k * 0.803, tg).userData.over = true;
+      glowBox(0.006, 0.014, 1.44, M.glowAmber, k * 1.703, 0.84, 0, tg).userData.over = true;
+    }
+    model(tg, "engineering", "msd_table");
     block(mx - 1.7, mz - 0.8, mx + 1.7, mz + 0.8);
     for (const k of [-0.8, 0.8]) workSpot(mx + k, mz + 1.2, mx + k, mz);
     // a gantry round three walls, up at the second level, and its rails
@@ -7533,7 +7734,12 @@ const ROOM_T = {
       rbox(w, 0.2, d, M.grey, x, GY, z, 0.02, false);
       glowBox(w === 2 ? 0.02 : w, 0.03, w === 2 ? d : 0.02, M.glowAmber, x + (w === 2 ? (x < 0 ? 1 : -1) : 0), GY - 0.12, z + (w === 2 ? 0 : 1));
     }
-    for (const s of [-1, 1]) for (let z = -D / 2 + 2; z < D / 2 - 2; z += 3.4) screen(1.6, 0.9, s * (W / 2 - 0.13), 1.8, z, -s * Math.PI / 2, rm.seed + z);
+    // the wall consoles: engineering.py's wall_console under each wall
+    // display, its back panel behind the display's frame
+    for (const s of [-1, 1]) for (let z = -D / 2 + 2; z < D / 2 - 2; z += 3.4) {
+      screen(1.6, 0.9, s * (W / 2 - 0.13), 1.8, z, -s * Math.PI / 2, rm.seed + z);
+      wallConsole(s * W / 2, z, -s * Math.PI / 2, rm.seed + z);
+    }
     // pipes along the walls, conduits up them, and the plasma conduits in
     // the floor running out from the core
     for (const s of [-1, 1]) {
@@ -7594,20 +7800,86 @@ const ROOM_Z = {
 const cartoMat = shareMat(skyMat.clone());
 cartoMat.depthWrite = true; cartoMat.side = THREE.DoubleSide; cartoMat.defines = {};
 starMats.push(cartoMat);
-// the warp core: bands of light running up it, a slow throb
+// An inner room's viewport (deck-polish.md, slice 5): the windows' sky on a
+// plane against a solid wall. skyMat draws at the far plane, behind the
+// wall, so it would show nothing there; this is cartoMat's form (its own
+// depth, the same program), with skyMat's uniforms themselves, so the
+// helm's sky, the warp and the jump's flash show in it as in the windows.
+// DoubleSide kept, as cartoMat's: the side is in three's program key, so
+// FrontSide would compile a program of its own.
+const viewMat = shareMat(cartoMat.clone());
+viewMat.uniforms = skyMat.uniforms;
+// The warp core (deck-remodel.md, slice 4): a glass column of plasma between
+// ring frames, on a stepped pedestal, under a cap at the ceiling. Until
+// 0.302 it was an open cylinder whose whole surface sat at 1.2-2.6, over the
+// bloom's threshold (1.0): at high the bloom made it a white blob from floor
+// to ceiling, at low (no composer) it clipped to flat white. Now its body is
+// a gradient under the threshold - deep blue at the glass's edges, a paler
+// blue where it faces you, a slow swirl in it - and only its bands and the
+// pulse go over it: thin cyan rings a frame apart, and one brighter band
+// climbing the column. All of it from `t`, the uniform the frame loop sets
+// on every starMats material (as blinkMat's lights): no texture, no
+// per-frame work, +0 calls. The pulse is in metres up the column (the
+// lathe's own y, from the floor), so a taller core takes longer to climb.
 const coreMat = shareMat(new THREE.ShaderMaterial({
   uniforms: { t: { value: 0 } }, toneMapped: false,
-  vertexShader: `varying vec2 vU; void main(){ vU = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-  fragmentShader: `uniform float t; varying vec2 vU;
+  vertexShader: `varying vec3 vP, vN, vV;
+    void main(){ vP = position; vN = normalize(normalMatrix * normal);
+      vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
+  fragmentShader: `uniform float t; varying vec3 vP, vN, vV;
     void main(){
-      float y = vU.y * 12.0, band = smoothstep(0.35, 0.5, abs(fract(y - t * 0.9) - 0.5));
-      float throb = 0.75 + 0.25 * sin(t * 2.2);
-      float pulse = exp(-pow(fract(vU.y - t * 0.35) - 0.5, 2.0) * 60.0);
-      vec3 c = mix(vec3(0.12, 0.25, 0.9), vec3(0.55, 0.8, 1.0), band) * (1.2 + throb) + vec3(0.8, 0.9, 1.0) * pulse * 2.0;
-      gl_FragColor = vec4(c * (0.6 + 0.4 * sin(vU.x * 6.2832 * 8.0) * 0.5 + 0.2), 1.0);
+      float face = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);
+      float a = atan(vP.z, vP.x), y = vP.y;
+      float swirl = 0.5 + 0.5 * sin(a * 5.0 + y * 2.3 - t * 1.4) * sin(a * 3.0 - y * 1.1 + t * 0.7);
+      vec3 body = mix(vec3(0.03, 0.08, 0.42), vec3(0.22, 0.46, 0.92), face * face) * (0.82 + 0.1 * swirl + 0.06 * sin(t * 2.2));
+      float band = smoothstep(0.0, 0.035, abs(fract(y / 0.91 - t * 0.12) - 0.5) - 0.465);
+      float pulse = exp(-pow(mod(y - t * 1.6, 14.0) - 7.0, 2.0) * 2.5);
+      vec3 c = body + vec3(0.45, 0.85, 1.0) * (band * 1.1 + pulse * 0.9) * (0.6 + 0.4 * face);
+      gl_FragColor = vec4(c, 1.0);
     }`,
 }));
 starMats.push(coreMat);
+// The core, floor to ceiling at (cx, cz) in a room `h` high: the column a
+// lathe bulging between its frames (coreMat, its own call, as before), the
+// frames lathes in M.trim, the pedestal and the cap in M.console with a lit
+// blue seam (M.glowBlue): materials the room draws anyway. ~5 k triangles
+// at h 12 (the budget's 6 k): the old cylinder and its six tori were ~8 k.
+function warpCore(cx, cz, h) {
+  const y0 = 0.62, y1 = h - 0.5, n = Math.max(2, Math.round((y1 - y0) / 1.7)), step = (y1 - y0) / n;
+  const col = [], v2 = (r, y) => new THREE.Vector2(r, y);
+  for (let i = 0; i < n; i++) {
+    const a = y0 + i * step, b = a + step;
+    col.push(v2(0.6, a + 0.06), v2(0.7, a + 0.24), v2(0.74, (a + b) / 2), v2(0.7, b - 0.24), v2(0.6, b - 0.06));
+  }
+  const core = new THREE.Mesh(new THREE.LatheGeometry(col, 32), coreMat); core.position.set(cx, 0, cz); core.userData.dynamic = true; root.add(core);
+  const frame = [v2(0.56, -0.09), v2(0.82, -0.09), v2(0.86, -0.06), v2(0.86, -0.02), v2(0.83, 0), v2(0.86, 0.02), v2(0.86, 0.06), v2(0.82, 0.09), v2(0.56, 0.09)];
+  for (let i = 0; i <= n; i++) {
+    const f = new THREE.Mesh(new THREE.LatheGeometry(frame.map(p => v2(p.x, p.y + y0 + i * step)), 32), M.trim); f.position.set(cx, 0, cz); add(f, false);
+  }
+  const ped = new THREE.Mesh(new THREE.LatheGeometry([v2(0.001, 0), v2(1.75, 0), v2(1.75, 0.1), v2(1.6, 0.14), v2(1.5, 0.42), v2(1.25, 0.47),
+    v2(1.1, 0.55), v2(0.9, 0.58), v2(0.6, 0.58), v2(0.6, y0 + 0.06)], 32), M.console);
+  ped.position.set(cx, 0, cz); add(ped);
+  const seam = new THREE.Mesh(new THREE.LatheGeometry([v2(1.57, 0.27), v2(1.555, 0.32)], 32), M.glowBlue); seam.position.set(cx, 0, cz); root.add(seam);
+  const cap = new THREE.Mesh(new THREE.LatheGeometry([v2(0.6, y1 - 0.06), v2(0.95, y1 - 0.12), v2(1.05, y1 + 0.1), v2(1.35, y1 + 0.3), v2(1.35, h + 0.01)], 32), M.console);
+  cap.position.set(cx, 0, cz); add(cap, false);
+}
+// A wall console (engineering.py's wall_console), its back to the wall at
+// (x, z), turned `rot` so its local +z faces the room: the stand-in a plain
+// sloped box in M.console; the LCARS inset on its slope (the wall display's
+// own panelMat above it: one call with it) is kept over the model.
+// The slope: 0.94 high at the front edge (local z 0.52), 1.12 at the back
+// (z 0.04), engineering.py's measures.
+function wallConsole(x, z, rot, seed) {
+  const g = new THREE.Group(), tilt = Math.atan2(0.18, 0.48);
+  add(new THREE.Mesh(wedgeGeo(1.56, 0.48, 0.94, 1.12), M.console), true, g).position.z = 0.28;
+  const inset = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.34), panelMat(seed));
+  inset.rotation.x = -Math.PI / 2 + tilt; inset.position.set(0, 1.03 + 0.004, 0.27); inset.userData.over = true; add(inset, true, g);
+  g.position.set(x, 0, z); g.rotation.y = rot; root.add(g);
+  const c = Math.abs(Math.cos(rot)), sn = Math.abs(Math.sin(rot)), hx = (1.6 * c + 0.55 * sn) / 2, hz = (1.6 * sn + 0.55 * c) / 2;
+  const ox = Math.sin(rot) * 0.28, oz = Math.cos(rot) * 0.28;
+  block(x + ox - hx, z + oz - hz, x + ox + hx, z + oz + hz);
+  return model(g, "engineering", "wall_console");
+}
 // a shuttlebay's force field
 const fieldMat = shareMat(new THREE.ShaderMaterial({
   uniforms: { t: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
@@ -8028,8 +8300,121 @@ function buildDeck(n) {
     plan = planDeck(n, GEN_X);
     buildPlan(plan);
     deckLobby(n, GEN_X, plan.name);
+    batchDeck(deckCells.filter(g => g.own === deckOwn));
   } finally { [owner, buildingDeck] = prev; }
   staffDeck(n, plan);
+}
+// A generated deck's corridors, junctions and lobby are ~30 cells, each
+// merged per material (finishCell), and nothing stops the camera's wedge
+// at a wall: down a street every cell in it is drawn, the same twenty
+// materials in each, and every door's two leaves - 400-490 calls a look
+// on decks 12, 18 and 25 (the deck remodel's slice 2, its counts by
+// material), where a phone's budget is ~100-200. So, once the deck is
+// built, each material its cells share goes in one BatchedMesh, every
+// cell's merge an instance of it: one call (WEBGL_multi_draw) where it
+// was one a cell, still culled cell by cell (perObjectFrustumCulled), so
+// no triangle is drawn that was not. The door leaves likewise, in one
+// more, their matrices set as a door moves (the loop's doors).
+// Left out: what is a cell's own (the floors' occlusion clones, a
+// corridor's name atlas: one merge, nothing to share), the transparent
+// and the windows' sky (their order is the scene's), and a merge holding
+// a dressing group's range (dressCut's setDrawRange is the whole mesh's).
+// A stand-in's range moves with its merge, so hideStandin collapses it in
+// the batch. Deck 8's cells stay as they are: they are built at boot, and
+// the batch's shaders (USE_BATCHING) would be compiled in it.
+const _batchM4 = new THREE.Matrix4();
+function batchDeck(cells) {
+  if (!cells.length) return;
+  const sig = geo => Object.keys(geo.attributes).sort().map(k => k + geo.attributes[k].itemSize).join(" ");
+  const groups = new Map();
+  for (const g of cells) for (const m of [...g.children]) {
+    const mat = m.material;
+    if (!m.isMesh || m.isInstancedMesh || m.userData.cut || !m.visible || mat.transparent || mat === skyMat) continue;
+    if (!m.userData.cellMerge) {
+      // a cell's only mesh of its material (finishCell left it alone: a
+      // corridor's ceiling, its light strip) - a call a cell, the most of
+      // what was left once the merges were batched (slice 2's counts). Its
+      // copy, laid out as a merge of that material would be, joins them; the
+      // original goes as a merge's parts do, kept where the rays look.
+      if (m.children.length || m.userData.dress || m.userData.dynamic) continue;
+      if (m.matrixAutoUpdate) m.updateMatrix();
+      const gg = copyGeo(m.geometry, mat.userData.attrs, mat.userData.fill);
+      const c = new THREE.Mesh(gg.index ? gg.toNonIndexed() : gg, mat);
+      if (gg.index) gg.dispose();
+      c.matrix.copy(m.matrix); c.matrixAutoUpdate = false;
+      c.receiveShadow = m.receiveShadow;
+      c.userData.single = m;
+      g.add(c);
+      m.removeFromParent();
+    }
+  }
+  for (const g of cells) for (const m of g.children) {
+    if (!m.isMesh || m.isInstancedMesh || !(m.userData.cellMerge || m.userData.single) || m.userData.cut || !m.visible) continue;
+    const mat = m.material;
+    if (mat.transparent || mat === skyMat || m.geometry.index) continue;
+    const k = mat.uuid + "|" + sig(m.geometry);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(m);
+  }
+  // a single left alone in its group goes back as it was: its copy was for
+  // nothing
+  for (const [k, list] of groups) if (list.length < 2) {
+    const c = list[0], m = c.userData.single;
+    if (m) { c.parent.add(m); c.removeFromParent(); c.geometry.dispose(); }
+    groups.delete(k);
+  }
+  const out = new THREE.Group();
+  out.userData.cell = true;
+  scene.add(out);
+  const moved = new Map();   // a batched merge: its batch, and where its vertices start in it
+  for (const list of groups.values()) {
+    const verts = list.reduce((n, m) => n + m.geometry.attributes.position.count, 0);
+    const bm = new THREE.BatchedMesh(list.length, verts, 0, list[0].material);
+    bm.receiveShadow = list[0].receiveShadow;
+    bm.matrixAutoUpdate = false;
+    for (const m of list) {
+      // the merge is in its cell's frame (finishCell), and a cell is the
+      // scene's child: its instance is the cell's own transform. Not
+      // m.matrixWorld - read here it was the identity (every corridor's
+      // walls drawn at the origin, 6 km from deck 12; slice 2's dump).
+      const g = m.parent;
+      g.updateMatrix();
+      const id = bm.addGeometry(m.geometry);
+      bm.setMatrixAt(bm.addInstance(id), _batchM4.multiplyMatrices(g.matrix, m.matrix));
+      moved.set(m, [bm, bm.getGeometryRangeAt(id).vertexStart]);
+      m.removeFromParent();
+      m.geometry.dispose();
+    }
+    out.add(bm);
+  }
+  for (const p of modelPlaces) {
+    const st = p.standin && cells.includes(p.cell) && p.g.userData.standin;
+    if (st) for (const e of st) if (e.length === 3 && moved.has(e[0])) { const [bm, at] = moved.get(e[0]); e[0] = bm; e[1] += at; }
+  }
+  // the door leaves: each body hidden (it stays where the rays look for
+  // it, in solid and ceilings) and drawn by its instance
+  const ds = doors.filter(d => d.own === owner);
+  if (ds.length) {
+    const geos = new Map();
+    for (const d of ds) for (const leaf of [d.L, d.R]) geos.set(leaf.children[0].geometry, 0);
+    const verts = [...geos.keys()].reduce((n, gg) => n + gg.attributes.position.count, 0);
+    const bm = new THREE.BatchedMesh(ds.length * 2, verts, 0, leafMat);
+    bm.receiveShadow = true; bm.matrixAutoUpdate = false;
+    for (const gg of geos.keys()) geos.set(gg, bm.addGeometry(gg));
+    for (const d of ds) {
+      d.batch = { bm, ids: [], last: d.open };
+      for (const leaf of [d.L, d.R]) {
+        const b = leaf.children[0];
+        b.updateWorldMatrix(true, false);
+        const id = bm.addInstance(geos.get(b.geometry));
+        bm.setMatrixAt(id, b.matrixWorld);
+        d.batch.ids.push(id);
+        b.visible = false;
+      }
+    }
+    out.add(bm);
+  }
+  deckCells.push(owned(out, owner));
 }
 function unloadDeck() {
   if (!deckOwn) return;
@@ -8224,9 +8609,27 @@ function deck8Shell() {
   bx(CC.X0, CZ1 - 0.15, CC.X1, CZ1 + 0.2, CC.H + 0.35, 7, "-y", H + 0.35);
   bx(-WING_END - 0.35, CZ1 - 0.15, CC.X0, CC.Z1 + 0.05, H + 0.35, 7, "+x");            // the wings
   bx(CC.X1, CZ1 - 0.15, WING_END + 0.35, CC.Z1 + 0.05, H + 0.35, 7, "-x");
-  // the bridge's drum, open where the corridor meets it
-  const ga = Math.asin(CW / (BR + 0.35));
-  P.push(part(new THREE.CylinderGeometry(BR + 0.35, BR + 1.2, BH + 0.35 - Y0, 72, 1, false, ga, Math.PI * 2 - 2 * ga), 7, 0, (BH + 0.35 + Y0) / 2, BZ));
+  // the bridge's drum, open where the corridor meets it, and where the two
+  // turbolifts' cars stand (deck-polish.md slice 8). The cars sit outside
+  // the bridge's wall, 2.6 m deep, and the drum (BR + 0.35 at its top, a
+  // cone wider below) ran through both of them half a metre in front of
+  // the rider's face: its outside, lit by the hull's own sun, was the white
+  // field in the door's opening. So in each car's width the drum is left
+  // off from the floor to the deck's height: kept below the floor (the
+  // saucer's side, seen from outside) and above the car (the bridge's wall
+  // is open there too, lgap, over the car's front). The cone's radius at a
+  // height is the same line, so the pieces meet. Segments: 68 round the
+  // arcs and 2 a gap's two pieces, which with the gaps' pieces open-ended
+  // is the 72 sides and caps' 288 triangles of the whole drum before.
+  const ga = Math.asin(CW / (BR + 0.35)), lg = Math.asin(1.35 / (BR + 0.35));
+  const dTop = BH + 0.35, dR = y => BR + 0.35 + 0.85 * (dTop - y) / (dTop - Y0);
+  const drum = (y0, y1, a0, a1, segs, open) =>
+    P.push(part(new THREE.CylinderGeometry(dR(y1), dR(y0), y1 - y0, segs, 1, open, a0, a1 - a0), 7, 0, (y0 + y1) / 2, BZ));
+  const arcs = [[ga, Math.PI / 2 - lg], [Math.PI / 2 + lg, Math.PI * 1.5 - lg], [Math.PI * 1.5 + lg, Math.PI * 2 - ga]];
+  const arcSum = arcs.reduce((s, [a0, a1]) => s + a1 - a0, 0);
+  let left = 68;
+  arcs.forEach(([a0, a1], i) => { const n = i < 2 ? Math.round(68 * (a1 - a0) / arcSum) : left; left -= n; drum(Y0, dTop, a0, a1, n, false); });
+  for (const c of [Math.PI / 2, Math.PI * 1.5]) { drum(Y0, 0, c - lg, c + lg, 2, true); drum(H, dTop, c - lg, c + lg, 2, true); }
   P.push(part(new THREE.SphereGeometry(BR + 0.35, 48, 8, 0, Math.PI * 2, 0, Math.PI / 2), 0, 0, BH + 0.34, BZ, 0, 0, 0, 1, 0.1, 1));
   shellG = hull(P);
   shellG.userData.dynamic = true;
@@ -8556,7 +8959,7 @@ function tickWarp() {
     place.sky = to.id;
     markDirty();
     flashHint(`Arrived: ${to.name}`);
-    if (actx && amb && sound === "on") announce(`We have arrived. ${to.name}.`);
+    if (actx && amb) announce(`We have arrived. ${to.name}.`);
   }
 }
 tickers.push(tickWarp);
@@ -10104,7 +10507,21 @@ function dropPerson(c) {
   if (i < 0) return false;
   crew.splice(i, 1);
   for (const [part, o] of c.parts) { const pt = crewParts.get(part); pt.nodes = pt.nodes.filter(n => n[0] !== o); }
-  if (c.body) scene.remove(c.body);
+  if (c.body) {
+    scene.remove(c.body);
+    // The skeleton's bone texture is made by three on the first frame that
+    // draws them, and is the skeleton's own: nothing frees it but dispose,
+    // so every person who left the view after being seen was a texture kept
+    // for good - one a loop of deckmem's walk (0.299.3). The parts share one
+    // skeleton (a second dispose is a no-op); the robe's and hat's materials
+    // are clones of their own, the badge's and PADD's everyone's (crewMats).
+    const shared = new Set(Object.values(crewMats));
+    c.body.traverse(o => {
+      if (o.isSkinnedMesh) o.skeleton.dispose();
+      else if (o.isMesh && !shared.has(o.material)) o.material.dispose();
+    });
+    if (c.mixer) c.mixer.uncacheRoot(c.body);
+  }
   return true;
 }
 
@@ -12446,11 +12863,16 @@ function sfx(freq, dur) {
 // murmur and glasses, the arboretum's birds and running water, the ready
 // room's fish tank. Every few minutes the computer makes an announcement
 // (speechSynthesis, after the intercom whistle). Quiet on purpose: this is
-// something to write against, not a soundtrack. M cycles on / quiet (no
-// announcements) / off, kept in localStorage; with the console open it all
-// drops back further.
-const SOUND = ["on", "quiet", "off"];
-let sound = SOUND.includes(lsGet("lcars.deck.sound", "on")) ? lsGet("lcars.deck.sound", "on") : "on";
+// something to write against, not a soundtrack. M turns it on and off, kept
+// in localStorage; with the console open it all drops back further.
+// The announcements are a setting of their own, off by default
+// (lcars.deck.announce: the captain's order of 2026-10-23, the hosted voice
+// only when he talks to someone): on, they are the browser's voice, never
+// POST /say, so a deck left open costs nothing. A "quiet" kept from before
+// (the sound without announcements) is the sound on.
+const SOUND = ["on", "off"];
+let sound = lsGet("lcars.deck.sound", "on") === "off" ? "off" : "on";
+let announceOn = lsGet("lcars.deck.announce", false) === true;
 let amb = null;
 const ANNOUNCE = [
   "Attention all decks. Stellar cartography will begin a sensor sweep of the Tarsus system at fourteen hundred hours.",
@@ -12543,17 +12965,25 @@ function tickAmbience(room) {
   }
   const ev = ROOM_EVENTS[amb.cur];
   if (ev && t > (amb.next[amb.cur] || 0)) amb.next[amb.cur] = t + ev(amb.room[amb.cur], t + 0.02);
-  if (t > amb.ann) { amb.ann = t + R(240, 480); if (sound === "on" && !anySheet() && !document.hidden) announce(); }
+  if (t > amb.ann) { amb.ann = t + R(240, 480); if (!anySheet() && !document.hidden) announce(); }
 }
 
-// The intercom whistle, then the computer's voice: the server's (sayAloud)
-// when it has one, else a female English voice of the browser's (the
-// ship's computer is), at low volume.
+// The intercom whistle, then the computer's voice: a female English voice
+// of the browser's (the ship's computer is), at low volume. Only with the
+// announcements on (announceOn) and the sound on; never the server's voice
+// (POST /say), which costs per character and is for the captain's own asks.
 function announce(text) {
+  if (!announceOn || sound === "off" || !actx || !amb) return;
   const t = actx.currentTime, d = amb.master;
   blip(d, 1320, 1330, 0.13, 0.03, t, "triangle"); blip(d, 1760, 1770, 0.2, 0.03, t + 0.15, "triangle");
   const line = text || ANNOUNCE[Math.floor(Math.random() * ANNOUNCE.length)];
-  setTimeout(() => sayAloud(line, 0.5).then(ok => { if (!ok) announceSynth(line); }), 600);
+  setTimeout(() => announceSynth(line), 600);
+}
+function setAnnounce(on) {
+  announceOn = !!on;
+  lsSet("lcars.deck.announce", announceOn);
+  if (!announceOn) { try { speechSynthesis.cancel(); } catch (e) {} }
+  flashHint(announceOn ? (sound === "off" ? "Announcements on · the sound is off (M)" : "Announcements on · in the browser's voice") : "Announcements off");
 }
 function announceSynth(line) {
   if (!("speechSynthesis" in window) || sound === "off") return;
@@ -12564,55 +12994,15 @@ function announceSynth(line) {
   speechSynthesis.speak(u);
 }
 
-/* ===================== the computer's voice ===================== */
-/* An announcement in the server's voice: POST /say relays a text-to-speech
-   service (lcars_say.h; Deepgram's Aura-2 by default, ElevenLabs as the
-   other), and GET /say, asked once, says which, so the computer's voice can
-   be named in its terms. An announcement is one short line every few
-   minutes, so it is fetched whole (mp3, the server's default) and decoded
-   onto actx, which a tap has already unlocked (an Audio element made after
-   a fetch is not, on iOS): the console's speech queue streams a reply
-   sentence by sentence (index.html), which buys nothing here. Resolves true
-   once it is playing or has been stopped, false when the server has no voice
-   (503), the fetch failed or the audio will not decode, for the caller to
-   fall back to speechSynthesis. sayStop (sound off, a newer line) ends it,
-   mid-fetch or mid-line. */
-const SAY_COMPUTER = { deepgram: "aura-2-athena-en", elevenlabs: "Xb7hH8MSUJpSbSDYk0k2" };
-const say = { prov: undefined, n: 0, ac: null, src: null };
-function sayFetch(method, body, signal) {
-  const headers = { "X-LCARS-Client": "web" };
-  if (cfg.user) headers.Authorization = "Basic " + b64(cfg.user + ":" + cfg.pass);
-  if (body) headers["Content-Type"] = "application/json";
-  return fetch(cfg.base.replace(/\/+$/, "") + "/say", { method, headers, signal, body: body ? JSON.stringify(body) : undefined });
-}
-async function sayAloud(text, vol) {
-  sayStop();
-  const n = say.n;
-  if (DEMO || sound === "off") return false;
-  try {
-    if (say.prov === undefined)
-      say.prov = await sayFetch("GET").then(r => r.ok ? r.json() : null).then(j => (j && SAY_COMPUTER[j.provider] ? j.provider : null));
-    if (n !== say.n) return true;
-    if (!say.prov) return false;
-    const ac = say.ac = new AbortController();
-    const res = await sayFetch("POST", { text, voice: SAY_COMPUTER[say.prov] }, ac.signal);
-    if (res.status === 503) say.prov = null;   // the server lost its voice
-    if (!res.ok) return false;
-    const buf = await actx.decodeAudioData(await res.arrayBuffer());
-    if (n !== say.n) return true;
-    const src = say.src = actx.createBufferSource(), g = actx.createGain();
-    g.gain.value = vol; src.buffer = buf; src.connect(g).connect(actx.destination);
-    src.onended = () => { if (say.src === src) say.src = null; };
-    src.start();
-    return true;
-  } catch (e) {
-    return n !== say.n;                         // an abort is a stop, not a failure
-  }
-}
+/* ===================== the computer's voice =====================
+   The deck's own lines (the announcements) are the browser's voice
+   (announceSynth); until 2026-10-23 they went through POST /say, which the
+   captain keeps for the times he talks to someone (the console's speech
+   queue, in the talk sheet's frame). sayStop ends whatever the deck is
+   saying: the sound off, a newer line. */
+const say = { n: 0 };
 function sayStop() {
   say.n++;
-  if (say.ac) { say.ac.abort(); say.ac = null; }
-  if (say.src) { try { say.src.stop(); } catch (e) {} say.src = null; }
   try { speechSynthesis.cancel(); } catch (e) {}
 }
 function cycleSound() { setSound(SOUND[(SOUND.indexOf(sound) + 1) % SOUND.length]); }
@@ -12621,7 +13011,7 @@ function setSound(to) {
   lsSet("lcars.deck.sound", sound);
   if (sound === "off") { if (amb) amb.master.gain.setTargetAtTime(0, actx.currentTime, 0.2); sayStop(); talkHush(); }
   else startAmbience();
-  flashHint(sound === "on" ? "Sound on · with announcements" : sound === "quiet" ? "Sound on · no announcements" : "Sound off");
+  flashHint(sound === "off" ? "Sound off" : announceOn ? "Sound on · with announcements" : "Sound on");
 }
 document.addEventListener("visibilitychange", () => {
   if (!actx || !amb) return;
@@ -13024,6 +13414,7 @@ function renderSettings() {
   const el = $("#settings"); el.textContent = "";
   const add = (label, fn) => { const b = document.createElement("button"); b.className = "pill dim"; b.textContent = label; b.onclick = () => { fn(); renderSettings(); }; el.appendChild(b); };
   add("Sound: " + sound, cycleSound);
+  add("Announcements: " + (announceOn ? "on (browser voice)" : "off"), () => setAnnounce(!announceOn));
   // the console's talk reads it (conv.mode in index.html), the frame's at once
   const cm = lsGet("lcars.deck.convmode", "") === "mute" ? "mute" : "barge";
   add("Conversation: " + (cm === "mute" ? "mic off while they speak" : "talk over them"), () => {
@@ -13971,6 +14362,24 @@ function openConsole(id, pad, aloud) {
   cframe.focus();
 }
 $("#openConsole").onclick = () => openConsole();
+// A page of the console opened by its own order said in the deck (the
+// rooms: "rooms", "go to the deck room"), in a frame nobody sees: the
+// console sheet comes up showing it as it is. A frame on screen already
+// (the console sheet, the talk sheet) is left where it is. index.html's
+// rmDeckUp calls it.
+window.lcarsDeckConsoleUp = () => {
+  if (cframe.classList.contains("insheet") || cframe.classList.contains("intalk")) return true;
+  document.exitPointerLock?.();
+  walkTo = null;
+  framePad = null;
+  $("#cunpin").style.display = "none";
+  $("#menu").classList.add("hidden");
+  $("#console").classList.remove("hidden");
+  $("#start").classList.add("hidden");
+  frameMode("insheet");
+  cframe.focus();
+  return true;
+};
 $("#holoend").onclick = () => { holoEnd(holoHere()); renderHolo(); closeSheets(); };
 $("#cunpin").onclick = () => { if (framePad) takePad(framePad); closeSheets(); };
 
@@ -14103,7 +14512,7 @@ function tickDict(dt) {
     scene.remove(pad);
     pinAt(id, pad, true);
     flashHint("Logged · #" + id + " is on the desk");
-    if (amb && sound !== "off") announce("Log entry recorded.");
+    if (amb) announce("Log entry recorded.");
   } else if (s.isNew && !s.dirty && !s.text.trim()) dictAbort("Nothing was said — no entry made");
   else if (++dict.tries > 120) dictAbort("The console has not saved it — open it there (C)");
 }
@@ -14211,8 +14620,9 @@ const DVCMDS = [
   { say: "graphics low", alias: ["low graphics"], help: "the light phone setting (G)", fn: () => setGfx("low") },
   { say: "graphics medium", alias: ["medium graphics"], help: "bloom, no ambient occlusion", fn: () => setGfx("medium") },
   { say: "graphics high", alias: ["high graphics"], help: "everything", fn: () => setGfx("high") },
-  { say: "sound on", alias: ["unmute", "announcements on"], help: "the ship's sound and its announcements (M)", fn: () => setSound("on") },
-  { say: "sound quiet", alias: ["no announcements", "announcements off"], help: "the sound, without the announcements", fn: () => setSound("quiet") },
+  { say: "sound on", alias: ["unmute"], help: "the ship's sound (M)", fn: () => setSound("on") },
+  { say: "announcements on", alias: ["turn on announcements", "make announcements"], help: "the computer's announcements, in the browser's voice", fn: () => setAnnounce(true) },
+  { say: "announcements off", alias: ["no announcements", "sound quiet", "turn off announcements"], help: "no announcements (the default)", fn: () => setAnnounce(false) },
   { say: "sound off", alias: ["mute", "silence the ship"], help: "no sound at all", fn: () => setSound("off") },
   { say: "night watch", alias: ["night shift", "bridge night watch", "dim the lights", "lights down", "lights low", "dim the bridge"],
     help: "the bridge's lights low, its displays carrying the room (U)", fn: () => nightWatch(true) },
@@ -15635,7 +16045,7 @@ async function holoGenerate(key) {
     holoJobs.delete(key);
     const here = holoHere();
     if (holoWant && holoWant.key === key && here && here === holoWant.rec) { holoRun(here, key); holoWant = null; }
-    if (amb && sound === "on" && !document.hidden) announce("Holodeck program ready: " + prog.title + ".");
+    if (amb && !document.hidden) announce("Holodeck program ready: " + prog.title + ".");
     flashHint("Holodeck program ready: " + prog.title);
   } catch (e) {
     holoJobs.set(key, { state: "err", err: e.message });
@@ -16037,6 +16447,12 @@ function frame() {
     d.open += ((near ? 1 : 0) - d.open) * Math.min(1, dt * 6);
     d.L.position.x = -d.leafW / 2 - d.open * d.leafW * 0.95;
     d.R.position.x = d.leafW / 2 + d.open * d.leafW * 0.95;
+    // a generated deck's leaves are drawn by their instances (batchDeck);
+    // the easing nears its end for ever, so a tenth of a millimetre is still
+    if (d.batch && Math.abs(d.open - d.batch.last) > 1e-4) {
+      d.batch.last = d.open;
+      [d.L, d.R].forEach((leaf, i) => { leaf.updateMatrixWorld(true); d.batch.bm.setMatrixAt(d.batch.ids[i], leaf.children[0].matrixWorld); });
+    }
   }
   for (const m of starMats) m.uniforms.t.value = t;
   spaceU.t.value = t;
@@ -16136,16 +16552,16 @@ function setSync(s) { $("#sync").textContent = s; }
   loadModels().then(patchReplay, patchReplay);
   deckEvStart();
   // a hook for the headless screenshot harness: hand it the handles it needs
-  window.__deck = { takeRows, socialSeen, patchLive, patchAll, patchObjs, placeByName, archSees, deckApi, DECK_API_DOC, openArchitect, paintArch, patchSkipped,
-                    lightSpots, ROOM_FILL, NIGHT, nightWatch, blocks, zones, pinnable, modelPlaces, NOPATCH, crew: () => crew, aoStats, blinkHold(on) { crewBlinkHold = !!on; }, READ_CLIP, SHIFT_CLIP, msdTex, padFace, padTexture, engOf, engSlug, sitAim: () => aimSeat && (sitDown(aimSeat), true), sitDown, standUp, jump, crouch, walkPace, tickBody, EYE, CROUCH_EYE, body: () => ({ seated: !!seated, crouched, aimSeat: !!aimSeat, eye: camera.position.y, jumpY }), seats: () => pinnable.filter(m => m.userData.seat), THREE, scene, player, camera, place, rows, carry, pinHere, rebuildPads, updateAim, renderer, composer, gtao, bloom, lights, openConsole, openMenu, holoHere, holoRun, holoGenerate, holoFind, holoJobs, openHolo, get aimHolo() { return aimHolo; }, talk, openTalk, personaOf, talkId, say, sayAloud, sayStop, crewAimed, get aimCrew() { return aimCrew; }, dict, dictFake(w) { dictWin = w; }, dictStart, dictEnd, get seated() { return seated; }, chart, chartLoad, chartAim, get active() { return active; }, get aimStar() { return aimStar; }, mediaLoad, mediaAssets, mediaRows, mediaPlaying, activate, padObjs, get aimPad() { return aimPad; },
-                    setView(x, z, a, p) { player.position.set(x, 0, z); yaw = a; pitch = p || 0; },
+  window.__deck = { atlasVia, takeRows, deckCells, doors, batchDeck, socialSeen, patchLive, patchAll, patchObjs, placeByName, archSees, deckApi, DECK_API_DOC, openArchitect, paintArch, patchSkipped,
+                    lightSpots, ROOM_FILL, NIGHT, nightWatch, blocks, zones, pinnable, modelPlaces, NOPATCH, crew: () => crew, mats: { M, MX }, aoStats, blinkHold(on) { crewBlinkHold = !!on; }, READ_CLIP, SHIFT_CLIP, msdTex, padFace, padTexture, engOf, engSlug, sitAim: () => aimSeat && (sitDown(aimSeat), true), sitDown, standUp, jump, crouch, walkPace, tickBody, EYE, CROUCH_EYE, body: () => ({ seated: !!seated, crouched, aimSeat: !!aimSeat, eye: camera.position.y, jumpY }), seats: () => pinnable.filter(m => m.userData.seat), THREE, scene, player, camera, place, rows, carry, pinHere, rebuildPads, updateAim, renderer, composer, gtao, bloom, lights, openConsole, openMenu, holoHere, holoRun, holoGenerate, holoFind, holoJobs, openHolo, get aimHolo() { return aimHolo; }, talk, openTalk, personaOf, talkId, say, sayStop, crewAimed, get aimCrew() { return aimCrew; }, dict, dictFake(w) { dictWin = w; }, dictStart, dictEnd, get seated() { return seated; }, chart, chartLoad, chartAim, get active() { return active; }, get aimStar() { return aimStar; }, mediaLoad, mediaAssets, mediaRows, mediaPlaying, activate, padObjs, get aimPad() { return aimPad; },
+                    setTone, M, setView(x, z, a, p) { player.position.set(x, 0, z); yaw = a; pitch = p || 0; },
                     aimInfo: () => ({ aim: !!aim, pad: aimPad && aimPad.userData.entryId, stack: aimStack && aimStack.userData.entryId }), aimHit: () => aim, deskAt: () => deskAt, pileOf, takePad, PILE_STEP, primary, throwPad, thrown, held, crew, walkable,
                     walkCrew, crewStep, roomSeats, workSpots, ROOM_CREW, DECK_ROOM_CREW, ROOM_CREW_NEAR, roomPid, planDeck, buildRoom, unbuildRoom, homeCrew, crewReady: () => crewReal, modelsIn: () => modelsIn, modelsReady: () => modelsDone && !modelsBusy, placeModels, dressing, tickDressing, DRESSING, DRESS_R, dressGroup, dressOrder, dressCut, hideStandin,
                     // where each placed model stands in the world, and which way its front faces
                     modelSpots: () => modelPlaces.map(p => { p.g.updateWorldMatrix(true, false); const v = new THREE.Vector3().setFromMatrixPosition(p.g.matrixWorld), f = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), p.rot).transformDirection(p.g.matrixWorld); return { room: p.room, prop: p.prop, x: v.x, y: v.y, z: v.z, fx: f.x, fz: f.z }; }), setActive(i) { active = i; renderHand(); },
                     setTop, get top() { return TOP; }, topCam, tapTop, holdTop, findPath, goTo, get walkTo() { return walkTo; }, get topSel() { return topSel; }, mapX, mapY, zoomTop,
                     rideTo, switchDeck, warpTo, applySky, openHelm, SKIES, get warping() { return !!warpS; }, deck: () => curDeck, lifts, genRooms, zoneAt, tickRooms, tickLights, lightSpots, openLift, openTransport, beamTo, place, pinnable, nearPinnable,
-                    get yaw() { return yaw; }, get gfx() { return gfx; }, get glLost() { return glLost; }, get sound() { return sound; }, get hint() { return performance.now() < flashUntil ? flashMsg : ""; }, get lastHint() { return flashMsg; }, get wantRead() { return wantRead; }, dv, DVCMDS, get jumping() { return jumpY > 0 || jumpV !== 0; },
+                    get yaw() { return yaw; }, get gfx() { return gfx; }, get glLost() { return glLost; }, get sound() { return sound; }, get announceOn() { return announceOn; }, get hint() { return performance.now() < flashUntil ? flashMsg : ""; }, get lastHint() { return flashMsg; }, get wantRead() { return wantRead; }, dv, DVCMDS, get jumping() { return jumpY > 0 || jumpV !== 0; },
                     summonCrew, dismissCrew, orderCrew, orderPost, orderCome, orderGoRoom, crewDests, crewStatus, crewOrderSaid, pickDest, crewJSON, get crewPick() { return crewPick; } };
 })();
 </script>

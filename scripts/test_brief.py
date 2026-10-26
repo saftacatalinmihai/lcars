@@ -79,5 +79,20 @@ class Brief(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+
+class No1Rooms(unittest.TestCase):
+    """brief_no1's Rooms paragraph (rooms.md 5.2)."""
+
+    def test_the_rooms_paragraph(self):
+        b = E.brief_no1(E.NO1, {})
+        para = b.split("\nRooms: ", 1)[1].split("\n\n", 1)[0]
+        for words in ("`to:: no1`", "`main`, your own room", "begin a paragraph with its own line `room:: <id>`",
+                      "You are in every project room", "only if they write `to:: no1`", "room list` names the rooms",
+                      'room new <id> "<name>"', "room log <id> [n]", "room show <msg id>"):
+            self.assertIn(words, para)
+        self.assertNotIn("Threads", b)
+        self.assertNotIn("thread new", b)
+
+
 if __name__ == "__main__":
     unittest.main()

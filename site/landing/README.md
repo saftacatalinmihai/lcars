@@ -11,6 +11,7 @@ from `LCARS_LANDING_D1_ID` and `LCARS_LANDING_HOST` when deploying.
 | --- | --- |
 | `public/index.html`, `landing.css`, `landing.js` | the page: the pitch and the form above the fold, the explainer, Try the demo, the features with real shots, self-host beside hosted, the form again, the privacy note |
 | `public/_headers` | the CSP (scripts and connections to the page's own origin only), nosniff, the caches |
+| `public/plausible-init.js` | Plausible's queue and init stub, staged and named in the pages only with `LCARS_LANDING_PLAUSIBLE` (below, "Visits") |
 | `public/video/` | the deck and crew loops (the explainer is on R2, below; a local copy here, ignored, plays in the preview) |
 | `public/shots/` | console shots from the public demo (`lcars-ui/demo/static.py`, made-up entries), the deck's from `docs/bridge.webp` and the explainer's stills |
 | `public/fonts/` | Antonio (OFL, `OFL.txt` beside it), as the console uses |
@@ -90,6 +91,32 @@ npx wrangler@3 secret put RATE_SALT -c .wrangler.deploy.toml   # 3. any long ran
 The custom domain (`custom_domain = true` on the route `deploy.sh` adds)
 makes the DNS record and the certificate itself; the zone must have no
 record of that name already.
+
+## Visits
+
+Off unless a deploy is given `LCARS_LANDING_PLAUSIBLE`, which counts them
+with Plausible Analytics (no cookie, no personal data kept: its data
+policy) - never Cloudflare Web Analytics, whose injected beacon the CSP
+refuses. Its value is either the Plausible site's domain (the classic
+`https://plausible.io/js/script.js` with `data-domain`) or the site's own
+script URL from Plausible's Site installation page,
+`https://plausible.io/js/pa-<id>.js` (the script since October 2025; the
+snippet's inline init is `plausible-init.js`, the CSP having no
+`'unsafe-inline'`). With it, `deploy.sh`'s staged copy has, before every
+page's `</head>`, the stub and the tag (both `defer`, after `landing.js`);
+`script-src` and `connect-src` in `_headers` with `https://plausible.io`
+added, nothing else; and the privacy note's "No tracking, no cookies, no
+analytics" replaced by a line naming Plausible. A successful signup sends
+a `Signup` custom event (the name and the page, nothing typed); Plausible
+counts it once a `Signup` goal is added to the site. Without the variable
+the stub is not uploaded and nothing of Plausible is in a page or the CSP.
+
+```sh
+# Plausible: add the site (Sites, + Add website: the landing's host), then Goals, + Add goal, custom event "Signup"
+echo 'LCARS_LANDING_PLAUSIBLE=lcars.<the zone>' >> ~/.env   # or that site's https://plausible.io/js/pa-<id>.js
+set -a; . ~/.env; set +a; site/landing/deploy.sh
+# Cloudflare: the zone's Web Analytics (Analytics & Logs), the host's automatic setup off
+```
 
 ## The explainer
 

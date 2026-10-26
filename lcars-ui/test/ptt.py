@@ -68,7 +68,11 @@ def block():
     m = re.search(r"/\* =+ hold to talk =+.*?/\* =+ end hold to talk =+ \*/", PAGE_SRC, re.S)
     if not m:
         sys.exit("ptt: the hold-to-talk markers are not in index.html")
-    return m.group(0)
+    # the page's one capture (vMicTake), which talkMic takes its clone from
+    v = re.search(r"/\* -+ one microphone capture, shared -+.*?(?=/\* -+ a recording goes up)", PAGE_SRC, re.S)
+    if not v:
+        sys.exit("ptt: the shared capture's block is not in index.html")
+    return v.group(0) + m.group(0)
 
 
 # the pills and the box, as a thread's pane has them (chatPaneHtml)
@@ -99,6 +103,8 @@ function sayStop() { window.stops++; say.run = null; }
 const V_IOS = false, V_HOLD_SETTLE = 350;
 window.quiets = 0;
 function sayQuiet(ms) { window.quiets++; }
+// the chats' voice window (chatVoiceTouch in index.html): a press is his
+function chatVoiceTouch() { window.touches = (window.touches || 0) + 1; }
 function talkSend(note) { const q = $("#talkq").value.trim(); if (q) { window.sent.push(q); window.notes.push(note || ""); } $("#talkq").value = ""; }
 function sayFetch(method, body, signal, sub = "") { if (sub === "/token") window.tokens++; return fetch("/say" + sub, { method }); }
 function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.remove("hidden"); }
@@ -244,6 +250,9 @@ def sockets(page):
 def fake(page, url):
     dg = FakeDeepgram()
     page.route_web_socket(re.compile(r"wss://api\.deepgram\.com/.*"), dg)
+    # every getUserMedia of the visit, counted: the browser's prompt is one
+    page.add_init_script("window.__gum1 = 0; { const md = navigator.mediaDevices, g = md.getUserMedia.bind(md);"
+                         " md.getUserMedia = c => { window.__gum1++; return g(c); }; }")
     page.goto(url)
     pill = page.locator("#talkptt")
 
@@ -252,6 +261,7 @@ def fake(page, url):
     page.mouse.move(box["x"] + 10, box["y"] + 10)
     page.mouse.down()
     check(page.evaluate("$('#talkptt').classList.contains('on')"), "the pill is lit while held")
+    check(page.evaluate("window.touches") >= 1, "the press starts the chats' voice window again (chatVoiceTouch)")
     page.wait_for_function("$('#pttl').textContent === 'Listening…'", timeout=8000)
     check(True, "listening once the socket is open")
     page.wait_for_function("$('#talkq').value === 'hello'", timeout=8000)
@@ -272,6 +282,8 @@ def fake(page, url):
     check(page.evaluate("window.stops") >= 1, "the press stopped a reply being spoken (sayStop)")
     check(not page.evaluate("$('#talkptt').classList.contains('on')") and
           page.evaluate("$('#pttl').textContent") == "Hold to talk", "the pill is back to rest")
+    check(page.evaluate("!!vmic.base && !vmic.users.size && vmic.base.getTracks().every(t => t.readyState === 'live' && !t.enabled)"),
+          "let go: the page's capture kept, its tracks disabled (nothing heard)")
 
     print("a fumble: the voice stopped, nothing sent")
     page.evaluate("window.fumbles = 0; say.run = { shown: 'playing' }")
@@ -315,6 +327,16 @@ def fake(page, url):
     check(page.evaluate("$('#talkq').value") == "go to " and sockets(page)["made"] == made,
           "with words in the box, Space is a space")
     page.fill("#talkq", "")
+    check(page.evaluate("window.__gum1") == 1, "five holds in one visit, one getUserMedia: the browser asks once")
+    check(page.evaluate("vmic.keepT") > 0, "the idle window running (vMicLetGo after VMIC_KEEP_MS)")
+    page.evaluate("window.__kb = vmic.base; vMicLetGo()")
+    check(page.evaluate("!vmic.base && window.__kb.getTracks().every(t => t.readyState === 'ended')"),
+          "let go: the capture stopped (the recording light out)")
+    page.mouse.down()
+    page.wait_for_function("!!(ptt.cur && ptt.cur.stream)", timeout=8000)
+    page.mouse.up()
+    page.wait_for_function("!ptt.cur", timeout=8000)
+    check(page.evaluate("window.__gum1") == 2, "and the next hold asks again")
 
     print("one socket at a time")
     # the first one still finishing (Deepgram slow to close) when the next
@@ -392,7 +414,7 @@ def fake(page, url):
     check(page.evaluate("window.sent").pop() == "typed instead", "the box still takes typing")
     State.token_status = 200
 
-    page.evaluate("$('#toast').classList.add('hidden');"
+    page.evaluate("$('#toast').classList.add('hidden'); vMicLetGo();"
                   "navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('no', 'NotAllowedError')); 0")
     page.mouse.down()
     page.wait_for_function("!$('#toast').classList.contains('hidden')", timeout=8000)
@@ -544,7 +566,8 @@ def conversation(page, url):
                   "say.run = { shown: 'pending' }; convSay(true)")
     check(page.evaluate("conv.cur.stream === null && conv.cur.src === null && conv.cur.held"),
           "a reply begun: the capture is let go")
-    check(page.evaluate("window.__tracks.every(t => t.readyState === 'ended')"), "its tracks stopped, not muted")
+    check(page.evaluate("window.__tracks.every(t => t.readyState === 'ended')"), "its clone's tracks stopped, not muted")
+    check(page.evaluate("!!vmic.base && vmic.base.getTracks().every(t => !t.enabled)"), "the page's capture kept, disabled")
     check(page.evaluate("window.quiets") >= 1, "and the reply's first sound waits for the switch (sayQuiet)")
     check(page.evaluate(st) == "mic off", "the pill says mic off")
     page.wait_for_timeout(300)
@@ -561,7 +584,8 @@ def conversation(page, url):
     page.wait_for_timeout(150)
     check(page.evaluate("conv.cur.stream") is None, "the run over: not taken again before the settle")
     page.wait_for_function("!!conv.cur.stream", timeout=3000)
-    check(page.evaluate("window.__gum") == 1 and page.evaluate("conv.cur.held") is False, "taken again after it")
+    check(page.evaluate("window.__gum") == 0 and page.evaluate("conv.cur.held") is False,
+          "taken again after it, from the kept capture: no getUserMedia")
     page.wait_for_timeout(600)
     check(dg.audio > a0 and sockets(page)["made"] == made, "the audio flows again, on the same socket")
     dg.say(res("Next question.", True), {"type": "UtteranceEnd"})
@@ -582,14 +606,14 @@ def conversation(page, url):
     page.evaluate("say.run.shown = 'playing'; convSay(true); say.run.shown = 'linger'; convSay(true)")
     page.evaluate("say.run = null; convSay(false)")
     page.wait_for_function("!!conv.cur.stream", timeout=3000)
-    check(page.evaluate("window.__drops === 1 && window.__gum === 1"), "two lines 2s apart: dropped once, taken back once")
+    check(page.evaluate("window.__drops === 1 && window.__gum === 0"), "two lines 2s apart: dropped once, taken back once")
     page.evaluate("say.run = { shown: 'playing' }; convSay(true); say.run.shown = 'linger'; convSay(true)")
     page.wait_for_timeout(300)
     page.evaluate("say.run = null; convSay(false)")   # a 6s gap: the linger (4s) ran out
     page.wait_for_function("!!conv.cur.stream", timeout=3000)
     check(page.evaluate("$('#convst').textContent") == "listening", "a longer gap ends the run: the microphone back, listening")
     page.evaluate("say.run = { shown: 'playing' }; convSay(true)")
-    check(page.evaluate("window.__drops === 3 && window.__gum === 2"), "and the next line drops it again")
+    check(page.evaluate("window.__drops === 3 && window.__gum === 0"), "and the next line drops it again")
     page.evaluate("say.run = null; convSay(false)")
     page.wait_for_function("!!conv.cur.stream", timeout=3000)
     print("conversation: mute, a word in a gap")
@@ -611,7 +635,7 @@ def conversation(page, url):
     check(page.evaluate("conv.cur.stream === null && conv.cur.held"), "switched to the speaker mid-reply: let go at once")
     page.evaluate("convSetOutput('earpiece')")
     page.wait_for_function("!!conv.cur.stream", timeout=3000)
-    check(page.evaluate("!conv.cur.held && window.__gum === 1"), "and back to the earpiece: taken again at once")
+    check(page.evaluate("!conv.cur.held && window.__gum === 0"), "and back to the earpiece: taken again at once")
     page.evaluate("say.run = null; convSay(false)")
     page.wait_for_function("!!conv.cur.stream", timeout=3000)
 
@@ -639,7 +663,7 @@ def conversation(page, url):
     check(page.evaluate("navigator.audioSession.type") == "auto", "the reply over: auto until the microphone is asked for")
     page.wait_for_function("!!conv.cur.stream", timeout=3000)
     check(page.evaluate("navigator.audioSession.type") == "play-and-record"
-          and page.evaluate("window.__gumAs.every(t => t === 'play-and-record')") and page.evaluate("window.__gumAs.length") >= 2,
+          and page.evaluate("window.__gumAs.every(t => t === 'play-and-record')"),
           "every getUserMedia asked under play-and-record, never playback")
     page.evaluate("convHoldForTts = false; convSetOutput('speaker')")
 
@@ -703,12 +727,13 @@ def conversation(page, url):
     print("hold to talk: the phone's audio session")
     # the stand-in that answers again (the failures' one closes every socket)
     page.route_web_socket(re.compile(r"wss://api\.deepgram\.com/.*"), dg)
-    page.evaluate("convHoldForTts = true; convSess.type = ''; window.__gumAs = []; convSetOutput('speaker'); pttDown()")
+    page.evaluate("vMicLetGo(); convHoldForTts = true; convSess.type = ''; window.__gumAs = []; convSetOutput('speaker'); pttDown()")
     page.wait_for_function("!!(ptt.cur && ptt.cur.stream)", timeout=8000)
     check(page.evaluate("navigator.audioSession.type") == "play-and-record" and page.evaluate("window.__gumAs") == ["play-and-record"],
           "held: the microphone asked for under play-and-record")
     page.evaluate("pttUp()")
-    check(page.evaluate("navigator.audioSession.type") == "auto", "let go: auto")
+    check(page.evaluate("navigator.audioSession.type") == "auto" and page.evaluate("!!vmic.base"),
+          "let go: auto - the kept capture is not a microphone open")
     page.evaluate("say.run = { shown: 'pending' }; convSay(true)")
     check(page.evaluate("navigator.audioSession.type") == "playback", "the reply, with the speaker chosen: playback (no conversation needed)")
     page.click("#talkout")

@@ -14,6 +14,9 @@ The release binary embeds these too, so they ship with it.
 |---|---|---|---|
 | three.js r186 | `lcars-ui/vendor/three-0.186.1-r2.min.js` | MIT | Copyright 2010-2026 Three.js Authors |
 | meshoptimizer 1.3 (the decoder) | `lcars-ui/vendor/meshopt_decoder-1.3.0.mjs` | MIT | Copyright (C) 2016-2026, by Arseny Kapoulkine |
+| three.js r186's KTX2 loader, with ktx-parse and zstddec (Don McCurdy) in it | `lcars-ui/vendor/ktx2loader-0.186.1.mjs` (`scripts/ktx2-bundle-entry.js`) | MIT | Copyright 2010-2026 Three.js Authors; Copyright (c) 2020 Don McCurdy (ktx-parse, zstddec) |
+| Zstandard's decoder, compiled to wasm inside zstddec | in `lcars-ui/vendor/ktx2loader-0.186.1.mjs` | BSD-3-Clause | Copyright (c) Meta Platforms, Inc. and affiliates |
+| Basis Universal's transcoder (as three r186 ships it) | `lcars-ui/vendor/basis-0.186.1/basis_transcoder.js`, `.wasm` | Apache-2.0 | Copyright (C) 2019-2026 Binomial LLC |
 | Leaflet 1.9.4 | `lcars-ui/vendor/leaflet-1.9.4.js`, `.css` | BSD-2-Clause | Copyright (c) 2010-2023, Vladimir Agafonkin; Copyright (c) 2010-2011, CloudMade |
 | The crew's models, textures and clips, from Quaternius's Universal Base Characters and Universal Animation Library 1 and 2 | `lcars-ui/crew/` (its LICENSE.txt lists each) | CC0 1.0 | none (public domain dedication) |
 | Brass Vase 03 by Rico Cilliers, Carved Wooden Elephant by Greg Zaal (Poly Haven) | in `lcars-ui/deck/readyroom.glb` (`lcars-ui/deck/LICENSE.txt`) | CC0 1.0 | none (public domain dedication) |
@@ -60,7 +63,7 @@ either library.
 
 ### MIT
 
-Applies to three.js, meshoptimizer, musl, nghttp2, c-ares, Brotli and
+Applies to three.js, ktx-parse, zstddec, meshoptimizer, musl, nghttp2, c-ares, Brotli and
 libpsl, each with its copyright line from the tables above in place of
 `<copyright>`:
 
@@ -114,7 +117,7 @@ TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF TH
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### BSD-3-Clause (Zstandard)
+### BSD-3-Clause (Zstandard, here and in zstddec)
 
 ```
 Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
@@ -199,7 +202,7 @@ freely, subject to the following restrictions:
 The crew's and the Poly Haven models are dedicated to the public domain:
 https://creativecommons.org/publicdomain/zero/1.0/legalcode
 
-### Apache License 2.0 (OpenSSL)
+### Apache License 2.0 (OpenSSL, Basis Universal)
 
 ```
 

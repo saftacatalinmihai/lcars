@@ -7,6 +7,9 @@
   (media/reports/YYYY/MM/<slug>-<id>.<ext>, a hidden sidecar), the URL it
   prints, nothing half-written, and a refusal with nothing written when the
   root is not mounted;
+- the journal entry each report is (reports-as-entries.md): publish and
+  update write it, one over the size cap the first line alone, the journal down (exit 3),
+  `import` dry and applied, twice;
 - report.py update: the same name and URL, the sidecar's title kept and
   updated_utc added, a path outside the store, a sidecar, a symlink or a
   missing report Refused; through the server, the new bytes served where
@@ -117,12 +120,17 @@ class Server:
         return r.status, {k.lower(): v for k, v in r.getheaders()}, data
 
 
-def report(root, *args, cache=None, base="https://box.example.ts.net"):
+JOURNAL = ["http://127.0.0.1:1"]  # the scratch server's, once it is up: never the box's
+
+
+def report(root, *args, cache=None, base="https://box.example.ts.net", journal=None):
+    # the entries go to the scratch server as its login, and HOME is scratch,
+    # so no ~/.env of the box's (its login, its server) is ever read
     env = dict(os.environ, LCARS_MEDIA_ROOT=str(root), LCARS_REPORT_BASE=base,
-               LCARS_MEDIA_CACHE=str(cache) if cache else "0")
+               LCARS_MEDIA_CACHE=str(cache) if cache else "0", HOME=str(root.parent),
+               LCARS_URL=journal or JOURNAL[0], LCARS_AUTH_USER=USER, LCARS_AUTH_PASS=PASS)
     if not base:    # and no ~/.env of the box's to find it in
         env.pop("LCARS_REPORT_BASE")
-        env["HOME"] = str(root.parent)
     return subprocess.run([sys.executable, str(REPORT), *args], env=env, capture_output=True, text=True)
 
 
@@ -212,6 +220,126 @@ def script_checks(tmp, root):
     return rel, out
 
 
+def entries(srv, q=None):
+    """The scratch journal's report entries, {first line: entry}, whole:
+    /dump sends a report's first line alone unless report_body=1."""
+    st, _, body = srv.req("GET", "/dump?kind=report&deleted=all&report_body=1")
+    rows = json.loads(body) if st == 200 else []
+    return {e["content"].split("\n", 1)[0]: e for e in rows}
+
+
+def entry_checks(srv, tmp):
+    """Reports as entries (docs/design/reports-as-entries.md), on a root of
+    their own so the listing checks above keep their counts."""
+    root = tmp / "root2"
+    (root / "media").mkdir(parents=True)
+    src = tmp / "src2"
+    src.mkdir()
+    print("-- report.py publish: the entry --")
+    (src / "a.html").write_bytes(b'<h1>"Fleet"</h1>\r\nline\x01two\n')
+    (src / "b.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    r = report(root, "publish", str(src / "a.html"), "--title", "Fleet", "--json")
+    a = json.loads(r.stdout) if r.returncode == 0 else {}
+    e = entries(srv).get(f"report:: html {a.get('path')}")
+    check(r.returncode == 0 and e and e["id"] == a.get("id"), "an entry, its id in --json: %r" % r.stdout[:200])
+    side = json.loads((root / (a["path"].rsplit("/", 1)[0]) / ("." + a["path"].rsplit("/", 1)[1] + ".json")).read_text())
+    check(e and e["kind"] == "report" and e["title"] == "Fleet" and e["created_at_utc"] == side["published_utc"],
+          "kind report, the title, created_at the publish time")
+    check(e and e["content"] == f"report:: html {a['path']}\n\n<h1>\"Fleet\"</h1>\nlinetwo\n",
+          "the first line, a blank, the whole text (CRLF and control bytes gone): %r" % (e or {}).get("content"))
+    r = report(root, "publish", str(src / "b.pdf"), "--json")
+    b = json.loads(r.stdout) if r.returncode == 0 else {}
+    e = entries(srv).get(f"report:: pdf {b.get('path')}")
+    check(e and e["content"] == f"report:: pdf {b['path']}", "a PDF's entry is the first line alone")
+
+    print("-- report.py update: the same entry --")
+    (src / "a2.html").write_text("<h1>Revised</h1>\n")
+    r = report(root, "update", a["path"], str(src / "a2.html"), "--json")
+    u = json.loads(r.stdout) if r.returncode == 0 else {}
+    e = entries(srv).get(f"report:: html {a['path']}")
+    check(u.get("id") == a["id"] and e and e["content"].endswith("\n\n<h1>Revised</h1>\n"),
+          "refreshes the entry it made: %r" % (e or {}).get("content"))
+    check(len([k for k in entries(srv) if a["path"] in k]) == 1, "and makes no second one")
+
+    print("-- the journal's limit --")
+    big = src / "big.csv"
+    big.write_text("x,y\n" * 140000)   # 560,000 bytes
+    r = report(root, "publish", str(big), "--json")
+    j = json.loads(r.stdout) if r.returncode == 0 else {}
+    e = entries(srv).get(f"report:: csv {j.get('path')}")
+    check(r.returncode == 0 and (root / j["path"]).stat().st_size == 560000,
+          "a report over the entry cap is published: %r" % r.stderr.strip()[:160])
+    check(e and e["id"] == j.get("id") and e["content"] == f"report:: csv {j['path']}",
+          "and its entry is the first line alone, the link: %r" % (e or {}).get("content", "")[:80])
+    r = report(root, "update", a["path"], str(big), "--json")
+    e = entries(srv).get(f"report:: html {a['path']}")
+    check(r.returncode == 0 and (root / a["path"]).stat().st_size == 560000 and e
+          and e["content"] == f"report:: html {a['path']}", "an update over it: the file, the entry made the link alone")
+    r = report(root, "update", a["path"], str(src / "a2.html"))
+    e = entries(srv).get(f"report:: html {a['path']}")
+    check(r.returncode == 0 and e and e["content"].endswith("\n\n<h1>Revised</h1>\n"), "and back under it, the text again")
+    edge = src / "edge.txt"
+    edge.write_text("y" * (520192 - 300))
+    r = report(root, "publish", str(edge), "--json")
+    p = json.loads(r.stdout).get("path") if r.returncode == 0 else None
+    e = entries(srv).get(f"report:: txt {p}")
+    check(e and len(e["content"]) > 519000, "one just under it is an entry: %d" % len((e or {}).get("content", "")))
+    st, _, _ = srv.req("GET", "/dump")
+    check(st == 200, "which the console's cold load (/dump) still reads")
+
+    print("-- the journal down --")
+    r = report(root, "publish", str(src / "b.pdf"), "--json", journal="http://127.0.0.1:1")
+    j = json.loads(r.stdout) if r.stdout.strip() else {}
+    check(r.returncode == 3 and j.get("id") is None and "import --apply" in j.get("error", "") + r.stderr
+          and (root / j.get("path", "x")).is_file(), "the report is published, the entry's failure said, exit 3")
+    down = j.get("path")
+
+    print("-- report.py import --")
+    old = tmp / "old.py"
+    # report.py from before it wrote entries: the parent of the commit that
+    # made it (main's own copy writes them since that deployed)
+    made = subprocess.run(["git", "rev-list", "-1", "--grep=report.py writes them", "HEAD"], cwd=REPO,
+                          capture_output=True, text=True).stdout.strip()
+    old.write_text(subprocess.run(["git", "show", f"{made}^:scripts/report.py"], cwd=REPO,
+                                  capture_output=True, text=True).stdout)
+    olds = []
+    for name in ("a.html", "b.pdf", "big.csv"):
+        o = subprocess.run([sys.executable, str(old), "publish", str(src / name), "--json"], capture_output=True, text=True,
+                           env=dict(os.environ, LCARS_MEDIA_ROOT=str(root), LCARS_MEDIA_CACHE="0", HOME=str(tmp),
+                                    LCARS_URL=JOURNAL[0], LCARS_AUTH_USER=USER, LCARS_AUTH_PASS=PASS))
+        olds.append(json.loads(o.stdout)["path"] if o.returncode == 0 else None)
+    (root / olds[1]).with_name("." + olds[1].rsplit("/", 1)[1] + ".json").write_text(
+        json.dumps({"title": "Back then", "published_utc": "2026-01-02 03:04:05"}))
+    (root / olds[1]).touch()   # its mtime now, the sidecar's time wins
+    big2 = json.loads(report(root, "publish", str(src / "a.html"), "--json").stdout)["path"]
+    (root / big2.lstrip("/")).write_text("x" * 600000)
+    eid = entries(srv)[f"report:: html {big2.lstrip('/')}"]["id"]
+    srv_delete = srv.req("DELETE", f"/entries/{eid}")[0]
+    before = entries(srv)
+    r = report(root, "import", "--json")
+    plan = json.loads(r.stdout) if r.returncode == 0 else {}
+    tb = olds[-1]
+    check([x["path"] for x in plan.get("create", []) if x.get("link_only")] == [tb],
+          "one over the cap is made the link alone, and said")
+    check(sorted(x["path"] for x in plan.get("create", [])) == sorted(olds + [down]),
+          "the dry run names the reports with no entry: %r" % [x["path"] for x in plan.get("create", [])])
+    check(entries(srv) == before, "and writes nothing")
+    check(len(plan.get("have", [])) == 5 and big2.lstrip("/") in [x["path"] for x in plan["have"]],
+          "those with one are left, a deleted one included (%d)" % srv_delete)
+    r = report(root, "import", "--apply")
+    check(r.returncode == 0 and "4 created (1 as the link alone" in r.stdout, "--apply makes them: %r" % r.stdout.strip().splitlines()[-1:])
+    now = entries(srv)
+    e = now.get(f"report:: pdf {olds[1]}")
+    check(e and e["created_at_utc"] == "2026-01-02 03:04:05" and e["title"] == "Back then",
+          "created_at the sidecar's published_utc, the sidecar's title")
+    check(now.get(f"report:: csv {tb}", {}).get("content") == f"report:: csv {tb}", "the big one's entry the first line alone")
+    check(now.get(f"report:: html {olds[0]}", {}).get("content", "").endswith('<h1>"Fleet"</h1>\nlinetwo\n'),
+          "an HTML report's text")
+    r = report(root, "import", "--apply")
+    check(r.returncode == 0 and "0 created (0 as the link alone, too big to embed), 9 already entries" in r.stdout and entries(srv) == now,
+          "a second run writes nothing: %r" % r.stdout.strip().splitlines()[-1:])
+
+
 def server_checks(srv, root, cache, rel, out):
     print("-- GET /reports --")
     st, _, body = srv.req("GET", "/reports")
@@ -285,8 +413,10 @@ def server_checks(srv, root, cache, rel, out):
         "code, out = no1.report(['--update', %r, %r, 'fixed the axis'])\n"
         "print(json.dumps({'code': code, 'out': out, 'sent': sent}))\n"
     ) % (str(REPO / "scripts"), csv, str(root / "new.csv"))
+    # report.py's own entry to the scratch server (the environment's login
+    # wins over ~/.env's), no1.py's log line stood in for
     env = dict(os.environ, LCARS_MEDIA_ROOT=str(root), LCARS_REPORT_BASE="https://box.example.ts.net",
-               LCARS_MEDIA_CACHE="0")
+               LCARS_MEDIA_CACHE="0", LCARS_URL=JOURNAL[0], LCARS_AUTH_USER=USER, LCARS_AUTH_PASS=PASS)
     r = subprocess.run([sys.executable, "-B", "-c", probe], env=env, capture_output=True, text=True)
     j = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 and r.stdout.strip() else {}
     sent = j.get("sent") or []
@@ -404,11 +534,13 @@ def main():
         binary = tmp / "lcars-test"
         build(binary)
     srv = Server(binary, tmp, root, cache)
+    JOURNAL[0] = srv.base
     try:
         st, _, _ = srv.req("GET", "/reports")
         check(st == 503, "GET /reports with the media root unmounted: %d" % st)
         rel, out = script_checks(tmp, root)
         server_checks(srv, root, cache, rel, out)
+        entry_checks(srv, tmp)
         if os.environ.get("BROWSER", "1") != "0":
             browser_checks(srv, rel)
     finally:

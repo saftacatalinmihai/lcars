@@ -1,0 +1,7 @@
+The *.theme files in this directory are btop's themes, copied verbatim
+(their own headers kept) from https://github.com/aristocratos/btop/tree/main/themes
+at commit af521aed05948627a56837f6953e6709a3ae812d (25 Oct 2026).
+btop is Copyright 2021 Aristocratos and its contributors, and each theme
+names its own author in its header. They are licensed under the Apache
+License, Version 2.0; a copy is in LICENSE beside this file. LCARS reads
+them as palettes (docs/design/theming.md); they are not modified here.

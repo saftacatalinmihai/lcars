@@ -17,6 +17,7 @@ tree says __EXPLAINER__: R2's URL at a deploy, deploy.py; sound on), 2:24 long, 
 <audio>; the feature rows' loops muted, loaded only near the screen, and
 not at all with reduced motion;
 the share card's absolute URLs, the privacy note naming who keeps the list,
+the user manual at /manual/ (linked from the footer; its pictures, version and anchors),
 nothing loaded from another origin, and no script error.
 """
 import pathlib
@@ -110,6 +111,7 @@ try:
                 check(not any("/video/loop-crew" in u for u in reqs), "a phone loads no loop of a row far below")
             check(page.locator("a[href='https://public.mihai-safta.dev/lcars-demo/index.html']").count() >= 1, "Try the demo links to the demo")
             check(page.locator("a[href='https://github.com/saftacatalinmihai/lcars']").count() >= 1, "the repo is linked")
+            check(page.locator("footer a[href='/manual/']").count() == 1, "the footer links the manual")
             check("Not affiliated with Paramount" in page.inner_text("footer"), "the not-affiliated line")
             check("MIT" in page.text_content(".plans") and "Coming" in page.text_content(".plans"), "self-host (MIT) beside hosted, coming")
             check("$" not in page.inner_text("body") and "€" not in page.inner_text("body"), "no price")
@@ -122,6 +124,27 @@ try:
             check(meta.get("og:image") == URL + "og-card.jpg" and meta.get("twitter:image") == URL + "og-card.jpg" and meta.get("og:url") == URL
                   and meta.get("twitter:card") == "summary_large_image", f"the share card's URLs are absolute (the preview's origin) ({meta.get('og:image')})")
             check(page.request.get(URL + "og-card.jpg").headers.get("content-type") == "image/jpeg", "the card is served as a JPEG")
+            # the user manual (site/manual/, built into public/manual/): served
+            # with the landing's headers, its pictures as files, its version
+            # filled, nothing from another origin, no wider than the screen
+            man = ctx.new_page()
+            man_err = []
+            man.on("console", lambda m: m.type == "error" and man_err.append(m.text))
+            man.on("request", lambda r: (not r.url.startswith(URL)) and foreign.append(r.url))
+            r = man.goto(URL + "manual/")
+            man.wait_for_load_state("networkidle")
+            check(r.status == 200 and "The console: a user manual" in man.title(), f"/manual/ is the manual ({r.status})")
+            check("__VERSION__" not in man.content() and "For LCARS " in man.inner_text(".ver"), "its version is filled")
+            pics = man.evaluate("""async () => { const r = []; for (const i of document.images) { i.loading = 'eager';
+              try { await i.decode(); r.push(i.naturalWidth > 0 && !i.src.startsWith('data:')); } catch (e) { r.push(false); } } return r; }""")
+            check(len(pics) >= 10 and all(pics), f"its pictures load, as files ({sum(pics)}/{len(pics)})")
+            check(man.evaluate("document.documentElement.scrollWidth") <= w, "the manual is no wider than the screen")
+            check(not man_err, f"the manual loads with no error, the CSP's included ({man_err[:2]})")
+            bad = man.evaluate("[...document.querySelectorAll('a[href^=\"#\"]')].filter(a => !document.getElementById(a.hash.slice(1))).length")
+            check(bad == 0, f"every anchor in the manual resolves ({bad} not)")
+            if SHOTS:
+                man.screenshot(path=str(SHOTS / f"{name}-manual.png"))
+            man.close()
             if SHOTS:
                 SHOTS.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(SHOTS / f"{name}-fold.png"))

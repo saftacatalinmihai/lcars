@@ -335,6 +335,7 @@ def open_commands(page):
 
 
 def open_daypage(page):
+    # Today opens the Day view (slice 3); its Save as a page is the draft
     page.click("#bDayPage")
 
 
@@ -344,6 +345,8 @@ def open_daypage_read(page):
     # purpose. So the same text is rendered through the reader's own path — the
     # picture worth having is the links, not the brackets around them.
     page.click("#bDayPage")
+    page.wait_for_timeout(300)
+    page.click("#daypage")
     page.wait_for_timeout(300)
     page.evaluate(
         "() => { const t = document.querySelector('#content').value;"

@@ -762,9 +762,12 @@ static char **ChatBuildEnv(Arena *arena, const char *cli_dir) {
       old_path = e + 5;
       continue;
     }
-    // the engineer key is never the journal chat's to hold (lcars_engineer.h)
+    // the engineer key is never the journal chat's to hold (lcars_engineer.h),
+    // nor the publisher's write tokens (lcars_publish.h, social-publish.md
+    // 3.7): a post is the Share sheet's, never a chat's
     if (strncmp(e, "LCARS_URL=", 10) == 0 ||
         strncmp(e, "LCARS_ENGINEER_KEY=", 19) == 0 ||
+        strncmp(e, "LCARS_PUB_", 10) == 0 ||
         strncmp(e, "CLAUDECODE=", 11) == 0 ||
         strncmp(e, "CLAUDE_CODE_ENTRYPOINT=", 23) == 0) {
       continue;
@@ -1038,7 +1041,7 @@ static int HandleChat(int client_fd, Arena *arena, const char *body,
     goto done;
   }
 
-  const char *argv[32];
+  const char *argv[40];
   int argc = 0;
   argv[argc++] = claude_bin;
   argv[argc++] = "-p";
@@ -1087,6 +1090,11 @@ static int HandleChat(int client_fd, Arena *arena, const char *body,
   argv[argc++] = read_rule;
   argv[argc++] = "--disallowedTools";
   argv[argc++] = "Read(./**)";
+  // and the box's secrets by name, wherever LCARS_CHAT_DIR puts the
+  // working directory: ~/.env and the publisher's token files
+  // (social-publish.md 3.7). Bash needs no rule: it is lcars-cli only.
+  argv[argc++] = "Read(~/.env)";
+  argv[argc++] = "Read(~/.config/lcars/**)";
   argv[argc++] = "--permission-mode";
   argv[argc++] = "dontAsk";
   // No MCP servers: the claude.ai connectors take seconds to start and add

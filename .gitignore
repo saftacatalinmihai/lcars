@@ -18,6 +18,8 @@ lcars.js
 lcars.wasm
 sqlite3.web.o
 pages/
+# the user manual's source (docs/design/manual.md), not a build output
+!site/manual/pages/
 .cache/clangd/index
 redate.sh
 .vscode/

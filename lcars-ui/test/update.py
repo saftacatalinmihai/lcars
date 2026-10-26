@@ -33,6 +33,13 @@ from offline import USER, PASS, build, check, checks, fails
 
 UI = pathlib.Path(__file__).resolve().parent.parent
 NEW = "9.9.9"
+# The floating version (#verMark) over a covered screen: shown only while the
+# page is stale (body[data-stale]), and then amber (the design pass, Words)
+MARK = """() => { const m = document.querySelector('#verMark'), cs = getComputedStyle(m);
+  const p = document.createElement('i'); p.style.color = 'var(--amber)'; document.body.appendChild(p);
+  const amber = getComputedStyle(p).color; p.remove();
+  return { stale: document.body.dataset.stale === 'on', shown: cs.display !== 'none' && m.getBoundingClientRect().height > 0,
+           amber: cs.display !== 'none' && cs.color === amber }; }"""
 
 
 def page_checks(srv, ui):
@@ -76,6 +83,10 @@ def page_checks(srv, ui):
         check(not r.from_service_worker, "by the server, not the worker's cache")
         check(not page.evaluate("document.querySelector('#appVer').classList.contains('upd')"),
               "the same version: no mark")
+        page.evaluate("openMore()")
+        check(page.evaluate(MARK) == {"stale": False, "shown": False, "amber": False},
+              "and no floating version over a covered screen (%s)" % page.evaluate(MARK))
+        page.evaluate("closeOv()")
 
         print("-- a deploy: the server has " + NEW + " --")
         html = (ui / "index.html").read_text(encoding="utf-8")
@@ -86,9 +97,21 @@ def page_checks(srv, ui):
         check(page.evaluate("document.querySelector('#appVer').classList.contains('upd')"),
               "the header's version is marked")
         check(page.evaluate("APP_VERSION") == old, "the page itself is still the old one")
+        # stale: the floating mark over a covered screen, amber; Later puts
+        # off the offer (the header's arrow) and leaves the mark
+        page.evaluate("openMore()")
+        check(page.evaluate(MARK) == {"stale": True, "shown": True, "amber": True},
+              "stale: the floating version shows, amber (%s)" % page.evaluate(MARK))
+        page.evaluate("updLater()")
+        check(not page.evaluate("document.querySelector('#appVer').classList.contains('upd')"),
+              "Later takes the header's offer off")
+        check(page.evaluate(MARK) == {"stale": True, "shown": True, "amber": True},
+              "and leaves the mark: behind is a fact (%s)" % page.evaluate(MARK))
+        page.evaluate("closeOv()")
         page.evaluate("updOpen()")
-        btn = '#c_upd [data-act="update"]'
-        check(page.inner_text(btn) == "Update to v" + NEW, "the settings offer Update to v" + NEW)
+        # Update lives in What's new since 0.325.0 (updOpen opens it)
+        btn = '#wn_upd [data-act="update"]'
+        check(page.text_content(btn).strip() == "Update to v" + NEW, "What's new offers Update to v" + NEW)
 
         print("-- Update --")
         n = len(loads)
@@ -104,6 +127,9 @@ def page_checks(srv, ui):
         check('const APP_VERSION = "%s"' % NEW in cached, "the worker's cached shell is the new one")
         check(not page.evaluate("document.querySelector('#appVer').classList.contains('upd')"),
               "no mark: nothing newer")
+        page.evaluate("updPaint(); openMore()")
+        check(page.evaluate(MARK)["shown"] is False, "and no floating version (%s)" % page.evaluate(MARK))
+        page.evaluate("closeOv()")
 
         print("-- offline: nothing --")
         ctx.set_offline(True)

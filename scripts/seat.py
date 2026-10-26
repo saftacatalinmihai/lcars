@@ -83,6 +83,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import crew_tool as T  # noqa: E402 - the crew login and its HTTP
+import rooms as R  # noqa: E402 - the crew messages' header and rows (rooms.md)
 
 SEAT_KIND = "crew_seat"
 INBOX_KIND = "crew_inbox"
@@ -114,10 +115,6 @@ REMOVED_MAX = 10
 def empty():
     return {"holder": None, "queue": [], "waiting": {}, "preempt": None, "note": "", "log": [], "removed": [],
             "jobs": jobs_empty()}
-
-
-def jobs_empty():
-    return {"running": None, "queue": [], "recent": [], "note": ""}
 
 
 def is_crew(name):
@@ -355,12 +352,18 @@ def step(s, facts, now):
 # ---- the job line (docs/design/job-queue.md) -----------------------------------
 #
 # Beside the seat, a line of heavy jobs (a full run.sh, perf, buttons.py, a
-# release build): one on the cores at a time, run outside any session, so
-# the engineer who submits one stops while another takes the seat, and the
-# result brings them back. It lives in this same block, under the same lock:
-# a job's end and its engineer's place in the seat's line are one write.
-# A job: {id, name, cmd, label, wt, head, tree, t, timeout} and, as it goes,
-# hold (the submitter's turn is not over), started, unit, inline.
+# release build), run outside any session, so the engineer who submits one
+# stops while another takes the seat, and the result brings them back. It
+# lives in this same block, under the same lock: a job's end and its
+# engineer's place in the seat's line are one write.
+# A job: {id, name, cmd, label, wt, head, tree, t, timeout, cls} and, as it
+# goes, hold (the submitter's turn is not over), started, unit, inline.
+#
+# More than one may run ("More than one", the job side): up to `limit` (its
+# ceiling LCARS_JOBS_MAX, 2), when every one running and the next are
+# shared, their core weights fit the box, and the readings say there is
+# room. The readings come in as an argument (`r`: avail_mb, cpu_psi,
+# mem_psi, swapin_kbs, each None when unknown): nothing here reads /proc.
 
 RECENT_MAX = 5
 # who queues a job's result, as the seat's `by` (the inbox's sender too)
@@ -368,6 +371,48 @@ JOB = "job"
 # those a completion goes in behind, at the front of the line: the captain's
 # word, a handover (as good as it), and earlier completions
 JOB_AHEAD = ("captain", "handover", JOB)
+
+# A job's class (engineer.py's job_class, from heavy_command's parse): its
+# core weight and its memory peak in MB, measured on the VPS on 2026-10-22
+# (the design's table). "exclusive" runs alone - it measures time (perf,
+# deckshots) or fills the box (the render) - and is the class of anything
+# not known, and of a job written before classes (no `cls`). "parallel"
+# (run.sh with PERF=0) was 1800 until run.sh's screens stage (0.327.3)
+# put two more Chromiums beside keyboard's shards: measured again on
+# 2026-10-24 at 2707-2764 MB of PSS across 61 processes, ~35 s in, plus
+# ~220 MB written to /tmp (a tmpfs: RAM too), so 3000. With it the reserve
+# keeps a second run.sh from ever starting beside one (the box has ~5.4
+# GB free at rest, ~2.7 GB with one run.sh going).
+JOB_CLASSES = {"exclusive": (4, 3000), "explainer": (4, 3500), "parallel": (2, 3000), "browser": (1, 700),
+               "test": (1, 900), "build": (1, 300)}
+JOB_CORES = 4
+JOB_RESERVE_MB = 1500  # MemAvailable kept beside a second job, less its peak
+JOB_CPU_OPEN = 25  # CPU PSI some avg60 (%) under which a second job may start
+# closing: any one of these drops the limit by one (never below 1)
+JOB_CLOSE = {"avail_mb": 1000, "mem_psi": 5, "swapin_kbs": 2048, "cpu_psi": 40}
+JOB_REOPEN = 5 * 60  # good readings for this long before it opens again
+JOB_FRESH = 90  # a job started this recently has not shown its memory yet
+
+
+def job_cls(x):
+    c = (x or {}).get("cls")
+    return c if c in JOB_CLASSES else "exclusive"
+
+
+def job_weight(x):
+    return JOB_CLASSES[job_cls(x)][0]
+
+
+def job_peak(x):
+    return JOB_CLASSES[job_cls(x)][1]
+
+
+def job_shared(x):
+    return JOB_CLASSES[job_cls(x)][0] < JOB_CORES
+
+
+def jobs_empty():
+    return {"running": [], "queue": [], "recent": [], "note": ""}
 
 
 def job_busy(s):
@@ -378,8 +423,9 @@ def job_busy(s):
 def job_find(s, name):
     """`name`'s job: (job, "running" | place in the line from 1) or (None, None)."""
     j = s.get("jobs") or jobs_empty()
-    if j["running"] and j["running"]["name"] == name:
-        return j["running"], "running"
+    for x in j["running"]:
+        if x["name"] == name:
+            return x, "running"
     for i, x in enumerate(j["queue"]):
         if x["name"] == name:
             return x, i + 1
@@ -394,7 +440,7 @@ def job_submit(s, job, now):
     j = s["jobs"]
     job = dict(job, t=int(now))
     if not s["queue"] and not job_busy(s):
-        j["running"] = dict(job, inline=True, started=int(now))
+        j["running"].append(dict(job, inline=True, started=int(now)))
         log(s, now, f"{job['name']} runs {job['label']} inline")
         return "inline"
     j["queue"].append(dict(job, hold=True))
@@ -410,26 +456,98 @@ def job_release(s, name):
             x.pop("hold", None)
 
 
-def job_next(s, facts, now, deploying=False, mem_ok=True):
-    """The job to start now, or (None, why not). Nothing while one runs or a
-    deploy is queued or running (a deploy is the head of this line), nor
-    into too little memory. A held job (its submitter's turn not yet over)
-    starts once their session is idle or off by `facts` - the Stop hook's
-    word lost, reap's move still starts it. The first that may start goes;
-    a held one does not block the line behind it. Pure; job_started records it."""
+def _bad(r):
+    """Why the readings close the limit, or "" (an unknown reading is no reason)."""
+    if r.get("avail_mb") is not None and r["avail_mb"] < JOB_CLOSE["avail_mb"]:
+        return f"memory: {r['avail_mb']} MB free"
+    if r.get("mem_psi") is not None and r["mem_psi"] > JOB_CLOSE["mem_psi"]:
+        return f"memory pressure {r['mem_psi']:g}%"
+    if r.get("swapin_kbs") is not None and r["swapin_kbs"] > JOB_CLOSE["swapin_kbs"]:
+        return f"swapping in {r['swapin_kbs'] / 1024:.1f} MB/s"
+    if r.get("cpu_psi") is not None and r["cpu_psi"] > JOB_CLOSE["cpu_psi"]:
+        return f"CPU pressure {r['cpu_psi']:g}%"
+    return ""
+
+
+def job_limit(s, r, now, jobs_max):
+    """The jobs' current limit, moved by these readings, kept in the block
+    (`jobs.limit`: n, max, why, good_since). It opens at the ceiling. A bad
+    reading drops it by one (never below 1) - a job over it runs to its end,
+    nothing is killed; it rises by one only after JOB_REOPEN of readings
+    that are good (none bad, CPU pressure under JOB_CPU_OPEN), so one
+    reading does not make it flap. jobs_max 1: always 1, today's line."""
     j = s["jobs"]
-    if j["running"]:
-        return None, f"{j['running']['name']}'s job is running"
+    jobs_max = max(1, int(jobs_max))
+    lim = j.get("limit") if isinstance(j.get("limit"), dict) else {}
+    n = min(jobs_max, max(1, int(lim.get("n") or jobs_max)))
+    good_since = lim.get("good_since")
+    why = _bad(r)
+    if jobs_max == 1:
+        n, good_since, why = 1, None, ""
+    elif why:
+        if n > 1:
+            n -= 1
+            log(s, now, f"jobs held at {n}: {why}")
+        good_since = None
+    elif r.get("cpu_psi") is None or r["cpu_psi"] >= JOB_CPU_OPEN:
+        good_since = None
+    elif n < jobs_max:
+        if good_since is None:
+            good_since = int(now)
+        elif now - good_since >= JOB_REOPEN:
+            n += 1
+            good_since = None
+            log(s, now, f"jobs opened to {n}")
+    held = lim.get("why", "") if n < jobs_max and not why else why
+    j["limit"] = {"n": n, "max": jobs_max, "why": held if n < jobs_max else "", "good_since": good_since,
+                  "at": int(now)}
+    return n
+
+
+def job_next(s, facts, now, deploying=False, mem_ok=True, r=None):
+    """The job to start now, or (None, why not). Nothing while a deploy is
+    queued or running (a deploy is the head of this line). The line's head
+    is the first job that may start: a held one (its submitter's turn not
+    yet over) does not block, and starts once their session is idle or off
+    by `facts` - the Stop hook's word lost, reap's move still starts it.
+    With nothing running, the head starts if `mem_ok` (today's rule). Beside
+    running jobs (up to `jobs.limit`, job_limit's), only the head, only if
+    it and every running one are shared, their weights fit JOB_CORES, the
+    memory free less its peak (and the peaks of those started too recently
+    to show) keeps JOB_RESERVE_MB, and CPU pressure is under JOB_CPU_OPEN.
+    An unknown reading keeps it waiting. Pure; job_started records it."""
+    j = s["jobs"]
+    run = j["running"]
     if not j["queue"]:
         return None, ""
     if deploying:
         return None, "a deploy has the cores first"
-    if not mem_ok:
-        return None, "waiting for memory"
-    for x in j["queue"]:
-        if not x.get("hold") or facts.get(x["name"], "off") in ("idle", "off"):
-            return x, ""
-    return None, "waiting for the submitter's turn to end"
+    x = next((x for x in j["queue"] if not x.get("hold") or facts.get(x["name"], "off") in ("idle", "off")), None)
+    if not x:
+        return None, ("waiting for the submitter's turn to end" if not run else
+                      f"{', '.join(r_['name'] for r_ in run)}'s job is running")
+    if not run:
+        return (x, "") if mem_ok else (None, "waiting for memory")
+    r = r or {}
+    lim = (j.get("limit") or {}).get("n") or 1
+    names = ", ".join(r_["name"] for r_ in run) + ("'s job is" if len(run) == 1 else "'s jobs are") + " running"
+    if len(run) >= lim:
+        why = (j.get("limit") or {}).get("why")
+        return None, names + (f" (held at {lim}: {why})" if why else "")
+    if not job_shared(x):
+        return None, names + f"; {x['name']}'s runs alone"
+    alone = next((r_ for r_ in run if not job_shared(r_)), None)
+    if alone:
+        return None, f"{alone['name']}'s job runs alone"
+    if sum(job_weight(r_) for r_ in run) + job_weight(x) > JOB_CORES:
+        return None, names + ": no cores to spare"
+    avail = r.get("avail_mb")
+    fresh = sum(job_peak(r_) for r_ in run if now - (r_.get("started") or r_.get("t") or 0) < JOB_FRESH)
+    if avail is None or avail - fresh - job_peak(x) < JOB_RESERVE_MB:
+        return None, names + "; waiting for memory"
+    if r.get("cpu_psi") is None or r["cpu_psi"] >= JOB_CPU_OPEN:
+        return None, names + "; the CPU is busy"
+    return x, ""
 
 
 def job_started(s, jid, now, unit=""):
@@ -439,9 +557,27 @@ def job_started(s, jid, now, unit=""):
         return None
     j["queue"].remove(x)
     x.pop("hold", None)
-    j["running"] = dict(x, started=int(now), **({"unit": unit} if unit else {}))
-    log(s, now, f"{x['name']}'s job started: {x['label']}")
-    return j["running"]
+    x = dict(x, started=int(now), **({"unit": unit} if unit else {}))
+    j["running"].append(x)
+    log(s, now, f"{x['name']}'s job started: {x['label']}" + (f" ({len(j['running'])} running)"
+                                                              if len(j["running"]) > 1 else ""))
+    return x
+
+
+def job_adopt(s, job, now):
+    """A job whose run is under way or has ended (its files say so) but that
+    the block has lost - written over by an older engineer.py or seat.py
+    across the deploy that upgraded the line, which read a newer block its
+    own way: back in `running`, so that its end is settled and reported as
+    any other's. The job, or None if the block has it (or just had it)."""
+    j = s["jobs"]
+    if any(x["id"] == job["id"] for x in j["running"] + j["queue"] + j["recent"]):
+        return None
+    x = dict(job, started=int(job.get("started") or now))
+    x.pop("hold", None)
+    j["running"].append(x)
+    log(s, now, f"{x['name']}'s job carried over: {x['label']}")
+    return x
 
 
 def job_back(s, name, now):
@@ -467,22 +603,26 @@ def job_back(s, name, now):
     log(s, now, f"{name} queued, #{i + 1} (their job's result)")
 
 
-def job_done(s, jid, outcome, now, back=True):
+def job_done(s, jid, outcome, now, back=True, told=None):
     """The job `jid` ended (or was refused, or cancelled): out of the lines,
     into `recent`, and its engineer back in the seat's line unless `back`
-    is false (cancelled: nobody waits on it). The job, or None if it is not
-    in the block (already done: the caller reports nothing twice)."""
+    is false (cancelled: nobody waits on it). `told`, kept on the record
+    for the watchdog: how its engineer hears of it - "inbox" (a [job]
+    message), "turn" (an inline run's waiter, in their own turn), "no".
+    The job, or None if it is not in the block (already done: the caller
+    reports nothing twice)."""
     j = s["jobs"]
-    x = j["running"] if j["running"] and j["running"]["id"] == jid else \
-        next((x for x in j["queue"] if x["id"] == jid), None)
-    if not x:
-        return None
-    if x is j["running"]:
-        j["running"] = None
+    x = next((x for x in j["running"] if x["id"] == jid), None)
+    if x:
+        j["running"].remove(x)
     else:
+        x = next((x for x in j["queue"] if x["id"] == jid), None)
+        if not x:
+            return None
         j["queue"].remove(x)
     rec = {k: x[k] for k in ("id", "name", "label", "t", "started") if k in x}
-    j["recent"] = (j["recent"] + [dict(rec, ended=int(now), outcome=outcome)])[-RECENT_MAX:]
+    rec.update(ended=int(now), outcome=outcome, told=told or ("inbox" if back else "no"))
+    j["recent"] = (j["recent"] + [rec])[-RECENT_MAX:]
     log(s, now, f"{x['name']}'s job {outcome}: {x['label']}")
     if back:
         job_back(s, x["name"], now)
@@ -491,22 +631,31 @@ def job_done(s, jid, outcome, now, back=True):
 
 def jobs_normal(j):
     """The job block as read back (the captain may have edited it): its
-    fields present and of their type; a job without an id or name dropped."""
+    fields present and of their type; a job without an id or name dropped.
+    `running` was one job or none before 0.298.6: read into the list."""
     out = jobs_empty()
     if not isinstance(j, dict):
         return out
     ok = lambda x: isinstance(x, dict) and all(isinstance(x.get(k), str) and x[k] for k in ("id", "name", "cmd"))
     fix = lambda x: dict(x, label=str(x.get("label") or x["cmd"])[:80], t=int(x.get("t") or time.time()),
                          timeout=int(x.get("timeout") or 0))
-    if ok(j.get("running")):
-        out["running"] = fix(j["running"])
-    seen = {out["running"]["id"]} if out["running"] else set()
+    seen = set()
+    r = j.get("running")
+    for x in r if isinstance(r, list) else [r]:
+        if ok(x) and x["id"] not in seen:
+            seen.add(x["id"])
+            out["running"].append(fix(x))
     for x in j.get("queue") or []:
         if ok(x) and x["id"] not in seen:
             seen.add(x["id"])
             out["queue"].append(fix(x))
     out["recent"] = [x for x in (j.get("recent") or []) if isinstance(x, dict)][-RECENT_MAX:]
     out["note"] = str(j.get("note") or "")
+    lim = j.get("limit")
+    if isinstance(lim, dict) and isinstance(lim.get("n"), int) and isinstance(lim.get("max"), int):
+        out["limit"] = {"n": lim["n"], "max": lim["max"], "why": str(lim.get("why") or ""),
+                        "good_since": lim["good_since"] if isinstance(lim.get("good_since"), int) else None,
+                        "at": int(lim.get("at") or 0)}
     return out
 
 
@@ -575,10 +724,13 @@ def render(s, now, host=""):
         lines.append("- **Waiting on an answer:** " + ", ".join(f"{k} (since {when(v)})"
                                                                for k, v in sorted(s["waiting"].items())))
     j = s.get("jobs") or jobs_empty()
-    if j["running"]:
-        r = j["running"]
+    lim = j.get("limit") or {}
+    for r in j["running"]:
         lines.append(f"- **Job running:** {r['name']}, {r['label']}, since {when(r.get('started') or r['t'])} "
-                     f"({max(0, int(now - (r.get('started') or r['t']))) // 60} min)" + (" (inline)" * bool(r.get("inline"))))
+                     f"({max(0, int(now - (r.get('started') or r['t']))) // 60} min)" + (" (inline)" * bool(r.get("inline")))
+                     + (f" ({len(j['running'])} of {lim.get('n', 1)})" if len(j["running"]) > 1 else ""))
+    if lim.get("max", 1) > 1 and lim.get("n", 1) < lim["max"]:
+        lines.append(f"- **Jobs held at {lim['n']} of {lim['max']}:** {lim.get('why') or 'waiting for good readings'}")
     if j["queue"]:
         lines.append("- **Jobs queued:** " + " · ".join(f"{i + 1}. {x['name']}, {x['label']}"
                                                          + (" (turn not over)" if x.get("hold") else "")
@@ -693,11 +845,15 @@ def inbox_to(row):
     return t.split(" ← ", 1)[0], THREAD_MARK.sub("", sender)
 
 
-def inbox_thread(row):
-    """The thread of Number One's an inbox row is for, or None (main's)."""
+def inbox_room(row):
+    """The room an inbox row is for (the sender's `#<room>` mark, threads
+    v2's `#<thread>`), or None (main's)."""
     sender = inbox_sender(row)
     m = THREAD_MARK.search(sender[:-len(FRESH)] if sender.endswith(FRESH) else sender)
     return m.group(1) if m else None
+
+
+inbox_thread = inbox_room  # threads v2's name
 
 
 # The mark a sender's message is typed with, so the one it reaches knows whose
@@ -736,11 +892,126 @@ CANCELLED = "[cancelled] "
 
 def inbox_cancel(row):
     _http("PUT", f"/entries/{row['id']}", {"done_bool": 1, "title": CANCELLED + row["title"]})
+    _msg_quietly(msg_cancelled, row["id"])
 
 
 def inbox_uncancel(row):
     """`row` as inbox_cancel had it: {id, title} before the mark."""
     _http("PUT", f"/entries/{row['id']}", {"done_bool": 0, "title": row["title"]})
+    _msg_quietly(msg_cancelled, row["id"], True)
+
+
+def _msg_quietly(fn, *a):
+    """A message row's bookkeeping, which must never fail what carries it."""
+    try:
+        return fn(*a)
+    except Exception:  # noqa: BLE001 - the record only: the slip is what delivers
+        return None
+
+
+# ---- the crew's messages (docs/design/rooms.md) ---------------------------------
+# A crew_msg row is the record of one message, whole, never pruned; the
+# crew_inbox row above is the slip that delivers it, linked by value_int,
+# and its delivery ticks the message done. These raise as _http does: the
+# callers (engineer.py's msg_post) make a failed write cost nothing but the
+# row, never a delivery.
+
+def msg_add(frm, to, room, text, delivered=True, slip=0, extra=()):
+    """A message's row: from `frm` (captain, no1, an engineer, ship), to `to`
+    (a crew member, or "" for the room's members), in `room`. `delivered`:
+    typed already, or nobody is typed to; else `slip`, the inbox row that
+    will deliver it."""
+    room = room if room and R.ROOM_ID_RE.match(room) else R.MAIN
+    r = _http("POST", "/entries", {"kind": R.MSG_KIND, "title": R.title(frm, to, room, text),
+                                   "content": R.content(text, room, to, extra),
+                                   "value_int": int(slip or 0), "done_bool": 1 if delivered else 0})
+    return (r or {}).get("id")
+
+
+def msg_waiting():
+    """The messages not yet delivered: crew_msg rows not done, oldest first."""
+    rows = _http("GET", "/entries?" + urllib.parse.urlencode(
+        {"kind": R.MSG_KIND, "done": 0, "order": "id", "dir": "asc", "limit": 500})) or []
+    return [r for r in rows if not r.get("deleted")]
+
+
+def msg_delivered(slips):
+    """The messages the inbox rows `slips` carried ({slip id: the text typed},
+    or a list of ids), ticked delivered. The captain may have edited an order
+    in its inbox before delivery (the console's Inbox): the row then takes
+    the text as typed, so it says what was said."""
+    slips = {int(k): v for k, v in (slips.items() if isinstance(slips, dict) else ((x, None) for x in slips)) if k}
+    if not slips:
+        return 0
+    n = 0
+    for r in msg_waiting():
+        k = int(r.get("value_int") or 0)
+        if k not in slips:
+            continue
+        body = {"done_bool": 1}
+        typed = slips[k]
+        p = R.title_parse(r.get("title")) or {}
+        if typed and p and R.strip(typed).strip() != R.strip(r.get("content") or "").strip():
+            room, to = p["room"] or R.MAIN, p["to"] or None
+            body.update(title=R.title(p["frm"], p["to"], room, typed), content=R.content(typed, room, to))
+        _http("PUT", f"/entries/{r['id']}", body)
+        n += 1
+    return n
+
+
+def msg_cancelled(slip, back=False):
+    """A message whose inbox row was cancelled (queue remove): marked so and
+    done, never delivered; `back` (queue restore) undoes it."""
+    if back:
+        rows = _http("GET", "/entries?" + urllib.parse.urlencode(
+            {"kind": R.MSG_KIND, "done": 1, "order": "id", "dir": "desc", "limit": 300})) or []
+    else:
+        rows = msg_waiting()
+    for r in rows:
+        if int(r.get("value_int") or 0) != int(slip):
+            continue
+        t = r.get("title") or ""
+        if back and t.startswith(CANCELLED):
+            _http("PUT", f"/entries/{r['id']}", {"done_bool": 0, "title": t[len(CANCELLED):]})
+        elif not back:
+            _http("PUT", f"/entries/{r['id']}", {"done_bool": 1, "title": CANCELLED + t})
+
+
+def msgs_all(min_id=0, limit=500):
+    """crew_msg rows with their text, oldest first, past `min_id`."""
+    rows = _http("GET", "/entries?" + urllib.parse.urlencode(
+        {"kind": R.MSG_KIND, "order": "id", "dir": "asc", "limit": limit, "content": 1, "min_id": min_id})) or []
+    return [r for r in rows if not r.get("deleted")]
+
+
+def msg_get(mid):
+    """One entry by id, whole (a crew_msg row, the caller checks), or None
+    when there is none (a 404); Down as _http."""
+    try:
+        return _http("GET", f"/entries/{int(mid)}")
+    except RuntimeError as e:
+        if ": 404 " in str(e) + " ":
+            return None
+        raise
+
+
+def rooms_rows():
+    """The crew_room rows, oldest first (the lowest id of an `id::` wins)."""
+    rows = _http("GET", "/entries?" + urllib.parse.urlencode(
+        {"kind": R.ROOM_KIND, "order": "id", "dir": "asc", "limit": 500, "content": 1})) or []
+    return [r for r in rows if not r.get("deleted")]
+
+
+def room_put(rid, name, by="no1", closed=False):
+    """A project room's row made, or its name and state set: one per id."""
+    row = next((r for r in rooms_rows() if R.room_row_id(r) == rid), None)
+    if row is None:
+        r = _http("POST", "/entries", {"kind": R.ROOM_KIND, "title": name or rid,
+                                       "content": f"id:: {rid}\nby:: {by}", "done_bool": 1 if closed else 0})
+        return (r or {}).get("id")
+    if (row.get("title"), bool(row.get("done_bool"))) != (name or rid, bool(closed)):
+        _http("PUT", f"/entries/{row['id']}", {"title": name or rid, "done_bool": 1 if closed else 0})
+    return row["id"]
 
 
 # ---- the locks -----------------------------------------------------------------
@@ -763,3 +1034,12 @@ def changing(state_dir, host=""):
         yield s
         if json.dumps(s, sort_keys=True) != before or rid is None:
             write(rid, s, time.time(), host)
+            # the seat's and the job line's gauges, as of this write. Guarded
+            # here too, not only inside eng_metrics.record: the module missing
+            # or broken (a bad deploy, a syntax error) must never cost a seat
+            # move, which is already written by now
+            try:
+                import eng_metrics as M
+                M.record(state_dir, lambda m: M.seat_gauges(m, s))
+            except Exception as e:  # noqa: BLE001
+                print(f"seat: metrics not recorded: {type(e).__name__}: {e}", file=sys.stderr)

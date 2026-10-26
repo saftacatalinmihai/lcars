@@ -159,6 +159,22 @@ def first_words(text, n=60):
     return s if len(s) <= n else s[:n].rsplit(" ", 1)[0] + "…"
 
 
+# The drafter's voice when crew/social-voice.local.md is not there (and
+# beside it when it is): the captain's own last comments on a platform, kept
+# in that platform's daily reading (its JSON's "own") by the poll that read
+# them anyway - no request of its own, and the reading is the run's JSON
+# that stays. Short: they are examples of a voice, not an archive.
+OWN_KEEP, OWN_CHARS = 6, 600
+
+
+def own_replies(items):
+    """[(at, link, text)] -> the newest OWN_KEEP as [{at, link, text}]."""
+    out = [{"at": at or "", "link": link or "", "text": first_words(plain(text), OWN_CHARS)}
+           for at, link, text in items if (text or "").strip()]
+    out.sort(key=lambda o: o["at"], reverse=True)
+    return out[:OWN_KEEP]
+
+
 def comment(platform, cid, link, on, parent, author, at, text, replied=False):
     return {"id": f"{platform}:{cid}", "platform": platform, "link": link, "on": on, "parent": parent,
             "author": author or "?", "at": at, "text": text, "replied": bool(replied)}
@@ -254,7 +270,10 @@ class Fetcher:
             items = [{"id": int(s["objectID"]), "title": s.get("title") or "", "points": int(s.get("points") or 0),
                       "comments": int(s.get("num_comments") or 0)} for s in stories]
             stats = {"value": sum(i["points"] for i in items), "main": "points",
-                     "comments": sum(i["comments"] for i in items), "items": items}
+                     "comments": sum(i["comments"] for i in items), "items": items,
+                     "own": own_replies([(iso(dt.datetime.fromtimestamp(int(h.get("created_at_i") or 0),
+                                                                         dt.timezone.utc)),
+                                          hn_link(h["objectID"]), h.get("comment_text")) for h in mine])}
         return list(found.values()), stats
 
     # -- GitHub --
@@ -294,7 +313,7 @@ class Fetcher:
 
     def github(self, at, daily, last=None):
         since = iso(at - dt.timedelta(days=GH_DAYS))
-        me, found, stats = self.gh_user().lower(), {}, {}
+        me, found, stats, own = self.gh_user().lower(), {}, {}, []
         for full in map(self.gh_repo, self.repos()):
             _, meta = self.gh(f"/repos/{full}")
             _, issues = self.gh(f"/repos/{full}/issues?state=all&since={since}&per_page=100")
@@ -306,6 +325,7 @@ class Fetcher:
             for c in ic + rc:
                 if (c.get("user") or {}).get("login", "").lower() == me:
                     mine_at.setdefault(gh_number(c), []).append(c.get("created_at") or "")
+                    own.append((c.get("created_at"), c.get("html_url"), c.get("body")))
 
             def thread(n):
                 i = by_num.get(n) or {}
@@ -345,7 +365,8 @@ class Fetcher:
         stars = sum(r["stars"] for r in stats.values())
         return list(found.values()), {"value": stars, "main": "stars", "forks": sum(r["forks"] for r in stats.values()),
                                       "views": sum(r.get("views", 0) for r in stats.values()),
-                                      "clones": sum(r.get("clones", 0) for r in stats.values()), "repos": stats}
+                                      "clones": sum(r.get("clones", 0) for r in stats.values()), "repos": stats,
+                                      "own": own_replies(own)}
 
     def gh_discussions(self, full, since):
         owner, name = full.split("/", 1)
@@ -561,9 +582,11 @@ def plan(found, seen, failed, prev_fail, daily_done, stats, day, at):
             row = seen.get(c["id"])
             if row is None:
                 new.append(c)
-            elif c["replied"] and re.search(r"^status: new$", row.get("content") or "", re.M):
-                # the captain's reply seen by a later poll: the comment is answered
-                patches.append((row, re.sub(r"^status: new$", "status: replied", row["content"], count=1, flags=re.M)))
+            elif c["replied"] and re.search(r"^status: (new|drafted)$", row.get("content") or "", re.M):
+                # the captain's reply seen by a later poll: the comment is
+                # answered, a drafted one too (the draft stays under it)
+                patches.append((row, re.sub(r"^status: (new|drafted)$", "status: replied", row["content"], count=1,
+                                            flags=re.M)))
     new.sort(key=lambda c: (c["at"], c["id"]))
     fails = {p: (prev_fail.get(p, 0) + 1 if p in failed else 0) for p in PLATFORMS}
     lines = []
@@ -606,6 +629,113 @@ def notice_body(cs, ids):
         out.append(f"{NAMES[c['platform']]} · {c['author']} on {c['on']}\n{first_words(c['text'], 140)}\n"
                    f"{c['link']}" + (f"\n#{i}" if i else ""))
     return "\n\n".join(out)
+
+
+# The notice's due time (the captain's answer to ask 9695, Q2 A): the next
+# 09:00 in LCARS_TZ - today's when the run is before it, else tomorrow's -
+# so the phone alerts in the morning and never at night. A timed start and
+# end of no length: the CalDAV side gives a reminder scheduled from the
+# journal its alert at the due time (caldav_effective_extra's VALARM), and
+# an empty end would read as a running stopwatch in the page.
+NOTICE_HOUR = 9
+
+
+def notice_due(at, tz):
+    """The UTC "YYYY-MM-DD HH:MM:SS" of the next NOTICE_HOUR:00 in tz after `at`."""
+    loc = at.astimezone(tz)
+    due = dt.datetime.combine(loc.date(), dt.time(NOTICE_HOUR), tz)
+    if loc >= due:
+        due = dt.datetime.combine(loc.date() + dt.timedelta(days=1), dt.time(NOTICE_HOUR), tz)
+    return due.astimezone(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def notice_fields(at, tz):
+    t = notice_due(at, tz)
+    return {"start_date": t, "end_date": t}
+
+
+# ---- the drafts (crew/social-drafts.md, slice 3) -----------------------------------
+#
+# The drafter is an agent; this is the arithmetic around it, no model: which
+# comments want a draft (the gate's and the `social` verb's), the answer's
+# `#<id>: <draft>` blocks, and the comment entry with its draft put in. The
+# runner (crew.py's run_social_drafts) PATCHes it, guarded by the gate's read.
+
+DRAFT_LINE = "Suggested reply (draft, not posted):"
+NO_REPLY = "No reply suggested"
+DRAFTS_MAX = 8                    # a run's comments: the budget is per run, the rest wait an hour
+DRAFT_CHARS = 2000
+DRAFT_RE = re.compile(r"^#(\d+):[ \t]*(.*)$")
+
+
+def status_of(content):
+    m = re.search(r"^status: (\S+)$", content or "", re.M)
+    return m.group(1) if m else ""
+
+
+def line_of(content, key):
+    m = re.search(rf"^{key}: (.*)$", content or "", re.M)
+    return m.group(1).strip() if m else ""
+
+
+def pending(rows):
+    """The crew_social_comment rows wanting a draft, oldest first: status
+    new, not done, not deleted, and no draft under them yet."""
+    out = [r for r in rows if not r.get("deleted") and not r.get("done_bool")
+           and status_of(r.get("content")) == "new" and DRAFT_LINE not in (r.get("content") or "")]
+    out.sort(key=lambda r: (r.get("created_at_utc") or "", r.get("id") or 0))
+    return out[:DRAFTS_MAX]
+
+
+def comment_text(content):
+    """The comment's own words: after the header lines, before any draft."""
+    c = (content or "").replace("\r", "")
+    head = c.find("\n\n")
+    body = c[head + 2:] if head >= 0 else ""
+    return body.split(DRAFT_LINE, 1)[0].strip()
+
+
+def parse_drafts(text):
+    """The drafter's answer -> {entry id: draft}. A block starts at a line
+    `#<id>: ` and runs to the next one (a draft may have paragraphs); a
+    `# title` line or a `---` footer ends it. The first block of an id wins."""
+    out, cur, buf = {}, None, []
+
+    def close():
+        if cur is not None and cur not in out:
+            d = "\n".join(buf).strip()
+            if d:
+                out[cur] = d[:DRAFT_CHARS]
+    for ln in (text or "").replace("\r", "").split("\n"):
+        m = DRAFT_RE.match(ln.strip())
+        if m:
+            close()
+            cur, buf = int(m.group(1)), [m.group(2)]
+        elif cur is not None and (re.match(r"#+\s", ln) or ln.strip() == "---"):
+            close()
+            cur, buf = None, []
+        elif cur is not None:
+            buf.append(ln)
+    close()
+    return out
+
+
+def with_draft(content, draft):
+    """The comment entry with its draft under DRAFT_LINE and status drafted."""
+    c = re.sub(r"^status: new$", "status: drafted", content or "", count=1, flags=re.M).rstrip("\n")
+    if DRAFT_LINE in c:
+        c = c.split(DRAFT_LINE, 1)[0].rstrip("\n")
+    return f"{c}\n\n{DRAFT_LINE}\n{draft.strip()}\n"
+
+
+def voice_lines(readings):
+    """The captain's own last replies, from each platform's newest reading's
+    "own" -> printable lines (the `social` verb's)."""
+    out = []
+    for p, j in readings.items():
+        for o in (j or {}).get("own") or []:
+            out.append(f"- {NAMES.get(p, p)}, {o.get('at', '')[:10]} ({o.get('link', '')}): {o.get('text', '')}")
+    return out
 
 
 # ---- one run -----------------------------------------------------------------------

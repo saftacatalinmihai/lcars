@@ -51,7 +51,7 @@ class Isolation(unittest.TestCase):
             ok = mock.Mock(returncode=0, stdout="", stderr="")
             # as test_no1_threads.py did: STATE patched, nothing else
             with mock.patch.object(E, "STATE", d), mock.patch.object(E, "run", return_value=ok), \
-                    mock.patch.object(E, "out"), mock.patch.dict(os.environ, {"LCARS_THREAD_BY": ""}):
+                    mock.patch.object(E, "out"), mock.patch.dict(os.environ, {"LCARS_THREAD_BY": "", "LCARS_ROOM_BY": ""}):
                 E.detach("deploy", "obrien")
             self.assertEqual(E.read_deploy()["name"], "obrien", "written, to the scratch state")
         after = (os.stat(real).st_mtime_ns, open(real, "rb").read()) if os.path.exists(real) else None

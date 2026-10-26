@@ -154,7 +154,7 @@ class Roles(Base):
         self.assertEqual((fm["schedule"], fm["posts"]), ("Sun *-*-* 07:00", "counselor"))
         argv = C.claude_argv(fm, prompt, tool="/x/crew_tool.py")
         self.assertEqual(argv[argv.index("--tools") + 1], "Bash")
-        allowed = argv[argv.index("--allowedTools") + 1: argv.index("--permission-mode")]
+        allowed = argv[argv.index("--allowedTools") + 1: argv.index("--disallowedTools")]
         self.assertEqual(allowed, [f"Bash(/x/crew_tool.py {v}:*)" for v in ("today", "counsel", "get", "list")])
         self.assertIn("URGENT", prompt)
 
@@ -170,13 +170,22 @@ class Roles(Base):
                     sched = C.load(n)[0]["schedule"].split()
                     if sched[0] in days and sched[0] != day:
                         continue    # a weekly role on another day ("*-*-01" may be any day)
-                    if sched[-1].startswith("*:"):
+                    if sched[-1].startswith("*:") or n == "housekeeping":
                         # an hourly role (the social watch) cannot keep 20
                         # minutes from every other: it must be a light script,
                         # a few requests waiting on the network, that waits on
-                        # the crew lock (lock_wait) for whoever runs then
+                        # the crew lock (lock_wait) for whoever runs then.
+                        # So is housekeeping, a few seconds of measuring at
+                        # the hours ordered (00, 06, 12, 18): no minute of the
+                        # 06 hour keeps 20 from ship, ops and the counselor
+                        # Or an agent role with a gate (the social drafter):
+                        # a quiet hour is no model and no seat, and a busy
+                        # one waits on the lock and the seat like any run
                         fm = C.load(n)[0]
-                        self.assertEqual((fm["kind"], fm["heavy"]), ("script", ""), n)
+                        if fm["kind"] == "agent":
+                            self.assertEqual((fm["gate"] in C.GATES, fm["heavy"]), (True, ""), n)
+                        else:
+                            self.assertEqual((fm["kind"], fm["heavy"]), ("script", ""), n)
                         continue
                     hours, mm = sched[-1].split(":")
                     for hh in map(int, hours.split(",")):     # "02,08,14,20:10" (shares)
@@ -232,9 +241,16 @@ class Roles(Base):
     def test_bad_roles_are_refused(self):
         for bad in (ROLE.replace("haiku", "gpt"), ROLE.replace("verbs: today", "verbs: today post"),
                     ROLE.replace("schedule: *-*-* 06:30\n", ""), "no front matter",
-                    ROLE.replace("model: haiku", "kind: script\nscript: rm")):
+                    ROLE.replace("model: haiku", "kind: script\nscript: rm"),
+                    ROLE.replace("budget:", "gate: nosuch\nbudget:"),
+                    ROLE.replace("model: haiku", "kind: script\nscript: social\ngate: social")):
             with self.assertRaises(ValueError):
                 C.parse_role(bad, "x")
+
+    def test_the_gate_key(self):
+        """`gate:` names one of crew.py's GATES; none is the default."""
+        self.assertEqual(C.parse_role(ROLE, "x")[0]["gate"], "")
+        self.assertEqual(C.parse_role(ROLE.replace("budget:", "gate: social\nbudget:"), "x")[0]["gate"], "social")
 
     def test_role_names(self):
         with self.assertRaises(SystemExit), redirect_stdout(io.StringIO()):
@@ -248,7 +264,7 @@ class Argv(Base):
         argv = C.claude_argv(fm, prompt, tool="/x/crew_tool.py")
         self.assertTrue(os.path.isabs(argv[0]))
         i = argv.index("--allowedTools")
-        allowed = argv[i + 1: argv.index("--permission-mode")]
+        allowed = argv[i + 1: argv.index("--disallowedTools")]
         self.assertEqual(allowed, ["Bash(/x/crew_tool.py today:*)", "Bash(/x/crew_tool.py agenda:*)",
                                    "Bash(/x/crew_tool.py get:*)", "WebFetch(domain:api.open-meteo.com)"])
         self.assertEqual(argv[argv.index("--tools") + 1], "Bash,WebFetch")
@@ -272,6 +288,22 @@ class Argv(Base):
         self.assertIn(f"Read(/{C.REPO}/lcars.db)", denied)
         self.assertIn(f"Read(/{C.REPO}/**/.env)", denied)
 
+    def test_no_agent_reads_the_secrets(self):
+        """social-publish.md 3.7: ~/.env and ~/.config/lcars denied to every
+        role, a reader or not, in both spellings; and its Bash only its verbs."""
+        for text in (ROLE, ROLE.replace("web: api.open-meteo.com", "read: repo")):
+            self.role(text=text)
+            fm, prompt = C.load("test")
+            argv = C.claude_argv(fm, prompt)
+            denied = argv[argv.index("--disallowedTools") + 1:]
+            denied = denied[:next((i for i, a in enumerate(denied) if a.startswith("--")), len(denied))]
+            for t in ("Read", "Edit", "Write"):
+                for p in ("~/.env", "~/.config/lcars/**", f"/{C.HOME}/.env", f"/{C.HOME}/.config/lcars/**"):
+                    self.assertIn(f"{t}({p})", denied)
+            allowed = argv[argv.index("--allowedTools") + 1: argv.index("--disallowedTools")]
+            bash = [a for a in allowed if a.startswith("Bash(")]
+            self.assertTrue(bash and all(a.startswith(f"Bash({C.TOOL} ") for a in bash), bash)
+
     def test_the_child_has_no_credentials(self):
         self.role()
         fm, _ = C.load("test")
@@ -291,7 +323,7 @@ class Folded(Base):
             fm, prompt = C.load("yeoman-linker")
         self.assertEqual((fm["posts"], fm["pre"], fm["brief"], fm["schedule"]), ("yeoman", "measure", "own", "*-*-* 23:12"))
         argv = C.claude_argv(fm, prompt)
-        allowed = argv[argv.index("--allowedTools") + 1: argv.index("--permission-mode")]
+        allowed = argv[argv.index("--allowedTools") + 1: argv.index("--disallowedTools")]
         self.assertEqual(allowed, [f"Bash({C.REPO}/scripts/lcars-link.sh:*)", f"Read(/{C.HOME}/.lcars-linker/**)"])
         self.assertEqual(argv[argv.index("--tools") + 1], "Bash,Read")      # no Write, as before
         self.assertEqual(argv[argv.index("--effort") + 1], "high")         # the user setting it ran under
@@ -311,7 +343,7 @@ class Folded(Base):
             fm, prompt = C.load("ship")
         self.assertEqual((fm["pre"], fm["brief"], fm["kind"]), ("ship", "own", "agent"))
         argv = C.claude_argv(fm, prompt)
-        allowed = argv[argv.index("--allowedTools") + 1: argv.index("--permission-mode")]
+        allowed = argv[argv.index("--allowedTools") + 1: argv.index("--disallowedTools")]
         self.assertIn("Bash(apt list --upgradable*)", allowed)
         self.assertIn("Bash([ -f /var/run/reboot-required ]*)", allowed)
         for a in allowed:
@@ -1229,10 +1261,18 @@ class Scripts(Base):
         f = os.path.join(hourly, "lcars_hourly_20261010_01.db.gz")
         open(f, "w").close()
         os.utime(f, (time.time() - 5 * 3600,) * 2)
+        # the box's own failed units (a crew run that failed overnight)
+        # would come first and decide `urgent`: none here
+        real_sh = C._sh
+
+        def sh(cmd, *a, **kw):
+            return (0, "", "") if "--failed" in cmd else real_sh(cmd, *a, **kw)
+
         srv = Server()
         try:
             os.environ["LCARS_URL"] = srv.url
-            lines, urgent = C.ship_checks(lh)
+            with mock.patch.object(C, "_sh", sh):
+                lines, urgent = C.ship_checks(lh)
         finally:
             srv.close()
         self.assertIn("- server answers /health", lines)

@@ -59,3 +59,29 @@ clips only the context under it, so every question's answer arrives.
 Voice: "answer question 2 yes, after lunch" (yes, no, a letter, skip or
 recommended; the rest is the note) on the top card in the shape, and "send
 the answers" for the first ask answered in full.
+
+## Later (0.299.0)
+
+Later on a card shows its choices under it: back in 1 hour, 3 hours, or
+tomorrow at 9:00 on the device's clock. A choice takes the card out of the
+list at once, with Undo in the toast. It is kept per device, as the drafts
+and answers are (`lcars.oqSnooze`: id -> `{ u: back at, ms; m: the row's
+last_modified_at_utc then }`).
+
+While snoozed a question is out of every count: `oqCount` (the Chats
+button, the dock, the Chats list's row, "n waiting on you"), `no1Asks`
+(Number One's ANSWER badge) and the deck's (its readings' "questions from
+Number One" and the HUD's line when a new one lands). With only snoozed
+ones the Chats row stays, unbadged, saying when the next is back.
+
+The snoozed sit in a Later row at the bottom of the view, folded to
+"Later · n, next back 14:30". Unfolded, a line each with when it is back
+and Now (back at once); a tap on a line opens its card there, to answer it
+anyway, still snoozed.
+
+One comes back when its time passes (a timer while the page is open, set
+by `refresh()`; the clock compared on every read after a reload) or as
+soon as its row is written again (its stamp past `m`: something was added
+to it). Voice: "snooze this question" (or "later": an hour), "... for
+three hours", "... until tomorrow", and "the snoozed questions"; palette
+rows for the same.

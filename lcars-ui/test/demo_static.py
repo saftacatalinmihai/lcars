@@ -221,8 +221,12 @@ with sync_playwright() as p:
       return { shown: getComputedStyle(m).display !== 'none' && r.height > 0, top: Math.round(r.top),
                text: over(document.querySelector('#demobar span')), reset: over(document.querySelector('#demoReset')) }; }"""
 
+    # the demo is never stale (no update check), so the mark shows only as
+    # a stale page would show it: placed by the same rules
     def mark_clear(where):
+        page.evaluate("document.body.dataset.stale = 'on'")
         m = page.evaluate(MARK)
+        page.evaluate("delete document.body.dataset.stale")
         check(m["shown"] and not m["text"] and not m["reset"], f"{where}: the version mark is off the strip's text and Reset ({m})")
 
     d = page.evaluate(HIT)

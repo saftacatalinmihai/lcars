@@ -77,6 +77,9 @@ static const UIType g_ui_types[] = {
     {"glb", "model/gltf-binary", true},
     {"gltf", "model/gltf+json", true},
     {"bin", "application/octet-stream", false},
+    // the deck's atlases (deck-model-assets.mjs): Basis data, already
+    // compressed (ETC1S's own coding, UASTC's zstd)
+    {"ktx2", "image/ktx2", false},
     {"wasm", "application/wasm", true},
     {"woff2", "font/woff2", false},
     {"txt", "text/plain; charset=utf-8", true},
@@ -87,9 +90,34 @@ static const UIType g_ui_types[] = {
 };
 #define UI_TYPE_COUNT (sizeof(g_ui_types) / sizeof(g_ui_types[0]))
 
+// The paths answered with a redirect, and where to: a directory without its
+// slash (relative urls in a page resolve against the directory, so the
+// directory is what has to be in the address bar), and /manual, the user
+// manual's short link (docs/design/manual.md), whose copy is lcars-ui/manual/.
+// A query is dropped: none of these pages reads one.
+static const char *UIRedirectFor(const char *path) {
+  assert(path != NULL);
+  size_t n = strcspn(path, "?#");
+  static const struct {
+    const char *from, *to;
+  } moves[] = {
+      {"/ui", "/ui/"},
+      {"/manual", "/ui/manual/"},
+      {"/manual/", "/ui/manual/"},
+      {"/ui/manual", "/ui/manual/"},
+  };
+  for (size_t i = 0; i < sizeof(moves) / sizeof(moves[0]); i++) {
+    if (strlen(moves[i].from) == n && strncmp(path, moves[i].from, n) == 0) {
+      return moves[i].to;
+    }
+  }
+  return NULL;
+}
+
 static bool UIIsPath(const char *path) {
   assert(path != NULL);
-  return strcmp(path, "/ui") == 0 || strncmp(path, "/ui/", 4) == 0;
+  return strcmp(path, "/ui") == 0 || strncmp(path, "/ui/", 4) == 0 ||
+         UIRedirectFor(path) != NULL;
 }
 
 static const char *UIRoot(void) {
@@ -904,15 +932,14 @@ static int HandleUIFile(int client_fd, Arena *arena, const char *method,
   assert(method != NULL && req_buf != NULL);
   assert(UIIsPath(path));
 
-  if (strcmp(path, "/ui") == 0) {
-    // relative urls in the page resolve against the directory, so the
-    // directory is what has to be in the address bar
+  const char *move = UIRedirectFor(path);
+  if (move) {
     char resp[256];
     int n = snprintf(resp, sizeof(resp),
                      "HTTP/1.1 301 Moved Permanently\r\n"
-                     "Location: /ui/\r\n"
+                     "Location: %s\r\n"
                      "Content-Length: 0\r\n%s\r\n",
-                     HTTPConnectionHeader());
+                     move, HTTPConnectionHeader());
     assert(n > 0 && n < (int)sizeof(resp));
     send(client_fd, resp, (size_t)n, MSG_NOSIGNAL);
     return 301;

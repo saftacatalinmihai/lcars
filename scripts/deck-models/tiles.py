@@ -7,7 +7,9 @@ surface into lcars-ui/deck/: bridge_<name>_{base,norm,rough}.webp.
   python3 scripts/deck-models/tiles.py SRC_DIR OUT_DIR [name ...]
 
 SRC_DIR holds the generated images (the media store's
-deck-models/bridge_tiles/, with their LICENSE.txt). Needs numpy and Pillow."""
+deck-models/bridge_tiles/, with their LICENSE.txt). Needs numpy and Pillow.
+The phone loads their KTX2 (deck-remodel.md slice 1): after writing new
+webps, run `scripts/deck-models/build.sh --ktx2 maps` too."""
 import os
 import sys
 

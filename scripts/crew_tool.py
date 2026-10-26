@@ -15,6 +15,8 @@
                                              an id, one trip planned against actual
     crew_tool.py audit                       security facts about this box (read-only)
     crew_tool.py docs                        the docs, and the code changed since each
+    crew_tool.py social                      the social comments wanting a drafted reply, their
+                                             threads, and the captain's voice (the drafter's)
     crew_tool.py post --title T [--urgent]   the runner's, never the agent's (body on stdin)
 
 It is the same shape as ~/.claude/scripts/lcars-link.sh, the linker's
@@ -1663,6 +1665,55 @@ def cmd_docs(_a):
     return 0
 
 
+# The social drafter's one read (crew/social-drafts.md, docs/design/
+# social-watch.md 2.4): the comments the watch wrote that want a draft, each
+# with what it answers, and how the captain writes - the voice page, kept out
+# of the public tree, and the captain's own last replies, which the watch's daily
+# readings keep. One call, so the run is a few turns. Always fenced as
+# journal data: a comment is a stranger's words, never an order.
+VOICE_PAGE = "social-voice.local.md"
+
+
+def voice_page():
+    d = os.environ.get("LCARS_CREW_DIR") or os.path.join(REPO, "crew")
+    try:
+        with open(os.path.join(d, VOICE_PAGE), encoding="utf-8") as f:
+            return re.sub(r"<!--.*?-->\n?", "", f.read(), flags=re.S).strip()
+    except OSError:
+        return ""
+
+
+def cmd_social(_a):
+    import social as SW
+    since = (now_local().date() - dt.timedelta(days=SW.SEEN_DAYS)).isoformat()
+    rows = SW.pending(entries_all(kind="crew_" + SW.COMMENT, since=since))
+    readings = {}
+    for p in SW.PLATFORMS:
+        got = entries(kind="crew_social_" + p, order="created", dir="desc", limit=1)
+        try:
+            readings[p] = json.loads(got[0].get("content") or "{}") if got else {}
+        except ValueError:
+            readings[p] = {}
+    page = voice_page()
+    print("How the captain writes (crew/" + VOICE_PAGE + "):\n")
+    print(page if page else "No voice page yet. Write from the captain's own replies below, and say in your report that "
+          "the drafts were written without it.")
+    own = SW.voice_lines(readings)
+    print("\nThe captain's own last replies (the watch's daily readings):\n")
+    print("\n".join(own) if own else "- none kept yet")
+    print(f"\nComments wanting a drafted reply ({len(rows)}):")
+    for r in rows:
+        c = r.get("content") or ""
+        print(f"\n#{r['id']} {SW.NAMES.get(SW.line_of(c, 'platform'), SW.line_of(c, 'platform'))}"
+              f" · {SW.line_of(c, 'author')} · {SW.line_of(c, 'at')}")
+        for k in ("link", "on", "parent"):
+            print(f"{k}: {SW.line_of(c, k)}")
+        print(SW.comment_text(c) or "(no text)")
+    if not rows:
+        print("- none")
+    return 0
+
+
 # ---- the runner's one write --------------------------------------------------
 
 def post(role, title, content, urgent=False, value_int=None, fields=None, notice=None):
@@ -1714,7 +1765,8 @@ def cmd_post(a):
 
 
 VERBS = {"today": cmd_today, "agenda": cmd_agenda, "onthisday": cmd_onthisday, "month": cmd_month,
-         "weekstats": cmd_weekstats, "counsel": cmd_counsel, "hygiene": cmd_hygiene, "trip": cmd_trip, "audit": cmd_audit, "docs": cmd_docs, "post": cmd_post}
+         "weekstats": cmd_weekstats, "counsel": cmd_counsel, "hygiene": cmd_hygiene, "trip": cmd_trip, "audit": cmd_audit, "docs": cmd_docs, "social": cmd_social,
+         "post": cmd_post}
 
 
 def fenced(fn, *args):
@@ -1741,7 +1793,8 @@ def main(a):
         print(__doc__)
         return 0
     verb, rest = a[0], a[1:]
-    if os.environ.get("CREW_FENCE") and verb != "post":
+    # social always: what it prints is strangers' comments
+    if verb == "social" or (os.environ.get("CREW_FENCE") and verb != "post"):
         if verb in READ_CLI:
             return fenced(cmd_cli, verb, rest)
         if verb in VERBS:
@@ -1751,7 +1804,7 @@ def main(a):
     if verb in VERBS:
         return VERBS[verb](rest)
     die(f"'{verb}' is not a verb here. Read: today, {', '.join(sorted(READ_CLI))}, "
-        "agenda, onthisday, month, weekstats, counsel, hygiene, trip, audit, docs.")
+        "agenda, onthisday, month, weekstats, counsel, hygiene, trip, audit, docs, social.")
 
 
 if __name__ == "__main__":

@@ -72,7 +72,7 @@ server's own), which `lcars.c` defines.
 | `lcars_media.h` | Photos/video/audio attached to entries: `POST /entries/<id>/media` streams the raw file under the media root (`$LCARS_MEDIA_ROOT`, a NAS mount here; unset, `<data dir>/media`, `MediaDefaultRoot`), `entry_media` side table holds the relative path. A module of `lcars_http.h`, dispatched before the body read |
 | `lcars_ui_files.h` | `GET /ui/...`: the web UI's files from `$LCARS_UI_DIR`, and `index.html` for any page path (`/ui/tasks`, `/ui/entry/123`). A module of `lcars_http.h`, after `lcars_media.h`, whose loopback test and file sender it uses |
 | `lcars_events.h` | `GET /events`: a thread watching the database file's change counter, and the SSE streams that announce it. A module of `lcars_http.h`, after `lcars_chat.h` |
-| `lcars_metrics.h` | `GET /metrics`: the latest reading of each kind (by the web UI's `reading()` rule), when it was measured, and live entries per kind, as Prometheus gauges for the Grafana Alloy on the VPS (`scripts/metrics-setup.sh`). A module of `lcars_http.h` |
+| `lcars_metrics.h` | `GET /metrics`: the latest reading of each kind (by the web UI's `reading()` rule), when it was measured, and live entries per kind, as Prometheus gauges for the Grafana Alloy on the VPS (`scripts/metrics-setup.sh`); then the crew's seat, job line and deploy metrics, `scripts/eng_metrics.py`'s file appended as it stands under `lcars_eng_metrics_timestamp_seconds` (docs/ops/seat-metrics.md). A module of `lcars_http.h` |
 | `lcars_kinds.h` | Kinds by role (docs/design/kinds.md): the role table (`g_kind_roles`, each role's default kind), the mapping read from the journal's `settings` entry titled `kinds` on every use, `GET`/`PUT /kinds/roles`, and `KindIsAppOwn` (the kinds no role may take). A module of `lcars_http.h`, ahead of the modules that read a role |
 | `lcars_features.h` | `GET /features`: each feature on or off and, when off, the names of the settings (or programs) it lacks, with the note the web UI shows at its door - getenv, stat and access(2) only, embeddings from the indexer's last answer (`g_embed_answering`, asked once at start). The owner's login only. A module of `lcars_http.h` |
 | `lcars_caldav.h` | CalDAV (RFC 4791) VTODO lists, one per task kind (`task`, `task_*`), so Apple Reminders syncs against the journal DB, due dates included. A module of `lcars_http.h` (included from inside its implementation block), not a standalone header |
@@ -266,7 +266,7 @@ anyone can send those headers, so nothing decides anything on them. Basic auth: 
 | `POST /tapes/<token>` | One slice of a recording still under way (`?off=<bytes>`, raw body; answers `{size}`, a gap is a 409 with the size held). `POST /entries/<id>/media?tape=<token>` with no body attaches what was staged. See "Media" below |
 | `GET`/`HEAD` `/ui/...` | The web UI (`lcars-ui/`), and the app itself for any page path — see "Pages". No auth from loopback |
 | `GET /events` | Server push: `text/event-stream`, `data: {"seq":N}` on connect and whenever the database changes, by any writer. See "Server push" |
-| `GET /metrics` | Prometheus text format: `lcars_reading{kind}`, `lcars_reading_timestamp_seconds{kind}`, `lcars_entries_total{kind}` (see `lcars_metrics.h`). No auth from loopback (Alloy on the box), Basic auth from anywhere else |
+| `GET /metrics` | Prometheus text format: `lcars_reading{kind}`, `lcars_reading_timestamp_seconds{kind}`, `lcars_entries_total{kind}` (see `lcars_metrics.h`), then the crew's file: `lcars_eng_metrics_timestamp_seconds` and the seat's, job line's and deploys' metrics (docs/ops/seat-metrics.md). No auth from loopback (Alloy on the box), Basic auth from anywhere else |
 | `GET /maps` | `{mapy_key}` from `$LCARS_MAPY_KEY` (or `null`): the key the web UI's course planner calls Mapy.com with. See "Plot a course" |
 | `GET /features` | `{features:[{name,on,needs,note}]}`: media, media_ffmpeg, computer, navigator, maps, transcription, speech, embeddings, caldav, strava, logseq, engineers, number_one, crew, reports. `needs` names what an off one lacks, never a value; the page's one source for what is off (docs/design/open-source.md 2a). The owner's login only: a limited login gets 403 |
 | `GET /dump` | Every row matching the `/entries` filters (plus `order`/`dir`/`content=0`) in **one streamed response**, gzipped when the client offers it. No `limit`/`offset` — those are a 400, since a client that sent them meant a page. What the web UI's cold load and boot sync ask for |
@@ -537,7 +537,11 @@ store, `media/reports/YYYY/MM/<slug>-<id>.<ext>` (UTC month, 8 hex of
 random), and prints `$LCARS_REPORT_BASE/<path>` (the server's URL, from
 the environment or `~/.env`; unset, the path alone, which the console
 opens); `report.py list` reads them back. `no1.py report
-FILE "<title>"` publishes and logs the link as a `no1_log` entry. Reports
+FILE "<title>"` publishes and logs the link as a `no1_log` entry; with
+`-` for FILE and `--as NAME.EXT` it reads the report from stdin (Number
+One may write no file: a heredoc is how it makes one), into a private
+temp file of that name that is removed after - text types only
+(`STDIN_EXTS`), 10 MB at most, never empty. Reports
 are never committed or left anywhere else on the box.
 
 - **Updated in place**: `report.py update <path> FILE` (`no1.py report
@@ -894,9 +898,13 @@ which does everything; its comments hold the detail.
     captain's, except deploying.
   - Engineers report to him unasked: each starts with `--settings` carrying
     a Stop hook (`engineer.py turn-ended`) and a Notification hook
-    (`attention`), and once a `[No.1]` message has put one under his orders
-    (`under_no1`), each turn's end and each question is typed into his
-    session as `[crew] …` (`notify_no1`). He is exempt from `reap`'s idle
+    (`attention`). A turn's end goes where the turn's cause says (`turn`
+    in the engineer's state, docs/design/rooms.md 4.2): the end of a turn
+    his order started is typed into his session as `[crew] …`
+    (`notify_no1`), a captain's 1:1 turn stays in the engineer's own room,
+    a DM goes to the engineer it names; once a `[No.1]` message has given
+    one an order (`under_no1`), their questions on screen are typed to him
+    too. He is exempt from `reap`'s idle
     stop.
   - **Nothing for him is lost while he is off duty.** Every note for him
     (`tell`/`notify_no1`) is a `crew_inbox` entry addressed `number-one ←
@@ -1155,7 +1163,17 @@ environment (`~/.env`, which `lcars.service` sources):
 - `DEEPGRAM_API_KEY` — **Deepgram Aura-2** (`/v1/speak?model=aura-2-…-en`,
   mp3). Chosen by default whenever this key is set; no `LCARS_TTS` needed.
 - `LCARS_TTS=elevenlabs` with `ELEVENLABS_API_KEY` — ElevenLabs'
-  `/v1/text-to-speech/<voice>/stream`, model `eleven_flash_v2_5`.
+  `/v1/text-to-speech/<voice>/stream`, model `eleven_flash_v2_5`. With
+  `DEEPGRAM_API_KEY` as well, **Deepgram stands in** for a line ElevenLabs
+  cannot speak (401/402/403 - a spent quota is a 401 - 429, 5xx, no
+  connection, no first byte in 4s): the same text in that seat's Aura-2
+  voice (`SAY_FALLBACK_VOICES` in `lcars_say.h`, the page's `SAY_VOICES`
+  side by side), before anything has gone out, so the page hears audio
+  either way; `X-LCARS-Say` names who spoke. A quota or key refusal sends
+  the next quarter hour's lines straight to Deepgram (a 429, the next
+  minute's). An unknown voice (400/404) is still a 502. Each line spoken
+  is logged with its length (`Say: elevenlabs spoke 87 chars`), what the
+  day's speech costs.
 - `LCARS_TTS=off`, or no key — both routes answer 503 and the page speaks
   with `speechSynthesis` as before.
 
@@ -1204,6 +1222,15 @@ which is the end of the reply. A narration of two sentences or more could
 start its first before the tool call cuts it off; in practice the tool call
 lands before the first sentence's audio does.
 
+Reading an entry aloud (`ttsAloud`: the Aloud button, `a`, the palette,
+"read aloud", the deck's `lcarsDeckAloud`) is one such run in the
+computer's voice, flagged `always` so it speaks with the chats' Voice
+off: `ttsChunks` cuts the text into ~220-character pieces, each a
+`sayAdd`, so the queue fetches the next only once one plays and a pause
+(`ttsPause`) resumes at the piece it was in. With no provider (a 503, the
+demo) or a piece refused, the rest is the browser's `speechSynthesis`, as
+before.
+
 `#chsay` in the talk row is a button, marked ■: "voice…" while the
 first line is being made, "speaking" from its first sound to the run's last
 (the gaps while the reply is still being written included, so it and the
@@ -1214,9 +1241,11 @@ that reply. If the server's voice fails, the rest of the run goes on in
 `speechSynthesis`, after the audio already scheduled. `test/speech.py`
 runs the block in headless Chromium against a stand-in `/say`. The deck's
 own voice is only the computer's announcements, one short line every few
-minutes: `sayAloud` there fetches it whole (mp3) and plays it as one
-buffer on the deck's `actx`, `announceSynth` when the server has none, and
-`sayStop` (sound off) ends it mid-fetch or mid-line.
+minutes, off by default (the deck's Settings, "announcements on",
+`lcars.deck.announce`) and, on, the browser's voice (`announceSynth`):
+since 2026-10-23 the deck never calls `/say`, which costs per character and is
+kept for the times the captain talks to someone. `sayStop` (sound off)
+ends a line.
 
 The crew think with **haiku** (`TALK_MODEL` in the deck), the host with
 sonnet: a crew member's chatter is short, and their thinking is now the
@@ -1316,7 +1345,14 @@ is not spoken.
 **In the console's chats** (`index.html`, "voice in the chats") all of this
 is behind a **Voice** toggle in a thread's header, off by default and
 remembered (`lcars.chat.voice`): the console is read in public (in the
-deck's talk sheet the deck's sound switch stands for it). On, a
+deck's talk sheet the deck's sound switch stands for it). It **idles
+off**: five minutes (`CHAT_VOICE_IDLE`; Config's "voice turns off after",
+1, 5, 15 or never) with no send, Hold to talk, tap on Voice or the
+speaking mark, conversation turn or reading aloud of his
+(`chatVoiceTouch`), and Voice is off with a toast, what is being said
+finishing (`chatVoiceIdle`). `lcars.chat.voice` keeps `{on, at}`, so a
+page loaded after the window starts off: a tab left open never narrates
+on its own, and the talk sheet's speech takes the same window. On, a
 reply is spoken - a streamed `/chat` answer (the computer,
 a crew role, a navigator) sentence by sentence as `chatPost` brings it
 (`chatSayFeed`: only the text after the last tool call, code and tables
@@ -1351,6 +1387,19 @@ the addons the deck uses are one bundle,
 name** (the `-r2`): the service worker serves same-origin files
 stale-while-revalidate, so a new deck.html importing a name it added would
 otherwise meet the old bundle and fail.
+
+The rooms' atlases are KTX2 (Basis: ETC1S base and ORM, UASTC normal
+maps, at most 1024²) on a phone, transcoded to what the GPU keeps
+compressed, ETC2, ASTC or BC7 (deck-remodel slice 1);
+`scripts/deck-model-assets.mjs` writes them beside the webps with
+KTX-Software's `ktx` and lists them in `lcars-ui/deck/atlases.json`. The
+loader is a second vendored module, `lcars-ui/vendor/ktx2loader-0.186.1.mjs`
+(esbuild from `scripts/ktx2-bundle-entry.js`, `three` external so the
+import map's bundle is the one it uses), and its transcoder
+`vendor/basis-0.186.1/` three's own copy; both are fetched with the first
+room's atlas, and the workers ended once no KTX2 is in flight. A room not
+listed, bigger than 1024² off a phone (Ten Forward's 2048 on a desktop), or
+whose KTX2 fails loads its webp.
 
 Its contract with the rest of the app:
 
@@ -2430,7 +2479,8 @@ Unattended jobs on the VPS that each leave one journal entry a run: the
 ops brief at 06:30, the historian (daily, and the month on the 1st), the
 science officer's weekly numbers, the yeoman's hygiene list, the security
 audit, the librarian's docs-against-code check, the counselor's Sunday
-reading of the week's personal logs, and three with no model, the
+reading of the week's personal logs, the hourly social drafter (gated: no
+model in an hour with nothing to draft), and, with no model, the
 ship's health, the nightly web suite, the blog post's shares and the hourly social watch. A role is a file, `crew/<role>.md`:
 front matter (schedule, model, the verbs it may run, WebFetch domains,
 budget, timeout) and the prompt. `crew.py list` shows them.
@@ -2625,7 +2675,7 @@ matter, filled in by crew/context.local.md. It writes, with the crew login:
 
 - `crew_social_comment`, one per new comment, line-keyed (`id: hn:<id>` or
   `github:<owner/repo>/c<id>`..., `platform`, `link`, `on`, `parent`,
-  `author`, `at`, `status: new|replied`, then the text as plain text):
+  `author`, `at`, `status: new|drafted|replied`, then the text as plain text):
   `done_bool` 1 when the captain's reply is a child of it - on the first read, or
   later by a guarded PATCH (`if_modified`; a 412 leaves their edit alone).
   **Seen lives in the journal**: a comment is new when no
@@ -2639,7 +2689,10 @@ matter, filled in by crew/context.local.md. It writes, with the crew login:
 - `task_crew_social`, **one** reminder per run that found comments the captain
   has not answered (`3 new comments: HN 2, GitHub 1`, a block per comment
   naming its entry): the crew's own list, which Open questions and CalDAV
-  already take (`askOf`);
+  already take (`askOf`). Due the next 09:00 in `LCARS_TZ` (today's before
+  it, else tomorrow's: `notice_due`), start and end alike, so CalDAV gives it
+  its alert (a reminder first scheduled from the journal gets a VALARM at
+  the due time) and the phone tells him in the morning, never at night;
 - `crew_social`, the run's entry, only when something happened (a quiet
   hour is the run log's `nothing`). Its last line, `failures: github=2`,
   is the count of runs in a row each platform failed, read back by the
@@ -2652,6 +2705,22 @@ to GitHub's or Cloudflare's GraphQL endpoint. A first run on the box took
 test_crew's 20 minutes between roles: a light script waiting on the
 network, it queues on the crew lock. Tests: `scripts/test_social.py`, on
 recordings in `scripts/testdata/social/`.
+
+**The drafts (`crew/social-drafts.md`, slice 3).** Hourly at :35, sonnet,
+$0.20 a run at most, and only when there is work: `gate: social` (crew.py's
+`GATES`, a check run under the crew lock before the seat or a model) finds
+the `status: new` comments with no draft (`social.pending`, eight a run);
+none is the run log's `nothing`. The agent's one read is `crew_tool.py
+social`, always fenced as journal data (a comment is a stranger's words):
+the voice page `crew/social-voice.local.md` when it is there, his own last
+replies (the `own` list each daily reading keeps, from what the poll read
+anyway), and each comment with its thread. Its answer is `#<id>: <draft>`
+blocks; `run_social_drafts` puts each under the entry's `Suggested reply
+(draft, not posted):` line, `status: drafted`, by a PATCH guarded with the
+gate's read (a 412 is his edit: skipped, the next run tries again), and the
+run's `crew_social_drafts` entry lists what was drafted and what not. The
+console's Copy reply copies it; nothing is ever posted. A drafted comment
+the captain answers is still marked replied.
 
 ### Crew notes (`scripts/crew_notes.py`, docs/design/crew-notes.md)
 
@@ -2898,7 +2967,8 @@ two trees from drifting:
   `name :: regex [:: globs]` a line, outside the public tree because they
   *are* the private names (hosts, the VPS, the family, the NAS, home
   paths, key shapes; the globs narrow a rule, as the owner-as-"he" one is
-  to the prompts). Any hit stops the export before a byte is written and
+  to the prompts, and a `!glob` leaves files out, as the short acronyms'
+  one is kept out of the textures, whose random bytes spell one). Any hit stops the export before a byte is written and
   names `file:line` and the rule. Without the file the export refuses: an
   audit of nothing passes anything. demo/static.py's audit takes its
   private rules (hosts, the VPS, the name) from the same file.

@@ -7,6 +7,8 @@
                                                   (media/reports/YYYY/MM/<name>, as list
                                                   gives it): same name, same URL
     report.py list [n] [--json]                   the newest n (20), newest first
+    report.py import [--apply] [--json]           every report in the store made an
+                                                  entry (once; a dry run without --apply)
 
 Number One and the engineers publish reports here - HTML, PDF, PNG, CSV,
 Markdown, anything - and never commit them or leave them elsewhere on the
@@ -14,10 +16,36 @@ box. A report lives in the NAS's media store, beside the attachments, at
 
     $LCARS_MEDIA_ROOT/media/reports/YYYY/MM/<slug>-<id>.<ext>
 
-with a hidden sidecar .<slug>-<id>.<ext>.json holding its title. No row is
-written to the journal: the server's GET /reports lists the directories, the
-web UI's Reports page shows that list, and GET /media/<path> serves each file
-to be read in the browser (HTML in a sandbox: lcars_media.h, "Reports").
+with a hidden sidecar .<slug>-<id>.<ext>.json holding its title, and GET
+/media/<path> serves it to be read in the browser (HTML in a sandbox:
+lcars_media.h, "Reports").
+
+Each report is also a journal entry (docs/design/reports-as-entries.md), so
+the console finds it like any entry, with no read of the NAS: kind
+"report", the report's title, created_at its publish time, and content
+
+    report:: <type> <rel>          html|md|txt|csv|pdf|png|zip|other, the path
+
+    <the whole text, for html, md, txt and csv; nothing more for the rest>
+
+An html/md/txt/csv entry with nothing after its first line is a report too
+big to embed (its entry over the journal's cap, HTTP_MAX_BODY_BYTES, 512
+KiB, less 4 KiB for the row): the file is published all the same, and the
+console shows the entry as a link. Nothing is refused for its size but
+the store's own MAX_BYTES.
+
+written after the file is in place, as the captain's login (LCARS_AUTH_USER
+and _PASS, the environment then ~/.env; the server at LCARS_URL, else
+~/.env's LCARS_CREW_URL, else http://127.0.0.1:8080). An update refreshes
+the entry whose first line names the report (or makes one, for a report
+from before). If the entry fails after the copy, the link is printed
+all the same, the failure on stderr, exit 3; `import --apply` writes it.
+--json adds the entry's "id" (null, and an "error", when it failed).
+
+`import` makes the entries for reports published before that, created_at
+each sidecar's published_utc: a dry run printing what it would make unless
+--apply; a report whose first line an entry already has, a deleted one
+included, is left alone, so it can run any number of times.
 
 An update keeps the name, so the link already handed out shows the new
 content: the file is replaced atomically, its sidecar keeps the title and
@@ -46,6 +74,11 @@ import os
 import re
 import secrets
 import sys
+import urllib.parse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# the captain's login and the API, shared with release-import.py
+from journal_api import api, env_file_value, journal_login  # noqa: E402,F401
 
 
 
@@ -76,20 +109,6 @@ def root():
         return have
     data = os.environ.get("LCARS_DATA_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(data, DEFAULT_DIR)
-
-
-def env_file_value(key):
-    """key's value in ~/.env (KEY=value lines, never sourced), or "": an
-    engineer's shell, or Number One's, does not source it."""
-    try:
-        with open(os.path.join(os.path.expanduser("~"), ".env")) as f:
-            for ln in f:
-                k, eq, v = ln.strip().removeprefix("export ").partition("=")
-                if eq and k.strip() == key:
-                    return v.strip().strip("'\"")
-    except OSError:
-        pass
-    return ""
 
 
 def base():
@@ -148,7 +167,9 @@ def read_chunks(path, size=1 << 20):
 
 
 def publish(path, title=None, now=None):
-    """Copies path into the store; answers {url, path, title, bytes}."""
+    """Copies path into the store, then writes its journal entry; answers
+    {url, path, title, bytes, id} - id the entry's, None with an "error"
+    when the file is published and the entry is not (import writes it)."""
     if not os.path.isfile(path):
         raise Refused(f"{path} is not a file")
     size = os.path.getsize(path)
@@ -159,19 +180,23 @@ def publish(path, title=None, now=None):
     media = mounted_media()
     now = now or datetime.datetime.now(datetime.timezone.utc)
     rel_dir = f"{SUBDIR}/{REPORTS}/{now:%Y}/{now:%m}"
+    name = f"{slugify(title)}-{secrets.token_hex(4)}.{extension(path)}"
+    assert NAME_RE.match(name), name
+    rel = f"{rel_dir}/{name}"
+    published = now.strftime("%Y-%m-%d %H:%M:%S")
+    # the entry built first: a file that cannot be read fails before the copy
+    entry = entry_body(rel, path, title, published)
     # below <root>/media only: that one exists, so this never creates it
     d = os.path.join(media, REPORTS, f"{now:%Y}", f"{now:%m}")
     os.makedirs(d, exist_ok=True)
-    name = f"{slugify(title)}-{secrets.token_hex(4)}.{extension(path)}"
-    assert NAME_RE.match(name), name
     side = {"title": title, "source": os.path.basename(path),
-            "published_utc": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "published_utc": published,
             "by": os.environ.get("LCARS_REPORT_BY") or os.environ.get("USER") or ""}
     # the title first, so the report is listed with it the moment it appears
     write_atomic(os.path.join(d, "." + name + ".json"), [json.dumps(side).encode()])
     write_atomic(os.path.join(d, name), read_chunks(path))
-    rel = f"{rel_dir}/{name}"
-    return {"url": f"{base()}/{rel}", "path": rel, "title": title, "bytes": size}
+    r = {"url": f"{base()}/{rel}", "path": rel, "title": title, "bytes": size}
+    return with_entry(r, rel, entry)
 
 
 def cache_dir():
@@ -219,15 +244,12 @@ def update(rel, path, now=None):
     now = now or datetime.datetime.now(datetime.timezone.utc)
     d, name = os.path.split(dst)
     sidecar = os.path.join(d, "." + name + ".json")
-    side = {}
-    try:
-        with open(sidecar) as f:
-            side = json.load(f)
-    except (OSError, ValueError):
-        pass
-    if not isinstance(side, dict):
-        side = {}
+    side = read_sidecar(dst)
     side.setdefault("title", name)
+    rel = rel.strip().lstrip("/")
+    # the published time, for an entry made now for a report from before
+    # reports were entries (created_at is when it was first published)
+    entry = entry_body(rel, path, side["title"], side.get("published_utc") or mtime_utc(dst))
     side["updated_utc"] = now.strftime("%Y-%m-%d %H:%M:%S")
     write_atomic(dst, read_chunks(path))
     write_atomic(sidecar, [json.dumps(side).encode()])
@@ -241,9 +263,162 @@ def update(rel, path, now=None):
             os.unlink(os.path.join(cd, *rel.strip().lstrip("/").split("/")))
         except OSError:
             pass
-    rel = rel.strip().lstrip("/")
-    return {"url": f"{base()}/{rel}", "path": rel, "title": side["title"], "bytes": size,
-            "updated_utc": side["updated_utc"]}
+    r = {"url": f"{base()}/{rel}", "path": rel, "title": side["title"], "bytes": size,
+         "updated_utc": side["updated_utc"]}
+    return with_entry(r, rel, entry)
+
+
+def read_sidecar(full):
+    """The report's sidecar (.<name>.json beside it) as a dict, {} if none."""
+    d, name = os.path.split(full)
+    try:
+        with open(os.path.join(d, "." + name + ".json")) as f:
+            side = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return side if isinstance(side, dict) else {}
+
+
+def mtime_utc(full):
+    return datetime.datetime.fromtimestamp(os.stat(full).st_mtime,
+                                           datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ---- the journal entry (docs/design/reports-as-entries.md) ------------------
+#
+# Every report is also an entry of kind "report": its title the report's,
+# created_at its publish time, and its content
+#
+#     report:: <type> <rel>
+#
+#     <the file's whole text, for html, md, txt and csv; nothing for the rest>
+#
+# so the console finds reports as it finds any entry, with no read of the
+# NAS. The file stays where it was: every link handed out keeps working.
+# Written as the captain's own login (LCARS_AUTH_USER/PASS, as lcars-cli and
+# the timers write), since the reports are his.
+
+ENTRY_KIND = "report"
+TEXT_TYPES = ("html", "md", "txt", "csv")
+TYPE_OF = {"html": "html", "htm": "html", "md": "md", "markdown": "md", "txt": "txt",
+           "csv": "csv", "pdf": "pdf", "png": "png", "zip": "zip"}
+HTTP_MAX_BODY_BYTES = 512 * 1024   # lcars_http.h: a request body over it is a 413
+# The entry's whole JSON body stops 4 KiB short of the server's cap: GET
+# /dump (the console's cold load) builds each row in the connection's 1MB
+# arena by doubling, so a row's JSON must stay under 512 KiB, and the row
+# carries ~250 bytes of fields the POST body does not. Measured on a scratch
+# server: a 523,313-byte body of HTML round-trips through POST, GET, /dump
+# and PATCH; 531,676 is refused.
+ENTRY_BODY_MAX = HTTP_MAX_BODY_BYTES - 4096
+# Control characters other than tab and newline: the server's JSON reader
+# keeps a \u escape as its letters, and a NUL would end the C string.
+CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def report_type(rel):
+    ext = os.path.splitext(rel)[1][1:].lower()
+    return TYPE_OF.get(ext, "other")
+
+
+def entry_head(rel):
+    """The entry's first line, which names its report: how it is found."""
+    return f"report:: {report_type(rel)} {rel}"
+
+
+def entry_body(rel, path, title, created):
+    """The POST /entries body for the report at rel whose bytes are at path.
+    A text report whose entry the journal could not hold gets the first line
+    alone, as a binary one does: huge text stays a file, the entry is the
+    link (an html/md/txt/csv entry with nothing after its first line means
+    just that, and the console shows it as a link). Never refused."""
+    head = entry_head(rel)
+    body = {"kind": ENTRY_KIND, "title": title, "content": head, "created_at_utc": created}
+    # its bytes alone over the cap: over it escaped too, so not read
+    if report_type(rel) in TEXT_TYPES and os.path.getsize(path) <= ENTRY_BODY_MAX:
+        with open(path, "rb") as f:
+            text = f.read().decode("utf-8", "replace")
+        text = CONTROL_RE.sub("", text.replace("\r\n", "\n").replace("\r", "\n"))
+        full = dict(body, content=head + "\n\n" + text)
+        if len(json.dumps(full, ensure_ascii=False).encode()) <= ENTRY_BODY_MAX:
+            return full
+    return body
+
+
+def embedded(body):
+    """Whether the entry carries the report's text (not the link alone)."""
+    return "\n" in body["content"]
+
+
+def report_entries(q=None, deleted=False):
+    """{first line: entry id} of the journal's report entries (the lowest id
+    for a line held twice), those whose text has q if given. Read from GET
+    /dump, which streams one row at a time: every report's text at once
+    would not fit /entries' answer. Refused when it cannot be read."""
+    query = {"kind": ENTRY_KIND, "order": "id", "dir": "asc"}
+    if q:
+        query["q"] = q
+    if deleted:
+        query["deleted"] = "all"
+    st, rows = api("GET", "/dump?" + urllib.parse.urlencode(query))
+    if st != 200 or not isinstance(rows, list):
+        raise Refused(f"the journal's report entries could not be read ({st}): "
+                      + json.dumps(rows)[:200])
+    have = {}
+    for e in rows:
+        line = (e.get("content") or "").split("\n", 1)[0].strip()
+        if line.startswith("report:: ") and line not in have:
+            have[line] = e.get("id")
+    return have
+
+
+def with_entry(r, rel, body):
+    """r, with the id of the report's entry, made or refreshed: the live one
+    whose first line names rel gets the new title and text, else one is
+    made. A failure is an "error" in r, not raised: the file is published
+    by then, and `import --apply` writes the entry later."""
+    try:
+        eid = report_entries(q=rel).get(entry_head(rel))
+    except Refused as e:
+        return dict(r, id=None, error=f"published, but its journal entry was not written: {e}; "
+                    "report.py import --apply writes it")
+    if eid:
+        st, j = api("PATCH", f"/entries/{eid}", {"title": body["title"], "content": body["content"]})
+    else:
+        st, j = api("POST", "/entries", body)
+        eid = j.get("id") if isinstance(j, dict) else None
+    if st not in (200, 201) or not eid:
+        return dict(r, id=None, error=f"published, but its journal entry was not written ({st}): "
+                    + json.dumps(j)[:200] + "; report.py import --apply writes it")
+    return dict(r, id=eid)
+
+
+def import_reports(apply=False):
+    """Every report in the store as an entry, oldest first: those whose
+    first line no entry has (deleted ones counted: a report entry the
+    captain deleted stays deleted) are made, with created_at the sidecar's
+    published_utc, when apply; else only listed. Answers the plan:
+    {"create": [...], "have": [...], "failed": []} - a create's "link_only"
+    true when a text report is too big for its text to be embedded."""
+    have = report_entries(deleted=True)
+    out = {"create": [], "have": [], "failed": []}
+    for r in reversed(listing(None)):
+        full = os.path.join(root(), *r["path"].split("/"))
+        side = read_sidecar(full)
+        row = {"path": r["path"], "title": r["title"],
+               "published_utc": side.get("published_utc") or r["published_utc"]}
+        if entry_head(r["path"]) in have:
+            out["have"].append(dict(row, id=have[entry_head(r["path"])]))
+            continue
+        body = entry_body(r["path"], full, r["title"], row["published_utc"])
+        row["link_only"] = report_type(r["path"]) in TEXT_TYPES and not embedded(body)
+        if apply:
+            st, j = api("POST", "/entries", body)
+            if st not in (200, 201) or not isinstance(j, dict) or not j.get("id"):
+                out["failed"].append(dict(row, why=f"{st}: " + json.dumps(j)[:200]))
+                continue
+            row["id"] = j["id"]
+        out["create"].append(row)
+    return out
 
 
 def listing(n=20):
@@ -279,6 +454,35 @@ def listing(n=20):
     return rows[:n]
 
 
+def done(r, as_json):
+    """Prints a published or updated report: its link (the JSON with --json),
+    and a failed entry on stderr, exit 3 - the file is published all the same."""
+    print(json.dumps(r) if as_json else r["url"])
+    if r.get("error"):
+        print("report.py: " + r["error"], file=sys.stderr)
+        return 3
+    return 0
+
+
+def imported(plan, applied, as_json):
+    if as_json:
+        print(json.dumps(plan, indent=1))
+    else:
+        verb = "created" if applied else "would create"
+        for r in plan["create"]:
+            print(f"{verb}  {r['published_utc'][:16]}  {r['title']}\n    {r['path']}"
+                  + ("  (too big to embed: the link alone)" if r.get("link_only") else "")
+                  + (f"  (entry {r['id']})" if r.get("id") else ""))
+        for r in plan["failed"]:
+            print(f"FAILED  {r['published_utc'][:16]}  {r['title']}\n    {r['why']}")
+        total = sum(len(v) for v in plan.values())
+        links = sum(1 for r in plan["create"] if r.get("link_only"))
+        print(f"{total} reports: {len(plan['create'])} {verb} ({links} as the link alone, too big "
+              f"to embed), {len(plan['have'])} already entries, {len(plan['failed'])} failed"
+              + ("" if applied else " (a dry run: --apply writes them)"))
+    return 1 if plan["failed"] else 0
+
+
 def main(a):
     as_json = "--json" in a
     a = [x for x in a if x != "--json"]
@@ -296,15 +500,15 @@ def main(a):
                 rest = rest[:i] + rest[i + 2:]
             if len(rest) != 1:
                 raise Refused("publish FILE [--title T]")
-            r = publish(rest[0], title)
-            print(json.dumps(r) if as_json else r["url"])
-            return 0
+            return done(publish(rest[0], title), as_json)
         if a[0] == "update":
             if len(a) != 3:
                 raise Refused("update REL FILE (REL: media/reports/YYYY/MM/<name>, as list gives it)")
-            r = update(a[1], a[2])
-            print(json.dumps(r) if as_json else r["url"])
-            return 0
+            return done(update(a[1], a[2]), as_json)
+        if a[0] == "import":
+            if a[1:] not in ([], ["--apply"]):
+                raise Refused("import [--apply]")
+            return imported(import_reports(apply=a[1:] == ["--apply"]), a[1:] == ["--apply"], as_json)
         if a[0] == "list":
             n = int(a[1]) if len(a) > 1 and a[1].isdigit() else 20
             rows = listing(n)

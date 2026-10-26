@@ -19,7 +19,7 @@ a phone's own. Draw calls and triangles carry over as they are.
 
 Usage:  python3 test/deckshots.py [OUT_DIR] [--page DIR] [--gfx low|medium|high]
         [--size 390x844] [--only Bridge,Ten\\ Forward] [--secs 2] [--no-models]
-        [--no-hud] [--scale 3]
+        [--no-hud] [--scale 3] [--tone aces:0.9 --tone agx ...] [--match VIEW]
 """
 import argparse
 import functools
@@ -58,6 +58,9 @@ ap.add_argument("--view", action="append", default=[])
 # looks (e.g. "__deck.blinkHold(true)", every eye shut; "__deck.gtao.enabled
 # = false"); repeatable, in order
 ap.add_argument("--eval", action="append", default=[])
+# JavaScript evaluated once the looks are taken, its value kept in
+# report.json's "dump" (what a look's scene holds, to debug one); repeatable
+ap.add_argument("--dump", action="append", default=[])
 # another generated room to measure, DECK:TYPE[:K] (the Kth of that type
 # on that deck, 0 the first, as GEN's), named "Deck N type" (or "Deck N
 # type K") in --only; repeatable
@@ -76,7 +79,32 @@ ap.add_argument("--no-hud", action="store_true")
 # are measured at); a 1920x1080 still for video wants 1 or 2 (3 there is
 # 5760x3240 drawn in software)
 ap.add_argument("--scale", type=float, default=3)
+# a look whose draw calls (the most in a frame of its measure) are over N
+# fails the run (exit 1), after every look is taken and written; the
+# report names each one over (docs/design/deck-remodel.md, slice 2)
+ap.add_argument("--max-calls", type=int, default=0)
+# where each look's calls go: one frame's draws grouped by the cell they
+# are in (a generated room by its name, a corridor cell, the ship built at
+# boot), the kind of object (merged mesh, instanced, skinned, sprite...)
+# and the material (by its name in M or MX, else its type); printed (the
+# top 12) and kept in report.json as "by"
+ap.add_argument("--calls-by", action="store_true")
+# the tone mapper on trial (deck-remodel.md slice 3): NAME[:EXPOSURE] (aces,
+# agx, neutral; the page's setTone), repeatable. Each look is measured once,
+# with the first, and shot once per tone as <look>-<name>.png. A tone with no
+# exposure has one found by --match.
+ap.add_argument("--tone", action="append", default=[])
+# a room of ROOMS (Corridor): the exposure of every tone without one is the
+# one that gives that room's walls (M.wallCorr, M.wall), seen from its middle
+# to the four quarters, the same mean brightness as the first tone's, by
+# bisection, on the frame as low draws it (renderer.render, no composer: the
+# grade and GTAO would move the mean the same way for every mapper)
+ap.add_argument("--match", default="")
+# ROOM=I[,J...]: only those of a room's four looks (0 the bow, as YAWS),
+# for ROOMS and GEN alike; repeatable
+ap.add_argument("--pick", action="append", default=[])
 args = ap.parse_args()
+PICK = {k: [int(i) for i in v.split(",")] for k, v in (p.split("=", 1) for p in args.pick)}
 OUT = pathlib.Path(args.out)
 OUT.mkdir(parents=True, exist_ok=True)
 W, H = map(int, args.size.split("x"))
@@ -136,6 +164,32 @@ MEASURE = """async secs => {
   return { ms, calls, tris, shadowFrames };
 }"""
 
+# one frame's draws, grouped: cell | kind | material. A cell is the nearest
+# ancestor with userData.cell (its label from genRooms, else "cell"), or the
+# ship merged at boot; materials named from M and MX when the page hands
+# them over (__deck.mats), else by type and a short id
+CALLS_BY = """async () => {
+  const d = window.__deck, r = d.renderer, names = new Map(), cells = new Map();
+  for (const [set, tab] of [["M", d.mats && d.mats.M], ["MX", d.mats && d.mats.MX]]) if (tab) for (const [k, m] of Object.entries(tab)) if (m && m.isMaterial) names.set(m, set + "." + k);
+  for (const rec of d.genRooms) if (rec.g) cells.set(rec.g, rec.rm.type + ":" + rec.rm.name);
+  const ids = new Map();
+  const mname = m => names.get(m) || (m.userData && m.userData.label) || (m.type.replace("Material", "") + "#" + (ids.has(m) ? ids.get(m) : (ids.set(m, ids.size), ids.size - 1)));
+  const cellOf = o => { for (let p = o; p; p = p.parent) if (p.userData && p.userData.cell) return cells.get(p) || p.userData.label || "cell"; return "ship"; };
+  const kind = o => o.isInstancedMesh ? "inst" : o.isSkinnedMesh ? "skin" : o.isBatchedMesh ? "batch" : o.isSprite ? "sprite" : o.isPoints ? "points" : o.isLine ? "line" : "mesh";
+  const by = {};
+  const direct = r.renderBufferDirect;
+  r.renderBufferDirect = function (cam, sc, geo, mat, obj, ...rest) {
+    if (!mat.isMeshDepthMaterial && !mat.isMeshDistanceMaterial) { const k = cellOf(obj) + " | " + kind(obj) + " | " + mname(mat); by[k] = (by[k] || 0) + 1; }
+    return direct.call(this, cam, sc, geo, mat, obj, ...rest);
+  };
+  // the deck draws in its own rAF callback, before ours in the same frame:
+  // the first callback clears what came before it, the second ends after
+  // exactly one whole frame
+  await new Promise(done => requestAnimationFrame(() => { for (const k in by) delete by[k]; requestAnimationFrame(done); }));
+  r.renderBufferDirect = direct;
+  return by;
+}"""
+
 
 def pct(a, p):
     a = sorted(a)
@@ -160,24 +214,125 @@ def shot(path):
     pg.screenshot(path=path, timeout=180000)
 
 
+# the mean display luma (sRGB, Rec. 709 weights) of a room's walls' pixels,
+# over the four looks: each look's mask is a grid of rays, kept where the
+# first hit is a wall material; each step renders the frame as low does and
+# reads it back in the same task (the drawing buffer is not kept past it)
+WALL_MEAN = """([name, exposure, at]) => {
+  const d = window.__deck, r = d.renderer, gl = r.getContext(), walls = new Set([d.M.wallCorr, d.M.wall]);
+  const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, b = new Uint8Array(W * H * 4);
+  // a raycaster does not ask visible: a hidden deck's walls would answer
+  const shown = o => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+  const masks = window.__wallMasks || (window.__wallMasks = []);
+  d.setTone(name, exposure);
+  let s = 0, n = 0;
+  at.forEach(([x, z, a, p], k) => {
+    // the frame loop turns the player and tips the camera (its child) from
+    // setView's yaw and pitch; here, in one task, it is done by hand
+    d.setView(x, z, a, p);
+    d.player.rotation.y = a; d.camera.rotation.x = p;
+    d.player.updateMatrixWorld(true);
+    if (!masks[k]) {
+      const ray = new d.THREE.Raycaster(), px = [];
+      for (let j = 0; j < 40; j++) for (let i = 0; i < 20; i++) {
+        const u = (i + 0.5) / 20, v = (j + 0.5) / 40;
+        ray.setFromCamera(new d.THREE.Vector2(u * 2 - 1, 1 - v * 2), d.camera);
+        const hit = ray.intersectObject(d.scene, true).find(h => h.object.isMesh && shown(h.object) && h.distance > d.camera.near);
+        if (!hit) continue;
+        const m = Array.isArray(hit.object.material) ? hit.object.material[hit.face.materialIndex] : hit.object.material;
+        if (walls.has(m)) px.push([u, 1 - v]);
+      }
+      masks[k] = px;
+    }
+    r.setRenderTarget(null);
+    r.render(d.scene, d.camera);
+    // one read of the frame: a readPixels a pixel is a stall each (0.302's
+    // first run spent 40 minutes here)
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b);
+    // the mask in fractions of the frame: the deck steps its pixel ratio
+    // down when frames are slow (tickResolution), mid-match included
+    for (const [u, v] of masks[k]) { const i = (Math.floor(v * H) * W + Math.floor(u * W)) * 4; s += 0.2126 * b[i] + 0.7152 * b[i + 1] + 0.0722 * b[i + 2]; n++; }
+  });
+  return { n, mean: n ? s / n : 0 };
+}"""
+
+
+def match_tones(room, x, z):
+    at = [[x, z, yaw, -0.08] for yaw in YAWS]
+    for v in at:   # each look's rooms built and lit, as look() waits
+        pg.evaluate("([x, z, a, p]) => { window.__deck.setView(x, z, a, p); window.__deck.tickRooms(true); window.__deck.tickLights(0, true); }", v)
+        pg.wait_for_timeout(600)
+    pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=MODELS_WAIT)
+    t0, e0 = TONES[0]
+    ref = pg.evaluate(WALL_MEAN, [t0, e0, at])
+    report["match"] = {"room": room, "pixels": ref["n"], "target": round(ref["mean"], 2), "means": {t0: round(ref["mean"], 2)}}
+    print(f"  match in the {room}: {ref['n']} wall pixels over 4 looks, {t0} at {e0}: mean {ref['mean']:.2f}")
+    for k, (t, e) in enumerate(TONES):
+        if e:
+            continue
+        lo, hi = 0.2, 4.0
+        for _ in range(12):
+            mid = (lo + hi) / 2
+            if pg.evaluate(WALL_MEAN, [t, mid, at])["mean"] < ref["mean"]:
+                lo = mid
+            else:
+                hi = mid
+        e = round((lo + hi) / 2, 3)
+        got = pg.evaluate(WALL_MEAN, [t, e, at])["mean"]
+        TONES[k] = (t, e)
+        report["match"]["means"][t] = round(got, 2)
+        print(f"  match: {t} at {e}: mean {got:.2f}")
+    pg.evaluate("t => window.__deck.setTone(t[0], t[1])", list(TONES[0]))
+    report["tones"] = dict(TONES)
+
+
 def look(room, i, x, z, yaw, pitch=-0.08):
     pg.evaluate("([x, z, a, p]) => { window.__deck.setView(x, z, a, p); window.__deck.tickRooms(true); window.__deck.tickLights(0, true); }", [x, z, yaw, pitch])
     pg.wait_for_timeout(600)   # rooms built one a frame, lights eased in
     # a room built just now takes its models from the kept glb at once, or
     # when its load lands (a page before 0.220.0 has no cells' models)
-    pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=60000)
+    pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=MODELS_WAIT)
     m = pg.evaluate(MEASURE, args.secs)
     v = {"room": room, "yaw": yaw, "at": [x, z],
          "p50": round(statistics.median(m["ms"]), 1) if m["ms"] else None, "p99": round(pct(m["ms"], 0.99), 1),
          "calls": max(m["calls"]) if m["calls"] else 0, "tris": max(m["tris"]) if m["tris"] else 0,
          "frames": len(m["ms"]), "shadow_frames": m["shadowFrames"]}
+    if args.calls_by:
+        by = pg.evaluate(CALLS_BY)
+        v["by"] = dict(sorted(by.items(), key=lambda kv: -kv[1]))
+        cellsum = {}
+        for k, n in by.items():
+            c = k.split(" | ")[0]
+            cellsum[c] = cellsum.get(c, 0) + n
+        v["by_cell"] = dict(sorted(cellsum.items(), key=lambda kv: -kv[1]))
     report["views"].append(v)
-    if args.shots:
+    if args.shots and TONES:
+        for t, e in TONES:
+            pg.evaluate("t => window.__deck.setTone(t[0], t[1])", [t, e])
+            # three frames: the programs recompiled, OutputPass's rebuilt
+            pg.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))))")
+            shot(str(OUT / f"{room.replace(' ', '_').lower()}-{i}-{t}.png"))
+        pg.evaluate("t => window.__deck.setTone(t[0], t[1])", list(TONES[0]))
+    elif args.shots:
         shot(str(OUT / f"{room.replace(' ', '_').lower()}-{i}.png"))
+    if args.calls_by:
+        print("      by cell: " + ", ".join(f"{c} {n}" for c, n in list(v["by_cell"].items())[:8]))
+        for k, n in list(v["by"].items())[:12]:
+            print(f"      {n:4d}  {k}")
     print(f"  {room:20s} {i} p50 {v['p50']:6.1f}ms p99 {v['p99']:6.1f}ms calls {v['calls']:4d} tris {v['tris']:8d} shadow redraws {v['shadow_frames']}/{v['frames']}")
 
 
+# the rooms' models (ms): the KTX2 atlases' transcoder workers wait on the
+# main thread between maps, and in headless Chromium's software GL a frame
+# takes a second or more, so the boot's 30 maps take ~60 s here (2 s with
+# the frame loop held; a phone's frames are milliseconds)
+MODELS_WAIT = 180000
 report = {"url": URL, "size": args.size, "gfx": args.gfx, "views": []}
+TONES = [(t.split(":")[0], float(t.split(":")[1]) if ":" in t else 0) for t in args.tone]
+if TONES and not TONES[0][1]:
+    sys.exit("deckshots: the first --tone needs its exposure (aces:0.9): the others are matched to it")
+if any(not e for _, e in TONES) and not args.match:
+    sys.exit("deckshots: a --tone with no exposure needs --match")
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, args=["--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
     ctx = b.new_context(viewport={"width": W, "height": H}, device_scale_factor=args.scale, has_touch=True, is_mobile=True)
@@ -188,6 +343,9 @@ with sync_playwright() as p:
     pg = ctx.new_page()
     errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)))
+    # and the console's errors: a shader three could not compile is one,
+    # and only that (its mesh is simply not drawn)
+    pg.on("console", lambda m: m.type == "error" and errs.append("console: " + m.text[:2000]))
     t = time.time()
     pg.goto(URL, timeout=120000)   # (a loaded 4-core box can take over 30 s)
     pg.wait_for_function("window.__deck", timeout=120000)
@@ -199,7 +357,7 @@ with sync_playwright() as p:
         report["crew_ms"] = None
     # the prop library's models (a page before 0.214.0 has none: no wait)
     try:
-        pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=60000)
+        pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=MODELS_WAIT)
         report["models_ms"] = round((time.time() - t) * 1000)
         report["models_in"] = pg.evaluate("window.__deck.modelsIn ? window.__deck.modelsIn() : 0")
     except Exception:
@@ -229,6 +387,11 @@ with sync_playwright() as p:
       }
       return out;
     }""", ROOMS)
+    if args.match:
+        if args.match not in centres:
+            sys.exit(f"deckshots: --match {args.match}: no such room of {ROOMS}")
+        match_tones(args.match, *centres[args.match])
+    report["tones"] = dict(TONES)
     only = [s.strip() for s in args.only.split(",") if s.strip()]
     for room in ROOMS:
         if only and room not in only or only == ["none"]:
@@ -238,6 +401,8 @@ with sync_playwright() as p:
             continue
         x, z = centres[room]
         for i, yaw in enumerate(YAWS):
+            if room in PICK and i not in PICK[room]:
+                continue
             look(room, i, x, z, yaw)
     deck = 8
     for room, (dn, kind, *kth) in GEN.items():
@@ -271,11 +436,13 @@ with sync_playwright() as p:
             continue
         print(f"  {room}: {at[2]}")
         for i, yaw in enumerate(YAWS):
+            if room in PICK and i not in PICK[room]:
+                continue
             look(room, i, at[0], at[1], yaw)
     if deck != args.views_deck:
         pg.evaluate("n => window.__deck.switchDeck(n)", args.views_deck)
     if any(v.startswith("prop:") for v in args.view):
-        pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=60000)
+        pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=MODELS_WAIT)
     for spec in args.view:
         if spec.startswith("prop:"):
             name, *far = spec[5:].split(",")
@@ -314,6 +481,7 @@ with sync_playwright() as p:
         name, *nums = spec.split(",")
         x, z, yaw, *pitch = map(float, nums)
         look("view", name, x, z, yaw, pitch[0] if pitch else -0.08)
+    report["dump"] = [pg.evaluate(js) for js in args.dump]
     report["errors"] = errs
     b.close()
 srv.shutdown()
@@ -329,4 +497,12 @@ print(f"boot {report['boot_ms']}ms (occlusion bake {report.get('ao_boot_ms')}ms)
       f"shadow redraws {report.get('all', {}).get('shadow_frames')} of {report.get('all', {}).get('frames')} frames")
 for e in errs:
     print("  page error:", e, file=sys.stderr)
+over = [v for v in vs if args.max_calls and v["calls"] > args.max_calls]
+report["max_calls"] = args.max_calls or None
+report["over"] = [f"{v['room']} {v['yaw']}: {v['calls']}" for v in over]
 (OUT / "report.json").write_text(json.dumps(report, indent=1))
+if over:
+    print(f"FAIL: {len(over)} look(s) over {args.max_calls} calls: " + "; ".join(report["over"]), file=sys.stderr)
+    sys.exit(1)
+elif args.max_calls:
+    print(f"calls: every look at most {args.max_calls}")

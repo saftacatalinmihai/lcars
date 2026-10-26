@@ -25,7 +25,9 @@
 //                          The default: unset, it is chosen whenever that
 //                          key is there (the captain's choice of voice)
 //   LCARS_TTS=elevenlabs   ElevenLabs' streaming endpoint with the
-//                          low-latency Flash model, ELEVENLABS_API_KEY
+//                          low-latency Flash model, ELEVENLABS_API_KEY;
+//                          with DEEPGRAM_API_KEY too, Deepgram stands in
+//                          when ElevenLabs cannot speak (below)
 //   LCARS_TTS=off, or      off: both routes answer 503, and the page speaks
 //   no key                 with speechSynthesis as it always did
 //
@@ -34,6 +36,26 @@
 // aura-2-thalia-en, an ElevenLabs voice id) - which voices the page uses is
 // the page's business, and GET /say tells it whose names to use. It goes into
 // the provider's URL, so only [A-Za-z0-9_-] is accepted.
+//
+// ElevenLabs falling through to Deepgram. The captain's ElevenLabs is the
+// free tier, ten thousand credits a month, which a few busy days of crew
+// speech spend; and any hosted service has its outages. So when ElevenLabs
+// cannot speak a line - a 401, 402 or 403 (a spent quota is a 401
+// "quota_exceeded"; a bad key, a blocked account), a 429, a 5xx, no
+// connection, or no first byte within SAY_FIRST_BYTE_SECONDS - and
+// DEEPGRAM_API_KEY is there, the same text is spoken by Deepgram in the
+// seat's Aura-2 voice (SayFallbackVoice: the page's SAY_VOICES, both
+// columns, seat by seat), before anything has gone to the client, which
+// hears audio in the format it asked for either way. `X-LCARS-Say` names
+// the engine that spoke. A 400 or 404 (an unknown voice: the page's
+// mistake, to be seen) is not fallen through. A refusal that will not
+// mend in a minute - the quota, the key - is remembered for
+// SAY_HOLD_QUOTA_SECONDS and a 429 for SAY_HOLD_BUSY_SECONDS: those lines
+// go to Deepgram at once rather than waste a round trip each, and the
+// first after it is ElevenLabs' again. Each is logged ("Say: elevenlabs
+// refused (<why>), deepgram spoke"). GET /say still says "elevenlabs",
+// whose names the page goes on using. The URLs are $LCARS_ELEVENLABS_URL
+// and $LCARS_DEEPGRAM_URL when set (test/say_fallback.py's stand-ins).
 //
 // Nothing the provider says is trusted: a refusal (a bad key, an unknown
 // voice, a quota) is answered as a 502 with the provider's status and the
@@ -89,6 +111,9 @@ static int HandleTranscribe(int client_fd, Arena *arena, const char *body,
 #define SAY_MAX_CONCURRENT 3
 // How much of a refusal's body is kept to quote back.
 #define SAY_ERR_BODY_MAX 512
+// Why an attempt failed, in a few words (SayWhy): every buffer it is
+// written to or copied between is this size, so no copy can truncate.
+#define SAY_WHY_MAX 96
 #define SAY_CONNECT_TIMEOUT_SECONDS 5L
 // A whole answer. Speech streams several times faster than it plays, so
 // two minutes is far past any text SAY_TEXT_MAX allows.
@@ -96,9 +121,10 @@ static int HandleTranscribe(int client_fd, Arena *arena, const char *body,
 // A provider that goes this long without a byte has stalled.
 #define SAY_STALL_SECONDS 15L
 
-#define SAY_DEEPGRAM_URL "https://api.deepgram.com/v1/speak"
+#define SAY_DEEPGRAM_SPEAK "/v1/speak"
 #define SAY_DEEPGRAM_VOICE "aura-2-thalia-en"
-#define SAY_ELEVENLABS_URL "https://api.elevenlabs.io/v1/text-to-speech/"
+#define SAY_ELEVENLABS_BASE "https://api.elevenlabs.io"
+#define SAY_ELEVENLABS_SPEAK "/v1/text-to-speech/"
 #define SAY_ELEVENLABS_MODEL "eleven_flash_v2_5"
 #define SAY_ELEVENLABS_VOICE "EXAVITQu4vr4xnSDxMaL" // "Sarah", a premade
 // The raw PCM of {"format":"pcm"}. mp3 cannot be played until it is whole
@@ -109,6 +135,15 @@ static int HandleTranscribe(int client_fd, Arena *arena, const char *body,
 // wait for - any run of samples plays at once - at about 48KB a second,
 // which any phone's link carries.
 #define SAY_PCM_RATE 24000
+// ElevenLabs with Deepgram behind it: its first byte is ~0.3s, so one not
+// in after this is an outage, and the line is better said by Deepgram now
+// than in fifteen seconds (SAY_STALL_SECONDS) or never.
+#define SAY_FIRST_BYTE_SECONDS 4
+// How long ElevenLabs is passed over after a refusal: a quota or a key
+// (401/402/403) mends at the month's reset or by hand, so a quarter of an
+// hour between tries costs one wasted round trip each; a 429 in a minute.
+#define SAY_HOLD_QUOTA_SECONDS (15 * 60)
+#define SAY_HOLD_BUSY_SECONDS 60
 #define SAY_PCM_TYPE "audio/L16;rate=24000;channels=1"
 #define SAY_GRANT_URL "https://api.deepgram.com/v1/auth/grant"
 // How long a minted listening token is good for. Deepgram's default is 30s,
@@ -145,8 +180,47 @@ static struct {
   // Where /v1/listen is: https://api.deepgram.com, or $LCARS_DEEPGRAM_URL
   // (test/transcribe.py's stand-in).
   char listen_base[256];
+  // ElevenLabs' origin: https://api.elevenlabs.io, or $LCARS_ELEVENLABS_URL.
+  char eleven_base[256];
+  // ElevenLabs passed over until this time (time(NULL)), and why: the
+  // last refusal worth remembering. Read and written under hold_lock.
+  // SAY_WHY_MAX, as the why it is copied from and back into: a smaller
+  // one would cut the reason short (and -O3's -Wformat-truncation says so).
+  pthread_mutex_t hold_lock;
+  time_t hold_until;
+  char hold_why[SAY_WHY_MAX];
   atomic_int live;
 } g_say;
+
+// The page's SAY_VOICES (index.html) and SAY_COMPUTER (deck.html), seat by
+// seat: the Aura-2 voice Deepgram speaks a line in when ElevenLabs cannot.
+// Keep them in step with the page's.
+static const struct {
+  const char *eleven, *aura;
+} SAY_FALLBACK_VOICES[] = {
+    {"EXAVITQu4vr4xnSDxMaL", "aura-2-thalia-en"}, // the women
+    {"FGY2WhTYpPnrIDTdsKH5", "aura-2-andromeda-en"},
+    {"XrExE9yKIg1WjnnlVkGX", "aura-2-luna-en"},
+    {"cgSgspJ2msm6clMCkdW9", "aura-2-asteria-en"},
+    {"JBFqnCBsd6RMkjVDRZzb", "aura-2-apollo-en"}, // the men
+    {"nPczCjzI2devNBz1zQrb", "aura-2-orion-en"},
+    {"onwK4e9ZLuTAKqWW03F9", "aura-2-zeus-en"},
+    {"cjVigY5qzO86Huf0OWal", "aura-2-odysseus-en"},
+    {"pFZP5JQG7iQjIQuC4Bku", "aura-2-hera-en"},   // the host
+    {"Xb7hH8MSUJpSbSDYk0k2", "aura-2-athena-en"}, // the computer
+};
+
+// An ElevenLabs voice's seat in Aura-2; one the table does not know (a
+// voice swapped in on the page alone) speaks in Deepgram's default.
+static const char *SayFallbackVoice(const char *eleven) {
+  for (size_t i = 0;
+       i < sizeof(SAY_FALLBACK_VOICES) / sizeof(SAY_FALLBACK_VOICES[0]); i++) {
+    if (strcmp(SAY_FALLBACK_VOICES[i].eleven, eleven) == 0) {
+      return SAY_FALLBACK_VOICES[i].aura;
+    }
+  }
+  return SAY_DEEPGRAM_VOICE;
+}
 
 static const char *SayProviderName(SayProvider p) {
   return p == SAY_DEEPGRAM     ? "deepgram"
@@ -174,6 +248,12 @@ static void SayInit(void) {
   const char *base = getenv("LCARS_DEEPGRAM_URL");
   snprintf(g_say.listen_base, sizeof(g_say.listen_base), "%s",
            base && base[0] ? base : "https://api.deepgram.com");
+  const char *eleven = getenv("LCARS_ELEVENLABS_URL");
+  snprintf(g_say.eleven_base, sizeof(g_say.eleven_base), "%s",
+           eleven && eleven[0] ? eleven : SAY_ELEVENLABS_BASE);
+  pthread_mutex_init(&g_say.hold_lock, NULL);
+  g_say.hold_until = 0;
+  g_say.hold_why[0] = '\0';
   const char *grant = getenv("DEEPGRAM_API_KEY");
   if (SayKeyOk(grant)) {
     int n = snprintf(g_say.grant_auth, sizeof(g_say.grant_auth),
@@ -221,7 +301,10 @@ static void SayInit(void) {
   // See above; a second call only counts up.
   curl_global_init(CURL_GLOBAL_DEFAULT);
   g_say.provider = p;
-  printf("Say: speaking with %s\n", SayProviderName(p));
+  printf("Say: speaking with %s%s\n", SayProviderName(p),
+         p == SAY_ELEVENLABS && g_say.grant_auth[0]
+             ? ", deepgram when it cannot"
+             : "");
 }
 
 // One relay, shared by curl's callbacks.
@@ -231,8 +314,11 @@ typedef struct SayRelay {
   bool started;     // the 200 and its headers have gone to the client
   bool refused;     // the provider answered something other than 200
   bool client_gone; // the client hung up, or a send to it failed
+  bool slow;        // no first byte within `first_byte` seconds
   long http;
-  const char *type; // what the audio goes out as
+  const char *type;    // what the audio goes out as
+  const char *headers; // the 200's extra headers (X-LCARS-Say)
+  time_t first_byte;   // 0, or when the provider's first byte is overdue
   HTTPBodyStream *s;
   char err[SAY_ERR_BODY_MAX + 1];
   size_t err_len;
@@ -255,8 +341,8 @@ static size_t SayCurlWrite(char *data, size_t size, size_t nmemb, void *user) {
     // decides whether this is audio to pass on or an error to quote.
     curl_easy_getinfo(r->curl, CURLINFO_RESPONSE_CODE, &r->http);
     if (r->http == 200) {
-      HTTPStreamBegin(r->s, r->client_fd, 200, r->type,
-                      "Cache-Control: no-store\r\n", false, NULL, 0);
+      HTTPStreamBegin(r->s, r->client_fd, 200, r->type, r->headers, false, NULL,
+                      0);
       r->started = true;
     } else {
       r->refused = true;
@@ -299,6 +385,11 @@ static int SayCurlProgress(void *user, curl_off_t dltotal, curl_off_t dlnow,
     r->client_gone = true;
     return 1; // abort: CURLE_ABORTED_BY_CALLBACK
   }
+  if (r->first_byte && !r->started && !r->refused &&
+      time(NULL) >= r->first_byte) {
+    r->slow = true;
+    return 1;
+  }
   return 0;
 }
 
@@ -316,34 +407,56 @@ static bool SayVoiceOk(const char *v) {
   return true;
 }
 
-static int SayRelayText(int client_fd, Arena *arena, const char *text,
-                        const char *voice, bool pcm) {
-  assert(client_fd >= 0);
-  assert(text != NULL && voice != NULL);
-  assert(g_say.provider != SAY_OFF);
+// A line of the server's log, out at once: stdout is a pipe to the journal,
+// and a fallback's line would otherwise wait for the next request's flush.
+static void SayLog(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vprintf(fmt, ap);
+  va_end(ap);
+  fflush(stdout);
+}
 
-  char url[256];
+// One provider asked to speak `text`. Returns the status sent once the
+// audio has begun (200, the stream ended inside), the client has gone
+// (499) or the provider said nothing (200, empty); -1 when it failed
+// before a byte went out, `r` saying how, for the caller to answer or
+// fall through. `first_byte`: seconds to wait for the first audio, 0 for
+// curl's own limits alone.
+static int SayRelayOnce(SayRelay *r, HTTPBodyStream *s, int client_fd,
+                        Arena *arena, SayProvider p, const char *auth,
+                        const char *text, const char *voice, bool pcm,
+                        int first_byte, CURLcode *rc_out) {
+  assert(r != NULL && s != NULL);
+  assert(client_fd >= 0);
+  assert(text != NULL && voice != NULL && auth != NULL);
+  assert(p != SAY_OFF);
+
+  char url[512];
   JSONBuf req;
   jsonbuf_init(&req, arena);
   jsonbuf_append(&req, "{\"text\":");
   jsonbuf_append_json_string(&req, text);
-  if (g_say.provider == SAY_DEEPGRAM) {
+  if (p == SAY_DEEPGRAM) {
     // mp3, so every browser plays it as it is; Deepgram's default would be
     // too, but saying so keeps a change of default from breaking the page.
     // PCM bare: container=none, or a WAV header leads the stream.
     if (pcm) {
       snprintf(url, sizeof(url),
-               "%s?model=%s&encoding=linear16&container=none&sample_rate=%d",
-               SAY_DEEPGRAM_URL, voice, SAY_PCM_RATE);
+               "%s" SAY_DEEPGRAM_SPEAK
+               "?model=%s&encoding=linear16&container=none&sample_rate=%d",
+               g_say.listen_base, voice, SAY_PCM_RATE);
     } else {
-      snprintf(url, sizeof(url), "%s?model=%s&encoding=mp3", SAY_DEEPGRAM_URL,
-               voice);
+      snprintf(url, sizeof(url),
+               "%s" SAY_DEEPGRAM_SPEAK "?model=%s&encoding=mp3",
+               g_say.listen_base, voice);
     }
   } else {
     // optimize_streaming_latency is deprecated; Flash is the low-latency
     // model, and 44.1kHz/128k mp3 the format every browser plays.
-    snprintf(url, sizeof(url), "%s%s/stream?output_format=%s",
-             SAY_ELEVENLABS_URL, voice, pcm ? "pcm_24000" : "mp3_44100_128");
+    snprintf(url, sizeof(url),
+             "%s" SAY_ELEVENLABS_SPEAK "%s/stream?output_format=%s",
+             g_say.eleven_base, voice, pcm ? "pcm_24000" : "mp3_44100_128");
     jsonbuf_append(&req, ",\"model_id\":\"" SAY_ELEVENLABS_MODEL "\"");
   }
   jsonbuf_append(&req, "}");
@@ -356,26 +469,29 @@ static int SayRelayText(int client_fd, Arena *arena, const char *text,
     return SendJSONError(client_fd, 503, "curl_easy_init failed");
   }
   LcarsCurlCA(curl); // a static build's CA bundle (lcars_curl_ca.h)
-  HTTPBodyStream s;
-  SayRelay r;
-  memset(&r, 0, sizeof(r));
-  r.curl = curl;
-  r.client_fd = client_fd;
-  r.s = &s;
-  r.type = pcm ? SAY_PCM_TYPE : "audio/mpeg";
+  memset(r, 0, sizeof(*r));
+  r->curl = curl;
+  r->client_fd = client_fd;
+  r->s = s;
+  r->type = pcm ? SAY_PCM_TYPE : "audio/mpeg";
+  r->headers = p == SAY_DEEPGRAM ? "Cache-Control: no-store\r\n"
+                                   "X-LCARS-Say: deepgram\r\n"
+                                 : "Cache-Control: no-store\r\n"
+                                   "X-LCARS-Say: elevenlabs\r\n";
+  r->first_byte = first_byte > 0 ? time(NULL) + first_byte : 0;
   struct curl_slist *headers =
       curl_slist_append(NULL, "Content-Type: application/json");
   headers =
       curl_slist_append(headers, pcm ? "Accept: */*" : "Accept: audio/mpeg");
-  headers = curl_slist_append(headers, g_say.auth);
+  headers = curl_slist_append(headers, auth);
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req.data);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)req.len);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, SayCurlWrite);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &r);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, r);
   curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, SayCurlProgress);
-  curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &r);
+  curl_easy_setopt(curl, CURLOPT_XFERINFODATA, r);
   curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, SAY_CONNECT_TIMEOUT_SECONDS);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, SAY_TIMEOUT_SECONDS);
@@ -384,50 +500,157 @@ static int SayRelayText(int client_fd, Arena *arena, const char *text,
   // Off the main thread: no SIGALRM for DNS timeouts (see lcars_embed.h).
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
   CURLcode rc = curl_easy_perform(curl);
-  if (r.http == 0) {
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &r.http);
+  if (r->http == 0) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &r->http);
   }
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
+  *rc_out = rc;
 
-  if (r.started) {
+  if (r->started) {
     // The audio has begun, so a failure can only cut it short: no final
     // chunk, and the client sees a truncated transfer.
-    bool complete = rc == CURLE_OK && !r.client_gone;
-    if (!complete && !r.client_gone) {
-      printf("Say: %s stopped mid-speech: %s\n",
-             SayProviderName(g_say.provider), curl_easy_strerror(rc));
+    bool complete = rc == CURLE_OK && !r->client_gone;
+    if (!complete && !r->client_gone) {
+      SayLog("Say: %s stopped mid-speech: %s\n", SayProviderName(p),
+             curl_easy_strerror(rc));
     }
-    HTTPStreamEnd(&s, complete);
+    HTTPStreamEnd(s, complete);
     return 200;
   }
-  if (r.client_gone) {
+  if (r->client_gone) {
     g_conn_keep_alive = false;
     return 499; // nginx's "client closed request"; only ever logged
   }
-  if (r.refused || (rc == CURLE_OK && r.http != 200)) {
+  if (r->refused || (rc == CURLE_OK && r->http != 200)) {
+    r->refused = true;
     // The provider's message is quoted back, since "401" alone does not say
     // whether the key or the voice was wrong. Sanitised to printable ASCII:
     // it goes into a JSON string by way of a format.
-    for (size_t i = 0; i < r.err_len; i++) {
-      if (r.err[i] < ' ' || r.err[i] > '~' || r.err[i] == '"' ||
-          r.err[i] == '\\') {
-        r.err[i] = ' ';
+    for (size_t i = 0; i < r->err_len; i++) {
+      if (r->err[i] < ' ' || r->err[i] > '~' || r->err[i] == '"' ||
+          r->err[i] == '\\') {
+        r->err[i] = ' ';
       }
     }
-    printf("Say: %s refused (HTTP %ld): %.200s\n",
-           SayProviderName(g_say.provider), r.http, r.err);
-    return SendJSONError(client_fd, 502, "%s answered HTTP %ld: %.200s",
-                         SayProviderName(g_say.provider), r.http, r.err);
+    return -1;
   }
   if (rc == CURLE_OK) {
     // 200 with an empty body: nothing to say, said.
-    return SendHTTPResponse(client_fd, 200, r.type, "", 0);
+    return SendHTTPResponse(client_fd, 200, r->type, "", 0);
   }
-  printf("Say: %s unreachable: %s\n", SayProviderName(g_say.provider),
-         curl_easy_strerror(rc));
-  return SendJSONError(client_fd, 502, "%s unreachable: %s",
-                       SayProviderName(g_say.provider), curl_easy_strerror(rc));
+  return -1;
+}
+
+// Why an attempt failed, in a few words for the log and the 502.
+static void SayWhy(const SayRelay *r, CURLcode rc, char *out, size_t cap) {
+  if (r->refused) {
+    bool quota = strstr(r->err, "quota_exceeded") != NULL;
+    snprintf(out, cap, "HTTP %ld%s", r->http, quota ? ", quota exceeded" : "");
+  } else if (r->slow) {
+    snprintf(out, cap, "no audio in %ds", SAY_FIRST_BYTE_SECONDS);
+  } else {
+    snprintf(out, cap, "%s", curl_easy_strerror(rc));
+  }
+}
+
+// Whether ElevenLabs' failure is one Deepgram should answer for: anything
+// but a 400 or 404 (the request itself wrong - an unknown voice - which
+// the page should hear about, not have papered over).
+static bool SayFallsThrough(const SayRelay *r) {
+  return !r->refused || (r->http != 400 && r->http != 404 && r->http != 422);
+}
+
+static int SayRelayText(int client_fd, Arena *arena, const char *text,
+                        const char *voice, bool pcm) {
+  assert(client_fd >= 0);
+  assert(text != NULL && voice != NULL);
+  assert(g_say.provider != SAY_OFF);
+
+  HTTPBodyStream s;
+  SayRelay r;
+  CURLcode rc = CURLE_OK;
+  char why[SAY_WHY_MAX];
+  bool fallback = g_say.provider == SAY_ELEVENLABS && g_say.grant_auth[0];
+  if (fallback) {
+    pthread_mutex_lock(&g_say.hold_lock);
+    time_t now = time(NULL), until = g_say.hold_until;
+    snprintf(why, sizeof(why), "%s", g_say.hold_why);
+    pthread_mutex_unlock(&g_say.hold_lock);
+    if (now < until) {
+      // remembered: straight to Deepgram, without asking ElevenLabs again
+      int st =
+          SayRelayOnce(&r, &s, client_fd, arena, SAY_DEEPGRAM, g_say.grant_auth,
+                       text, SayFallbackVoice(voice), pcm, 0, &rc);
+      if (st >= 0) {
+        SayLog("Say: elevenlabs held off (%s, %lds more), deepgram spoke "
+               "%zu chars\n",
+               why, (long)(until - now), strlen(text));
+        return st;
+      }
+      char dg[SAY_WHY_MAX];
+      SayWhy(&r, rc, dg, sizeof(dg));
+      SayLog("Say: elevenlabs held off (%s), deepgram failed too (%s): "
+             "%.200s\n",
+             why, dg, r.err);
+      return SendJSONError(client_fd, 502,
+                           "elevenlabs held off (%s); deepgram: %s: %.200s",
+                           why, dg, r.err);
+    }
+  }
+  int st =
+      SayRelayOnce(&r, &s, client_fd, arena, g_say.provider, g_say.auth, text,
+                   voice, pcm, fallback ? SAY_FIRST_BYTE_SECONDS : 0, &rc);
+  if (st >= 0) {
+    // A line a request: what the voice costs is counted in characters
+    // (ElevenLabs' credits, Deepgram's dollars), and the log is where the
+    // day's are added up.
+    if (st == 200) {
+      SayLog("Say: %s spoke %zu chars\n", SayProviderName(g_say.provider),
+             strlen(text));
+    }
+    return st;
+  }
+  SayWhy(&r, rc, why, sizeof(why));
+  if (!fallback || !SayFallsThrough(&r)) {
+    SayLog("Say: %s %s (%s): %.200s\n", SayProviderName(g_say.provider),
+           r.refused ? "refused" : "unreachable", why, r.err);
+    if (r.refused) {
+      return SendJSONError(client_fd, 502, "%s answered HTTP %ld: %.200s",
+                           SayProviderName(g_say.provider), r.http, r.err);
+    }
+    return SendJSONError(client_fd, 502, "%s unreachable: %s",
+                         SayProviderName(g_say.provider), why);
+  }
+  // Remembered when it will not mend at once: a quota, a key, a 429
+  int hold = !r.refused ? 0
+             : r.http == 401 || r.http == 402 || r.http == 403
+                 ? SAY_HOLD_QUOTA_SECONDS
+             : r.http == 429 ? SAY_HOLD_BUSY_SECONDS
+                             : 0;
+  if (hold) {
+    pthread_mutex_lock(&g_say.hold_lock);
+    g_say.hold_until = time(NULL) + hold;
+    snprintf(g_say.hold_why, sizeof(g_say.hold_why), "%s", why);
+    pthread_mutex_unlock(&g_say.hold_lock);
+  }
+  char el[SAY_ERR_BODY_MAX + 1];
+  snprintf(el, sizeof(el), "%s", r.err);
+  st = SayRelayOnce(&r, &s, client_fd, arena, SAY_DEEPGRAM, g_say.grant_auth,
+                    text, SayFallbackVoice(voice), pcm, 0, &rc);
+  if (st >= 0) {
+    SayLog("Say: elevenlabs refused (%s), deepgram spoke %zu chars%s\n", why,
+           strlen(text), hold ? "; elevenlabs held off a while" : "");
+    return st;
+  }
+  char dg[SAY_WHY_MAX];
+  SayWhy(&r, rc, dg, sizeof(dg));
+  SayLog("Say: elevenlabs refused (%s): %.200s; deepgram failed too (%s): "
+         "%.200s\n",
+         why, el, dg, r.err);
+  return SendJSONError(client_fd, 502,
+                       "elevenlabs: %s: %.120s; deepgram: %s: %.120s", why, el,
+                       dg, r.err);
 }
 
 static int HandleSay(int client_fd, Arena *arena, const char *method,

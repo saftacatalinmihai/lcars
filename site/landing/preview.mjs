@@ -27,6 +27,12 @@ function headerRules() {
   return rules;
 }
 const RULES = headerRules();
+// the manual's __VERSION__ (deploy.sh: the console's APP_VERSION), read once
+const APP_VERSION = (() => {
+  try {
+    return /^const APP_VERSION = "([0-9.]+)";$/m.exec(fs.readFileSync(path.join(HERE, "../../lcars-ui/index.html"), "utf8"))[1];
+  } catch { return "0.0.0"; }
+})();
 
 const ASSETS = {
   async fetch(req) {
@@ -42,7 +48,8 @@ const ASSETS = {
     // and __EXPLAINER__ with the cut's R2 URL; the preview with the local copy
     // at public/video/explainer.mp4 (ignored), so it plays and no test reaches the bucket
     if (file.endsWith(".html"))
-      data = data.toString("utf8").replaceAll("__SITE__", new URL(req.url).origin).replaceAll("__EXPLAINER__", "/video/explainer.mp4");
+      data = data.toString("utf8").replaceAll("__SITE__", new URL(req.url).origin).replaceAll("__EXPLAINER__", "/video/explainer.mp4")
+        .replaceAll("__VERSION__", APP_VERSION);
     return new Response(data, { status, headers: h });
   },
 };

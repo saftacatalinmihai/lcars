@@ -264,6 +264,9 @@ def chat_checks(s, root, files):
               not [a for a in allowed if a.startswith("Read") and a != f"Read(/{real}/media/chat/**)"],
               "allowed only on <root>/media/chat/**, absolute (//): %s" % [a for a in allowed if "Read" in a])
         check(argv[argv.index("--disallowedTools") + 1] == "Read(./**)", "and denied in the working directory")
+        denied = argv[argv.index("--disallowedTools") + 1:argv.index("--permission-mode")]
+        check(denied == ["Read(./**)", "Read(~/.env)", "Read(~/.config/lcars/**)"],
+              f"~/.env and ~/.config/lcars denied by name (got {denied})")
         prompt = argv[argv.index("--append-system-prompt") + 1]
         check("Attached file:" in prompt and "Read tool" in prompt, "the system prompt says so")
         check("The person typing is the journal's owner, Ana, usually on a phone." in prompt,

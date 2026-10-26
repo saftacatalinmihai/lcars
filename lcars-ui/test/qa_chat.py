@@ -662,7 +662,7 @@ def talk_pass(b):
     b.tap(".chth .chvoice")
     check(b.ev("() => document.querySelector('.chth .chvoice').getAttribute('aria-pressed')") == "true" and vis("#talkptt") and vis("#talkconv"),
           "talk: a tap turns it on at once, and the talk row shows Hold to talk and Start conversation")
-    check(b.ev("() => localStorage.getItem('lcars.chat.voice')") == "true", "talk: remembered (lcars.chat.voice)")
+    check(b.ev("() => JSON.parse(localStorage.getItem('lcars.chat.voice')).on") is True, "talk: remembered (lcars.chat.voice, with the time)")
     check(not b.ev("() => document.querySelector('#toast').classList.contains('on')"),
           f"talk: no toast over the box, the pill and the row say it ({b.toast()!r})")
     wide = b.ev("() => [document.documentElement.scrollWidth, innerWidth, ...['#talkptt', '#talkconv', '.chth .chvoice', '.chth .chsend']"

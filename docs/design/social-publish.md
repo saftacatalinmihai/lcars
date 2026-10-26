@@ -6,8 +6,10 @@ the accounts, the blog post plan's dates) are in
 
 Status: slice 1 built (0.296.0, 2026-10-22): the Share sheet with the
 hand route, `social_post` pages-only, the limits table in
-`scripts/publish_net/limits.json`. Slices 2 on wait on the captain's
-accounts (section 6). Design 2026-10-21. Asked by Number One for the
+`scripts/publish_net/limits.json`. Slice 2 built (2026-10-23): the
+publisher, Mastodon and Bluesky, dry run until `LCARS_PUB_DRY=0`; "As
+built" under section 5 says where it differs from 3. The captain's
+answers are in section 6. Design 2026-10-21. Asked by Number One for the
 captain (thread social-login): "a way to automate posting to x, reddit,
 linkedin, HN, mastodon, bluesky, and any other platforms that you think
 would be useful for us".
@@ -44,7 +46,8 @@ drafted replies (social-watch.md 2.4) would use.
   far above a person's posting.
 - Login: no OAuth dance needed. In his instance's Preferences,
   Development, New application, scopes `write:statuses write:media
-  read:notifications` (the last for the watch, 3.5), and the page shows
+  profile read:notifications` (`profile` for `publish.py check`'s
+  verify_credentials, the last for the watch, 3.5), and the page shows
   "Your access token". alexandru/social-publish does the same (2.1).
 - Terms: an instance's own rules; automated posting of one's own posts is
   normal on Mastodon (the bot flag is for accounts that are *only*
@@ -377,8 +380,8 @@ built), a sheet over the entry:
    else none), the image (the entry's first photo, with its alt text from
    the entry's caption, editable), and the base text (the entry's
    title and first paragraph, editable). For a blog post the link's og:
-   title, description and image are fetched once by the server (`GET
-   /publish/card?url=`, the same reader the publisher uses) and shown as
+   title, description and image are fetched once by the server (`POST
+   /publish/card` {url}, the same reader the publisher uses) and shown as
    the card each network will show.
 2. **Where**: a chip per network. A network whose credentials are set is
    a toggle; one without is greyed with its note ("Mastodon: no token in
@@ -641,10 +644,10 @@ Each is one engineer's order, built, tested and deployed on its own.
    hand post as a `task_crew_social` with a due time; the voice orders;
    tests.js, logins.py, buttons.py, keyboard.py. Nothing is posted by
    the ship. Ready for Thursday and Tuesday.
-2. **The publisher, Mastodon and Bluesky** (~40 min): `scripts/publish.py`
+2. **The publisher, Mastodon and Bluesky** (~40 min; built 2026-10-23): `scripts/publish.py`
    with the provider shape, the two providers, `check`, dry run, the
    records, once-per-text, caps; `lcars_publish.h`'s `POST /publish/<id>`
-   and `GET /publish/card`; the sheet's Post buttons and their states;
+   and `POST /publish/card`; the sheet's Post buttons and their states;
    `GET /features` entries; the agents' deny rules; test_publish.py,
    test/publish.py. After it he posts to both with a tap.
 3. **Scheduled posts** (~25 min): `approved:` with hashes, `crew/publish.md`
@@ -669,7 +672,49 @@ Each is one engineer's order, built, tested and deployed on its own.
 HN has no slice: it is the hand route of slice 1, for good. Threads,
 Lemmy, Discord and Telegram wait for a reason (1.7, 1.8, 1.10).
 
+### As built: slice 2
+
+Where the code differs from section 3, and the choices 3 left open:
+
+- **One Post per card, no Post to N.** Each card with a publisher has
+  Post and Dry run; "computer, post it" (and "dry run") presses every
+  checked card's, "post to bluesky" one. A Post to N button would be a
+  second way to do what the voice order does, and a card's own Post
+  shows its own state (posting, posted, Retry) where the eye is.
+- **The hash is SHA-256 of the exact text sent** (the body with its
+  link). Once per text is that hash in a `crew_social_post` record with
+  a posted status; it is also Mastodon's `Idempotency-Key`, and slice
+  3's approval will hash the same bytes.
+- **Bluesky has no idempotency key**, so a retry after a failed attempt
+  first reads his own feed (getAuthorFeed) for the same text, and
+  answers `already` if it is there. Its session is made once and kept
+  0600 in `~/.config/lcars/publish-bluesky.json`, refreshed when it
+  expires; a dry run makes none.
+- **Dry runs do not count toward the cap** (5 posted a day per network,
+  in the captain's zone).
+- **A picture must be the journal's own media**: publish.py reads it
+  from the server only, never from a link.
+- **The card is `POST /publish/card` {url}**, not `GET ?url=`: the
+  server's request line keeps 255 bytes of the target, and a shortened
+  link would read another page's card. publish.py reads it from public
+  hosts only, every redirect checked again (no private, tailnet or
+  link-local address).
+- **Post is off until `/features` answers** with the network on; Open
+  is never off for it. The dry switch is the server's environment
+  (`LCARS_PUB_DRY=0` in `~/.env` and a restart turns it off), shown on
+  the card as "Dry runs only".
+- **The agents cannot read the credentials**: the chat's claude is
+  started without `LCARS_PUB_*` and denied `Read(~/.env)` and
+  `Read(~/.config/lcars/**)`; crew.py's roles and Number One's settings
+  deny Read, Edit and Write on both.
+
 ## 6. The captain's decisions
+
+Answered 2026-10-23 (Number One's ask 9357): Mastodon and Bluesky, both
+by the publisher (the accounts are in social-publish.local.md); a dry
+run first (`LCARS_PUB_DRY` unset is dry, a week, then `=0`); 5 a day per
+network; X, LinkedIn and HN by hand (Open); Reddit waits for Reddit's
+approval; dev.to drafts a later slice. The questions as they were asked:
 
 1. **The networks**: which accounts he has and wants. Mastodon: which
    instance and handle? Bluesky: which handle? (Neither is known to the

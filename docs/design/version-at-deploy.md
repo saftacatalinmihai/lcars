@@ -96,6 +96,18 @@ In `do_deploy`, under `deploy.lock`, in place of today's bare `git rebase`:
 The engineer's branch after a deploy is the stamped one, as their branch
 is the rebased one today. Their next order finds it at main.
 
+**A deploy that fails after the rebase puts the branch back** (25 Oct
+2026): the web suite, the checks, the merge or the rebuild failing left
+the branch rebased and numbered, and its next deploy refused the stamp's
+own `APP_VERSION` as one set by hand. `do_deploy` keeps the branch's ref
+before the rebase (`branch_before` in the deploy's state, and a line in
+the log) and, on any failure after it, resets the branch there
+(`restore_branch`); the failure message says so (`eng/x is put back at
+a1b2c3d4, as it was before the deploy`), or that it could not be, to be
+done by hand. A retry then rebases and numbers afresh. The reset was
+chosen over teaching the pre-check to accept the deploy's own stamp:
+the branch is the engineer's, and one state is simpler to reason about.
+
 ## A real conflict
 
 Anything the driver will not take (an old entry edited on both sides),
@@ -184,3 +196,182 @@ engineer's branch, and main moves only in `land_commits`.
 | 1 | `version-stamp.py`, `changelog-merge.py`, `.gitattributes`, `do_deploy`'s floor, rebase `-x` and checks, the outcome's number; `test_version_stamp.py` (patch, ops) | 30 min |
 | 2 | `test/version.py` in run.sh, the explainer's `+` and `deliver.sh`'s refusal, `export-public.py`'s refusal (patch) | 15 min |
 | 3 | the rules: CLAUDE.md, `brief_seat`, `brief_no1`, the switch-over (patch; the first commit written the new way) | 10 min |
+
+## As built: slice 1 (0.299.1)
+
+The captain approved the build (ask 9819), switching over in one deploy,
+with no explainer re-render per deploy.
+
+- **`scripts/version-stamp.py`**, run by `git rebase -x` (an up-to-date
+  branch is replayed too: `-x` always runs). Its decision is `plan(new,
+  old, floor)` (pure): the headings the commit added are the ones above
+  HEAD^'s, matched from the bottom (two entries can carry one heading:
+  two branches that picked the same number the old way). Numbered as the
+  design says. An old-style number above `max(floor, the one below)` is
+  kept with its date; one not above is renumbered (minor if it ends .0)
+  and dated today. The day is `LCARS_TZ`'s (the captain's). Refused (the
+  rebase stops; the deploy aborts it and the failure says why: `could not
+  be numbered: <sha>: ...`): two entries in a commit, a kind other than
+  patch or minor, a heading that is neither, a placeholder below a
+  number, an entry below the top added, changed or moved. **Not refused
+  yet: `APP_VERSION` edited by hand.** Every commit made the old way
+  does that, and the stamp overwrites it anyway. Until slice 3's
+  switch-over, two branches that both moved it still conflict on
+  index.html at rebase, as before.
+- **`scripts/changelog-merge.py`.** The rule changed from the design's.
+  In a rebase, "ours" is main *plus the branch's earlier commits*,
+  already stamped. Their entries sit above main's, and their headings
+  changed (`next minor` became `0.6.0`), so "both sides only stack on
+  top of the base" does not hold for a branch of two commits. The
+  driver's rule instead: theirs (the commit replayed) may only have put
+  entries on top of the base, with the base's headings in order below
+  them. Ours is taken whole. Theirs' new entries go on top of it (one
+  already in ours, by its text, is dropped). An old entry theirs edited
+  is carried into ours if ours still has it as the base had it, and is a
+  conflict if ours changed it too - except when ours changed only its
+  heading (one entry of ours, not an old one, with the base's text under
+  another heading) and theirs only its text: that is a review-fix commit
+  editing the branch's own entry, which the replay of the earlier commit
+  has numbered, and ours' heading goes over theirs' text (as git's own
+  merge would: separate hunks). Exit 1 runs `git merge-file`, so the
+  markers are git's own.
+- **A commit that adds no entry** has its subject's mark mended: `(patch)`
+  or an old-way `(X.Y.Z)` would otherwise go into the history as a
+  stale or another branch's version. It takes the branch's current top
+  when that is one of the branch's own (above the floor), else the mark
+  is dropped; `versions_in` lists each version once. The heading is
+  found on its own line (`^## <h>$`), never in a mention in the preamble.
+  The stamp's `LCARS_TZ` is the deploy's environment's, else `~/.env`'s
+  (`stamp_env`, by `setting()`), as the server's unit reads it.
+- **The deploy** (`do_deploy`): `version_floor(lb)` (main's top, and
+  every `versions` in deploys.jsonl), `changelog_driver()` (sets
+  `merge.lcars-changelog.driver` to the live checkout's script, by
+  absolute path, so a worktree whose tree predates the script still gets
+  it; idempotent), the rebase with `LCARS_VERSION_FLOOR`, its output in
+  the deploy log, and `version_check` before the web suite. The check
+  wants: no placeholder; numbered headings strictly falling; and, if the
+  branch changed the top, the top above the floor and equal to
+  `APP_VERSION`. A branch that added no entry passes, as before. The
+  outcome: `deployed <name> as <v>[, <v>]: ...`, oldest first, from
+  `versions_in` of the landed subjects.
+- **`.gitattributes`**: `CHANGELOG.md merge=lcars-changelog`.
+- **Tests**: `scripts/test_version_stamp.py` (25 tests, ~5 s). The
+  plan; the driver (both orders, one-sided edits, the conflicts and
+  their markers); and `do_deploy` end to end on a scratch live checkout
+  with two worktrees: two placeholder branches from one main (one of
+  them two commits, minor then patch), with and without the engineer's
+  own rebase; the old way colliding and renumbered; a rolled-back floor;
+  a real conflict and a refused stamp, each leaving the branch as it
+  was; the checks; the config set once; a review fix editing the
+  branch's own entry (a placeholder, and an old-way number renumbered,
+  each with and without the engineer's own rebase), behind a commit with
+  a stale mark; the zone read from `~/.env`.
+
+## As built: slice 2 (0.299.4)
+
+- **`lcars-ui/test/version.py`**, run.sh's version check (its inline
+  grep retired). `check(changelog, page, commits)` is pure: numbered
+  (the top equal to `APP_VERSION`: `ok (0.299.2)`), or placeholders on
+  top with `APP_VERSION` left at the number below them (`ok (0.299.2 +
+  next patch, numbered at deploy)`). Fails: a placeholder below a
+  number, a kind other than patch or minor, a top that is neither, and
+  `APP_VERSION` moved under a placeholder. With a base (`--base`, run.sh
+  passes `CHANGED_BASE`, default main; none in a fresh clone: skipped),
+  each commit since the merge base and the worktree's change may add one
+  entry at most, as the stamp numbers them. Self-contained, not an
+  import of the stamp: it ships in the public tree's run.sh.
+- **The explainer**: `version.mjs`'s `appVersion()` and `page.py`'s
+  `VERSION` add `+` when CHANGELOG.md's top is a placeholder;
+  `deliver.sh` refuses such a tree before anything is encoded
+  ("deliver after the deploy has numbered this tree").
+- **`export-public.py`** refuses a placeholder anywhere in CHANGELOG.md
+  before it writes DEST; `--audit-only` still runs on a branch.
+- **Tests**: test_version_stamp.py's `Check` (the shapes and failures,
+  two entries in a commit, the explainer's `+` through node and
+  deliver.sh's refusal in a scratch tree) and test_export.py's placeholder
+  case.
+
+## As built: slice 3
+
+- **The rules**: CLAUDE.md's "`CHANGELOG.md` holds the version, and the
+  deploy gives it", CHANGELOG.md's own preamble, `brief_seat` (the
+  placeholder entry, "patch, unnumbered" in a report before the deploy,
+  the number from `[deploy finished]` after it) and `brief_no1` (review
+  for a placeholder of the right kind; `[deploy finished]` names the
+  number). They reach a session from its next start after the deploy:
+  `do_deploy` runs the live checkout's `engineer.py`.
+- **The stamp runs only in the deploy's rebase.** It used to take no
+  arguments: an engineer ran `version-stamp.py --help` to read its usage,
+  and it numbered their placeholder against a floor of 0.0.0 (0.299.5) and
+  amended the commit (4a9468f, reported as "a hook wrote it"; there is no
+  hook). Now any argument prints the docstring and changes nothing (exit
+  0 for `--help`, 2 otherwise), and with no `LCARS_VERSION_FLOOR` or no
+  rebase in progress (`git rev-parse --git-path rebase-merge`) it says so
+  and exits 2.
+- **The switch-over's refusal**, before the rebase: `hand_set_versions`
+  (engineer.py, by the stamp's `hand_set`) walks the branch's commits, and
+  one that adds a placeholder and moves `APP_VERSION` fails the deploy
+  with `<sha> sets APP_VERSION by hand under a placeholder: leave it, the
+  deploy numbers it`, the branch untouched. It is put back in that commit
+  (amended, or rebased): a later commit undoing it would still conflict
+  when the first is replayed over a main that moved the line. An old-way
+  commit (its own number, `APP_VERSION` set to it) is not refused: the
+  stamp renumbers it, and two of them at different numbers still conflict
+  on index.html as before. The design's alternative, resetting the line on
+  the branch before the rebase, was not built: it rewrites the engineer's
+  commits outside the deploy's one rebase, and after the briefs change no
+  one writes the old way.
+- **Tests**: test_version_stamp.py's `Deploys` - the stamp by hand
+  (`--help`, an unknown argument, no floor, a floor and no rebase: HEAD,
+  the tree and the placeholder unchanged; the deploy then numbering it),
+  and the refusal (the sha named, the branch as it was, put back by an
+  amend and landed; an old-way branch passing the check).
+
+## As built: fragments (2026-10-24)
+
+Number One's order, the captain's word: parallel engineers must not
+conflict on files they both only append to. The placeholder still had
+every branch edit the top of CHANGELOG.md (the merge driver took most of
+it, but a branch had to rebase through it) and TODO.md collided outright.
+
+- **The fragment.** An engineer never edits CHANGELOG.md. A commit that
+  needs an entry adds `changelog.d/<name>-<slug>.md`: first line `minor`
+  or `patch`, then the entry's text. `changelog.d/README.md` says the
+  format, and is never a fragment (a fragment's name is lowercase
+  `[a-z0-9][a-z0-9._-]*.md`).
+- **The stamp** (version-stamp.py, still the rebase's `-x`): after the
+  placeholder (numbered first, as before), each fragment the commit
+  *added*, in name order, becomes `## X.Y.Z — <today>` with its text on
+  top of CHANGELOG.md, X.Y.Z = bump(max(floor, the top number), kind);
+  `APP_VERSION` and the subject take the highest given. The fragment is
+  **not** deleted in that commit: a later commit of the branch that edits
+  it (a review fix) must still apply in the replay. A fragment *edited*
+  replaces its section's text, its number kept; one *deleted* takes its
+  section out (and `APP_VERSION` follows the top down). Which section is
+  whose is the rebase's own record, `lcars-fragments.json` in git's
+  `rebase-merge` directory, gone with the rebase.
+- **The finish** (`finish`, called by `do_deploy` right after the rebase,
+  before `version_check`): every fragment in the branch's tree that the
+  live branch lacks is `git rm`'d and the last commit amended. What lands
+  holds none; `version_check` fails a deploy that would leave one.
+- **Two fragments at once** are numbered in turn: two in one commit by
+  name, two in two commits by commit, two branches by deploy. A fragment
+  and a placeholder, either order, either commit, number in turn.
+- **The transition.** The placeholder is retired but still numbered; both
+  shapes pass `lcars-ui/test/version.py`, the explainer and
+  `export-public.py` treat a fragment as unnumbered as they do a
+  placeholder. `hand_set` refuses a commit adding a fragment and moving
+  `APP_VERSION`, as it does a placeholder.
+- **TODO.md** merges with git's built-in `union` driver
+  (`.gitattributes`): both sides' added lines kept, order not
+  guaranteed. A rebase uses merge drivers, the deploy's included
+  (`test_todo_items_at_one_place_both_land`).
+- **Tests**: test_version_stamp.py - a fragment alone; two from one main
+  across two branches, and two in one commit; a fragment plus a
+  placeholder (both orders, and in one commit); a review fix editing the
+  fragment and a later commit deleting another; a bad one (kind, no text)
+  failing the deploy with the branch as it was; `APP_VERSION` set by hand
+  with one; one left failing the check, the README not one; TODO.md's
+  items from two branches at one place. `Check.test_fragments` for
+  run.sh's check, test_export.py's `test_a_fragment_refused`.
+

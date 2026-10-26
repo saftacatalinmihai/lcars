@@ -59,31 +59,36 @@ case("C only", {"lcars_http.h": [], "lcars.c": []}, [], advice=["make check", "t
 case("the deck", {"lcars-ui/deck.html": []}, ["deck"])
 case("the behaviour suite's tests", {"lcars-ui/test/tests.js": []}, ["behaviour"])
 case("keyboard.py", {"lcars-ui/test/keyboard.py": []}, ["keyboard"])
-case("perf.py", {"lcars-ui/test/perf.py": []}, ["perf"], only=[])
+case("targets.py", {"lcars-ui/test/targets.py": []}, ["screens"])
+case("axe.py", {"lcars-ui/test/axe.py": []}, ["screens"])
+case("perf.py", {"lcars-ui/test/perf.py": []}, ["perf", "screens"], only=[])
+case("rules.py, whose CASE_OK targets.py reads", {"lcars-ui/test/rules.py": []}, ["audit", "screens"])
+case("ui-rules.md", {"docs/design/ui-rules.md": []}, ["audit"])
+case("synth.py", {"lcars-ui/test/synth.py": []}, ["perf"], only=[])
 case("the course", {"lcars-ui/index.html": [(line_in("plot a course"), line_in("plot a course"))]},
-     ["audit", "behaviour", "keyboard", "perf"], only=["course-zoom", "course-turn"])
+     ["audit", "behaviour", "keyboard", "screens", "perf"], only=["course-zoom", "course-turn"])
 case("the calendar: no frame measured", {"lcars-ui/index.html": [(line_in("the calendar"),) * 2]},
-     ["audit", "behaviour", "keyboard"], advice=["test/dates.sh"])
+     ["audit", "behaviour", "keyboard", "screens"], advice=["test/dates.sh"])
 case("the editor", {"lcars-ui/index.html": [(line_in("editor"),) * 2]},
-     ["audit", "behaviour", "keyboard", "perf"], only=["morph", "morph-desktop", "open", "type"], advice=["test/editor.py"])
+     ["audit", "behaviour", "keyboard", "screens", "perf"], only=["morph", "morph-desktop", "open", "type"], advice=["test/editor.py"])
 case("a chat's style", {"lcars-ui/index.html": [(line_in("one chat", "css"),) * 2]},
-     ["audit", "behaviour", "keyboard", "perf"], only=["chat-thread", "eng-thread"], advice=["test/qa_chat.py"])
+     ["audit", "behaviour", "keyboard", "screens", "perf"], only=["chat-thread", "eng-thread"], advice=["test/qa_chat.py"])
 case("the engineers", {"lcars-ui/index.html": [(line_in("engineers"),) * 2]},
-     ["audit", "behaviour", "keyboard", "perf"], only=["eng-thread"], advice=["test/back.py"])
+     ["audit", "behaviour", "keyboard", "screens", "perf"], only=["eng-thread", "rooms-room"], advice=["test/back.py"])
 case("the speech queue, inside voice in the chats", {"lcars-ui/index.html": [(line_in("speech queue"),) * 2]},
-     ["audit", "behaviour", "keyboard"], advice=["test/speech.py"])
+     ["audit", "behaviour", "keyboard", "screens"], advice=["test/speech.py"])
 case("a shared helper: all of perf", {"lcars-ui/index.html": [(line_in("helpers"),) * 2]},
-     ["audit", "behaviour", "keyboard", "perf"], only=[])
+     ["audit", "behaviour", "keyboard", "screens", "perf"], only=[])
 case("two areas at once", {"lcars-ui/index.html": [(line_in("plot a course"),) * 2, (line_in("engineers"),) * 2]},
-     ["audit", "behaviour", "keyboard", "perf"], only=["course-zoom", "course-turn", "eng-thread"])
+     ["audit", "behaviour", "keyboard", "screens", "perf"], only=["course-zoom", "course-turn", "eng-thread", "rooms-room"])
 case("the page and the deck", {"lcars-ui/index.html": [(line_in("stats"),) * 2], "lcars-ui/deck.html": []},
-     ["deck", "audit", "behaviour", "keyboard"])
+     ["deck", "audit", "behaviour", "keyboard", "screens"])
 case("the page, untracked or whole", {"lcars-ui/index.html": None},
-     ["audit", "behaviour", "keyboard", "perf"], only=[])
+     ["audit", "behaviour", "keyboard", "screens", "perf"], only=[])
 case("run.sh itself: the full run", {"lcars-ui/test/run.sh": [], "README.md": []},
-     ["deck", "audit", "behaviour", "keyboard", "perf"], only=[])
+     ["deck", "audit", "behaviour", "keyboard", "screens", "perf"], only=[])
 case("a new UI file nobody knows: the full run", {"lcars-ui/foo.js": None},
-     ["deck", "audit", "behaviour", "keyboard", "perf"], only=[])
+     ["deck", "audit", "behaviour", "keyboard", "screens", "perf"], only=[])
 case("a check outside run.sh: itself, by hand", {"lcars-ui/test/qa_chat.py": []}, [], advice=["test/qa_chat.py"])
 case("the deck's crew models", {"lcars-ui/crew/male.glb": None}, ["deck"])
 case("sw.js: the quick checks, and offline.py and update.py by hand", {"lcars-ui/sw.js": []}, [],

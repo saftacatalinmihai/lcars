@@ -149,8 +149,8 @@ class From(unittest.TestCase):
                          {"from": "ship", "tag": "job"})
         # the thread survives the poll's cut (thread_marks), the fields too
         ev = E.events_of(user(pasted("[thread deck]\n[seat] relieved")))
-        res, _ = E.thread_marks(ev)
-        self.assertEqual((res[0]["th"], res[0]["from"], res[0]["t"]), ("deck", "ship", "[seat] relieved"))
+        res, _ = E.room_marks(ev)
+        self.assertEqual((res[0]["room"], res[0]["from"], res[0]["t"]), ("deck", "ship", "[seat] relieved"))
 
     def test_real_line(self):
         self.assertEqual(froms(REAL), [{"from": "ship", "tag": "crew", "who": "okafor-c30"}])
@@ -219,9 +219,9 @@ class Keys(unittest.TestCase):
 
     def test_a_split_event_keeps_keys_apart(self):
         ev = {"r": "them", "t": "Done.\n\n[thread deck]\nAnd the deck.", "k": "s:9:0", "at": 1.0}
-        res, _ = E.thread_marks([ev])
-        self.assertEqual([(e["th"], e["k"]) for e in res], [("main", "s:9:0.0"), ("deck", "s:9:0.1")])
-        self.assertEqual(E.thread_marks([dict(ev, t="One.")])[0][0]["k"], "s:9:0")
+        res, _ = E.room_marks([ev])
+        self.assertEqual([(e["room"], e["k"]) for e in res], [("main", "s:9:0.0"), ("deck", "s:9:0.1")])
+        self.assertEqual(E.room_marks([dict(ev, t="One.")])[0][0]["k"], "s:9:0")
 
 
 if __name__ == "__main__":

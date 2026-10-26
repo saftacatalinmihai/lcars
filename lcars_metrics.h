@@ -8,6 +8,7 @@
 //   lcars_reading{kind}                    the latest reading of each kind
 //   lcars_reading_timestamp_seconds{kind}  when it was measured (unix time)
 //   lcars_entries_total{kind}              live entries of each kind
+//   (and the crew's, below)
 //
 // A reading is exactly what the web UI's reading()/measureSeries() call one
 // (index.html): a live row whose value_float is non-zero, else whose
@@ -34,6 +35,24 @@
 //
 // lcars_entries_total is a gauge despite the _total the order named it by:
 // a deleted row makes it go down, which a counter may not.
+//
+// And the crew's numbers - the seat, the job line, the deploys
+// (scripts/eng_metrics.py, docs/ops/seat-metrics.md): engineer.py renders
+// them at each event into a Prometheus text file, and this appends that file
+// as it stands, as node_exporter's textfile collector does, after
+//
+//   lcars_eng_metrics_timestamp_seconds    the file's mtime (unix time)
+//
+// so a file nobody has written lately shows its age in Grafana (time() -
+// it) rather than a flat line of last week's values; reap rewrites it every
+// five minutes. The file is $LCARS_ENG_METRICS, else metrics/metrics.prom
+// under $LCARS_ENG_STATE, else under ~/.local/state/lcars-eng (engineer.py's
+// own rule); LCARS_ENG_METRICS set empty turns it off. A box with no crew
+// has no file, and /metrics is the journal's alone: no timestamp either, so
+// absent() tells the two apart. The file is ours, rendered whole and renamed
+// into place, so it is passed through unparsed - only bounded in size
+// (METRICS_ENG_MAX: an arena's request must not be one file's to fill) and
+// given its final newline.
 //
 // Who may read it: the rule of the web UI and the media files - loopback
 // (Alloy on the box, and tailscale serve) without a password, the public
@@ -298,6 +317,86 @@ static bool MetricsReadings(sqlite3_stmt *rs, JSONBuf *b, bool stamps) {
   return rc == SQLITE_DONE;
 }
 
+// The crew's metrics file, at most this many bytes; a bigger one is skipped
+// (and said in the log) rather than cut, since a cut line breaks the scrape.
+// eng_metrics.py's whole render is ~30KB.
+#define METRICS_ENG_MAX (256 * 1024)
+
+// The path of the crew's file into buf, or false when it is turned off or
+// does not fit.
+static bool MetricsEngPath(char *buf, size_t n) {
+  assert(buf != NULL && n > 0);
+  const char *p = getenv("LCARS_ENG_METRICS");
+  int w;
+  if (p != NULL) {
+    if (*p == '\0') {
+      return false;
+    }
+    w = snprintf(buf, n, "%s", p);
+  } else if ((p = getenv("LCARS_ENG_STATE")) != NULL && *p != '\0') {
+    w = snprintf(buf, n, "%s/metrics/metrics.prom", p);
+  } else if ((p = getenv("HOME")) != NULL && *p != '\0') {
+    w = snprintf(buf, n, "%s/.local/state/lcars-eng/metrics/metrics.prom", p);
+  } else {
+    return false;
+  }
+  return w > 0 && (size_t)w < n;
+}
+
+// Appends the crew's file, under its timestamp, when there is one to read.
+static void MetricsAppendEng(JSONBuf *out) {
+  assert(out != NULL);
+  char path[PATH_MAX];
+  if (!MetricsEngPath(path, sizeof(path))) {
+    return;
+  }
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    return; // no crew here, or not yet: the journal's numbers alone
+  }
+  struct stat sb;
+  if (fstat(fd, &sb) != 0 || !S_ISREG(sb.st_mode)) {
+    close(fd);
+    return;
+  }
+  if (sb.st_size > METRICS_ENG_MAX) {
+    fprintf(stderr, "metrics: %s is %lld bytes, over %d: skipped\n", path,
+            (long long)sb.st_size, METRICS_ENG_MAX);
+    close(fd);
+    return;
+  }
+  jsonbuf_append(out, "# HELP lcars_eng_metrics_timestamp_seconds When the "
+                      "crew's metrics file was last written.\n"
+                      "# TYPE lcars_eng_metrics_timestamp_seconds gauge\n");
+  jsonbuf_appendf(out, "lcars_eng_metrics_timestamp_seconds %lld\n",
+                  (long long)sb.st_mtime);
+  // read to the end, bounded: the file is replaced by rename, never
+  // rewritten in place, so this descriptor's bytes are one whole render
+  char chunk[16384];
+  size_t total = 0;
+  char last = '\n';
+  ssize_t r;
+  while (total < METRICS_ENG_MAX &&
+         (r = read(fd, chunk,
+                   sizeof(chunk) < METRICS_ENG_MAX - total
+                       ? sizeof(chunk)
+                       : METRICS_ENG_MAX - total)) != 0) {
+    if (r < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    jsonbuf_append_len(out, chunk, (size_t)r);
+    total += (size_t)r;
+    last = chunk[r - 1];
+  }
+  close(fd);
+  if (last != '\n') {
+    jsonbuf_append(out, "\n");
+  }
+}
+
 static int HandleMetrics(int client_fd, Arena *arena, const char *method) {
   assert(client_fd >= 0);
   assert(arena_valid(arena));
@@ -359,6 +458,9 @@ static int HandleMetrics(int client_fd, Arena *arena, const char *method) {
     jsonbuf_appendf(&out, "\"} %lld\n", (long long)sqlite3_column_int64(cs, 1));
   }
   ok = ok && rc == SQLITE_DONE;
+  if (ok) {
+    MetricsAppendEng(&out);
+  }
 
   int status;
   if (!ok) {

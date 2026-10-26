@@ -4,13 +4,19 @@
     no1.py crew list
     no1.py crew etas                            every engineer's estimates against the clock, as JSON
     no1.py crew poll <name>                     status and the tail of their conversation
-    no1.py crew say <name> [--fresh] "<order>"  typed into their session as "[No.1] <order>";
-                                                --fresh: into a cleared conversation (a new task)
+    no1.py crew say <name> [--fresh] [--room <id>] "<order>"
+                                                typed into their session as "[No.1] <order>";
+                                                --fresh: into a cleared conversation (a new task);
+                                                --room: filed in that room (open, or main) and
+                                                their report back there, as if your turn had
+                                                started in it - a project's room, wherever the
+                                                captain talks to you about it (without it: your
+                                                turn's room)
     no1.py crew key <name> <1-9|enter|esc|up|down|tab>
     no1.py crew clear <name>                    a fresh conversation, before a new unrelated task
     no1.py crew start <name> "<Rank Name>" ["<who they are>"]
     no1.py crew diff <name>                     their commits, stat and diff against the live branch
-    no1.py crew deploy <name>
+    no1.py crew deploy <name> [--room <id>]     its [deploy finished]/[deploy failed] to that room
     no1.py crew deploy-status
     no1.py crew rollback                        only on the captain's word
     no1.py crew stop|dismiss|recall <name>
@@ -26,6 +32,12 @@
                                                 write FILE over a published report (rel-path as
                                                 report.py list gives it): the same link, and one
                                                 no1_log line "Report updated: <title>"
+    no1.py report - "<title>" ["<note>"] --as NAME.EXT
+    no1.py report --update <rel-path> - --as NAME.EXT ["<note>"]
+                                                the same, the report read from stdin (a heredoc;
+                                                10 MB at most, not empty) into a private temp file
+                                                NAME.EXT, removed after: html, md, csv, txt, json,
+                                                svg, xml and the other text types (STDIN_EXTS)
     no1.py escalate "<question>" ["<context>"]  a reminder in the captain's No1 list (kind task_no1)
                                                 several in one: context, then "Q1: …" lines, each with
                                                 "Options: A) … B) …" and "Recommendation: A" (none: yes/no);
@@ -37,10 +49,15 @@
     no1.py ask "<question>" [--session <id>] [--model <m>]
                                                 the ship's computer (POST /chat); prints its answer
                                                 and the session id to continue it with
-    no1.py thread list                          your threads' labels (docs/design/no1-threads.md, 13)
-    no1.py thread new <id> "<name>"             a new label (a closed one of that id is reopened)
-    no1.py thread rename <id> "<name>"
-    no1.py thread close <id>                    not main
+    no1.py room list [--closed]                 the rooms (docs/design/rooms.md): id, name, count, last message
+    no1.py room new <id> ["<name>"]             a project room (a closed one of that id is reopened;
+                                                not a crew member's name: theirs is their own room)
+    no1.py room rename <id> "<name>"
+    no1.py room close <id>                      not main, not a crew member's own room
+    no1.py room log <id> [n]                    a room's latest n (20) messages, each clipped
+    no1.py room show <msg id>                   one message whole
+    no1.py thread ...                           the old name of room list|new|rename|close, for
+                                                this release: does the same, and says the room verb
     no1.py sync                                 your worktree (eng/number-one) fast-forwarded to the
                                                 live branch, so the files you read are what is live;
                                                 refused if it has changes or commits of its own.
@@ -68,6 +85,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -83,6 +101,7 @@ CREW_VERBS = {"list", "poll", "say", "key", "clear", "start", "diff", "deploy", 
               "stop", "dismiss", "recall", "queue", "etas"}
 QUEUE_OPS = {"move", "remove", "restore"}
 THREAD_OPS = {"list", "new", "rename", "close"}
+ROOM_OPS = THREAD_OPS | {"log", "show"}
 
 
 def die(msg, code=2):
@@ -103,9 +122,23 @@ def crew(a):
     if not a or a[0] not in CREW_VERBS:
         die("crew " + "|".join(sorted(CREW_VERBS)))
     verb, rest = a[0], a[1:]
+    if "--room" in rest:
+        # the room the order or the deploy is for, in place of the turn's
+        # (engineer.py room_given): a project's report goes to its room
+        i = rest.index("--room")
+        rid = rest[i + 1] if i + 1 < len(rest) else ""
+        if verb not in ("say", "deploy"):
+            die("--room is for crew say and crew deploy")
+        if not rid or rid.startswith("--"):
+            die("--room <id>: a room's id (no1.py room list)")
+        err = E.room_check(rid)
+        if err:
+            die(err, 4)
+        rest = rest[:i] + rest[i + 2:]
+        os.environ["LCARS_ROOM_AT"] = rid
     if verb in ("deploy", "rollback"):
-        # its outcome reports to the turn's thread (by_thread)
-        os.environ["LCARS_THREAD_BY"] = "no1"
+        # its outcome reports to the turn's room (by_room)
+        os.environ["LCARS_ROOM_BY"] = "no1"
     if verb in ("list", "deploy-status", "rollback", "etas"):
         return engineer(verb)
     if verb == "queue":
@@ -126,7 +159,7 @@ def crew(a):
         fresh = "--fresh" in rest[1:]
         text = " ".join(w for w in rest[1:] if w != "--fresh").strip() or sys.stdin.read().strip()
         if not text:
-            die('crew say <name> [--fresh] "<order>"')
+            die('crew say <name> [--fresh] [--room <id>] "<order>"')
         return engineer("say", name, *(["--fresh"] if fresh else []), inp="[No.1] " + text)
     if verb == "key":
         return engineer("key", name, rest[1] if len(rest) > 1 else "")
@@ -159,9 +192,30 @@ def crew(a):
     return engineer(verb, name)
 
 
+def room(a):
+    """engineer.py room number-one <op> ...: the rules are held there
+    (rooms.md 7). Nothing is typed, nothing switched."""
+    if not a or a[0] not in ROOM_OPS:
+        die('room list [--closed] | new <id> ["<name>"] | rename <id> "<name>" | close <id> | log <id> [n] '
+            '| show <msg id>')
+    op, rest = a[0], a[1:]
+    if op == "list" and rest not in ([], ["--closed"]):
+        die("room list [--closed]")
+    elif op == "new" and not 1 <= len(rest) <= 2:
+        die('room new <id> ["<name>"] (to speak in it, a "room:: <id>" line opening a paragraph of your reply)')
+    elif op in ("close", "show") and len(rest) != 1:
+        die(f"room {op} <{'id' if op == 'close' else 'msg id'}>")
+    elif op == "rename" and len(rest) < 2:
+        die('room rename <id> "<name>"')
+    elif op == "log" and not 1 <= len(rest) <= 2:
+        die("room log <id> [n]")
+    return engineer("room", E.NO1, op, *rest)
+
+
 def thread(a):
-    """engineer.py thread number-one <op> ...: the rules are held there.
-    Labels only: nothing is typed, nothing switched."""
+    """The old name of `room`'s list, new, rename and close, for one release
+    (rooms.md 7): engineer.py thread number-one <op> ... as before, its
+    answer saying the room verb to use."""
     if not a or a[0] not in THREAD_OPS:
         die('thread list | new <id> ["<name>"] | rename <id> "<name>" | close <id>')
     op, rest = a[0], a[1:]
@@ -171,7 +225,10 @@ def thread(a):
         die("thread close <id>")
     elif op == "rename" and len(rest) < 2:
         die('thread rename <id> "<name>"')
-    return engineer("thread", E.NO1, op, *rest)
+    code, j = engineer("thread", E.NO1, op, *rest)
+    if isinstance(j, dict):
+        j["use"] = f"no1.py room {op} ...: thread is the old name, going in the next release"
+    return code, j
 
 
 # ---- the journal, as Number One ---------------------------------------------
@@ -202,19 +259,73 @@ def cli_path():
     return None
 
 
+# A report piped in (`report - ... --as NAME.EXT`): Number One's permissions
+# let it run this script and write no file, so stdin is how it hands over a
+# report it made. Text it can type into a heredoc, so the types the server
+# shows as a page to read (ReportResolveType in lcars_media.h: the text
+# ones, HTML, and SVG, JSON and XML by mime.types); anything else would be a
+# download of something typed, which is a mistake.
+STDIN_EXTS = {"html", "htm", "md", "markdown", "csv", "tsv", "txt", "text", "log", "yaml", "yml",
+              "toml", "ini", "diff", "patch", "json", "xml", "svg"}
+STDIN_MAX = 10 * 1024 * 1024
+
+
+def stdin_report(name, stream=None):
+    """Reads the report from stdin into a private temp directory as name;
+    answers (its path, the directory to remove). Refused (die): a name with a
+    slash, a dot-dot or a leading dot, an extension not in STDIN_EXTS, an
+    empty input or one over STDIN_MAX. The name is what report.py keeps as
+    the sidecar's source and the stored file's extension."""
+    ext = os.path.splitext(name)[1][1:].lower()
+    if not name or "/" in name or "\\" in name or ".." in name or name.startswith(".") \
+            or not R.NAME_RE.match(name):
+        die(f"--as {name or '(empty)'}: a plain file name, NAME.EXT, with no slash or ..")
+    if ext not in STDIN_EXTS:
+        die(f"--as {name}: .{ext or '(none)'} is not a report type here ({', '.join(sorted(STDIN_EXTS))})")
+    stream = stream or sys.stdin.buffer
+    data = stream.read(STDIN_MAX + 1)
+    if len(data) > STDIN_MAX:
+        die(f"stdin is over {STDIN_MAX} bytes; a report piped in stops there")
+    if not data.strip():
+        die("stdin is empty: pipe the report in (a heredoc)")
+    d = tempfile.mkdtemp(prefix="no1-report-")  # 0700: Number One's alone
+    path = os.path.join(d, name)
+    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as f:
+        f.write(data)
+    return path, d
+
+
 def report(a):
     """Publishes the file, then logs its link where the captain reads Number
     One's log. The file is copied first: a log entry pointing at nothing would
-    be worse than a report with no entry, which `report.py list` still finds."""
+    be worse than a report with no entry, which `report.py list` still finds.
+    FILE "-" with --as NAME.EXT reads it from stdin (stdin_report); the temp
+    file is gone however this ends."""
     updating = bool(a) and a[0] == "--update"
     if updating:
         a = a[1:]
-    if len(a) < 2:
-        die('report --update <rel-path> FILE ["<note>"]' if updating else 'report FILE "<title>" ["<note>"]')
+    name = None
+    if "--as" in a:
+        i = a.index("--as")
+        if i + 1 >= len(a):
+            die("--as NAME.EXT")
+        name, a = a[i + 1], a[:i] + a[i + 2:]
+    src = a[1] if updating and len(a) > 1 else (a[0] if a else "")
+    if len(a) < 2 or (src == "-") != (name is not None):
+        die('report --update <rel-path> FILE|- [--as NAME.EXT] ["<note>"]' if updating
+            else 'report FILE|- "<title>" ["<note>"] [--as NAME.EXT]  (- with --as: the report from stdin)')
+    tmp = None
     try:
-        r = R.update(a[0], a[1]) if updating else R.publish(a[0], a[1])
+        if name is not None:
+            if updating:
+                R.stored(a[0])  # a wrong path refused before stdin is read
+            src, tmp = stdin_report(name)
+        r = R.update(a[0], src) if updating else R.publish(src, a[1])
     except R.Refused as e:
         die(str(e), 1)
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
     note = " ".join(a[2:]).strip()
     if updating:
         # one short line: the link was logged when it was published
@@ -224,9 +335,14 @@ def report(a):
         title = "Report: " + r["title"]
         content = f"[{r['title']}]({r['url']})" + (f"\n\n{note}" if note else "")
     code, j = answer(*http("POST", "/entries", {"kind": LOG_KIND, "title": title[:200], "content": content}))
+    # r's "id" is the report's own entry (report.py writes it, as the
+    # captain's login); entry_id is this log line's
     out = dict(r, entry_id=j.get("id") if code == 0 else None)
     if code != 0:
-        out["error"] = "published, but the log entry failed: " + json.dumps(j)[:300]
+        out["error"] = "; ".join(filter(None, [r.get("error"), "published, but the log entry failed: "
+                                               + json.dumps(j)[:300]]))
+    elif r.get("error"):
+        code = 1
     return code, out
 
 
@@ -322,6 +438,8 @@ def main(a):
         code, j = journal(rest)
     elif cmd == "ask":
         code, j = chat(rest)
+    elif cmd == "room":
+        code, j = room(rest)
     elif cmd == "thread":
         code, j = thread(rest)
     elif cmd == "sync":

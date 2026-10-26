@@ -338,10 +338,11 @@ static bool LimitedAllowed(int client_fd, const LimitedLogin *l,
   // /vault: the wrapped key is an offline guessing target, and writing it
   // is the owner's alone (lcars_vault.h). /quick: the computer answering
   // the captain's spoken questions to Number One (lcars_chat.h), a run of
-  // claude on his bill for a page of his - no other login's to start
+  // claude on his bill for a page of his - no other login's to start.
+  // /publish: a post under his name (lcars_publish.h), a read included
   if (IsEngineerPath(path) || IsCalDAVRequest(method, path) ||
       PathIs(path, "/say/token") || PathIs(path, "/vault") ||
-      PathIs(path, "/quick")) {
+      PathIs(path, "/quick") || IsPublishPath(path)) {
     *status = LimitedRefuse(client_fd, l);
     return false;
   }

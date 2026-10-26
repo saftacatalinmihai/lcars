@@ -181,6 +181,14 @@ def press_view(page, mobile, sel):
             page.evaluate("s => document.querySelector(s).click()", sel)
         else:
             tap(page, f'#dlg .shtile[data-i="{i}"]', f"phone ⋯ tile for {sel}")
+    elif sel == "#bChat" and page.evaluate("dockAllowed()"):
+        # a desk with the chat dock: the header's Chats is the dock's door
+        # (UI review slice 5, rule:headers), and the list's ⤢ the full view
+        # (a tap on it shuts the list when it is already open)
+        if not page.is_visible('#dock .dklist [data-dk="list-full"]'):
+            tap(page, sel, "desktop #bChat (the dock's list)")
+        page.wait_for_selector('#dock .dklist [data-dk="list-full"]')
+        tap(page, '#dock .dklist [data-dk="list-full"]', "the dock list's full view")
     else:
         tap(page, sel, f"desktop {sel}")
     until(page, OV_ON)
@@ -226,11 +234,13 @@ def press_nth(page, scope, n):
     page.wait_for_timeout(250)
 
 
-# The version on every screen (0.183.5): the header's #appVer while the main
-# page is up, else #verMark, top centre over whatever covers the header.
-# Seen means: "v" + APP_VERSION, inside the screen, and the topmost thing at
-# its centre (it lets taps through, so it is asked with pointer-events on).
-# Exactly one of the two, so no screen shows it twice.
+# The version (0.183.5, the design pass): the header's #appVer always while
+# the main page is up; #verMark, top centre over whatever covers the header,
+# only while the page is stale (a newer version on the server), so a current
+# page's covered screens show none. Seen means: the page's version, inside
+# the screen, and the topmost thing at its centre (it lets taps through, so
+# it is asked with pointer-events on). Stale, exactly one of the two, so no
+# screen shows it twice.
 VER_SEEN = """() => { const want = 'v' + APP_VERSION;
   const seen = el => { if (!el) return false; const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
     if (!r.width || cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0 ||
@@ -238,13 +248,18 @@ VER_SEEN = """() => { const want = 'v' + APP_VERSION;
     const pe = el.style.pointerEvents; el.style.pointerEvents = 'auto';
     const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     el.style.pointerEvents = pe;
-    return el.textContent === want && !!top && (top === el || el.contains(top)); };
+    // the header's reads "0.327.4 · live 0.327.5" while the server's differs
+    return (el.textContent === want || el.textContent.startsWith(APP_VERSION + ' · live ')) &&
+           !!top && (top === el || el.contains(top)); };
   return [seen(document.querySelector('#appVer')), seen(document.querySelector('#verMark'))]; }"""
 
 
-def ver_seen(page, size, where):
+def ver_seen(page, size, where, stale):
     hv, mk = page.evaluate(VER_SEEN)
-    check(hv != mk, f"{size}: {where} shows the version once (header {hv}, mark {mk})")
+    if stale:
+        check(hv != mk, f"{size}: {where}, stale, shows the version once (header {hv}, mark {mk})")
+    else:
+        check(not mk, f"{size}: {where}, current, shows no floating mark (header {hv}, mark {mk})")
 
 
 # the screens that are not a header button's view, each opened as the page
@@ -264,16 +279,27 @@ VER_SCREENS = [
 ]
 
 
+# a newer version on the server, as updCheck leaves it (no fetch), and back;
+# Later on, to show it does not hide the mark (only the offer)
+STALE_ON = """() => { const v = APP_VERSION.split('.'); v[2] = +v[2] + 1;
+  upd.server = v.join('.'); lsSetStr('lcars.updLater', upd.server); updPaint(); }"""
+STALE_OFF = """() => { upd.server = APP_VERSION; localStorage.removeItem('lcars.updLater'); updPaint(); }"""
+
+
 def ver_pass(page, size):
-    ver_seen(page, size, "the main page")
-    for what, open_js, close_js in VER_SCREENS:
-        page.evaluate(f"() => {{ {open_js}; }}")
-        page.wait_for_timeout(400)
-        ver_seen(page, size, what)
-        page.evaluate(f"() => {{ try {{ {close_js}; }} catch (e) {{}} }}")
-        force_close(page)
-        page.wait_for_timeout(300)
-    ver_seen(page, size, "the main page again")
+    for stale in (False, True):
+        page.evaluate(STALE_ON if stale else STALE_OFF)
+        hv, _ = page.evaluate(VER_SEEN)
+        check(hv, f"{size}: the main page shows its version under the clock (stale {stale})")
+        for what, open_js, close_js in VER_SCREENS:
+            page.evaluate(f"() => {{ {open_js}; }}")
+            page.wait_for_timeout(400)
+            ver_seen(page, size, what, stale)
+            page.evaluate(f"() => {{ try {{ {close_js}; }} catch (e) {{}} }}")
+            force_close(page)
+            page.wait_for_timeout(300)
+        ver_seen(page, size, "the main page again", stale)
+    page.evaluate(STALE_OFF)
 
 
 last = [""]          # the button pressed last, for a failure that shows up later
@@ -366,8 +392,8 @@ def shares_view(page, size, mobile, srv, errs):
 
 def share_view(page, size, mobile, srv, errs):
     """The Share sheet (./share/<id>, social-publish.md 3.2): opened from an
-    entry as a person opens it - Share… in the editor's row on a desktop, its
-    tile in the ⋯ sheet on a phone; its url, Close, Escape and Back; every
+    entry as a person opens it - its tile in the editor's ⋯ sheet, at both
+    sizes since research slice C; its url, Close, Escape and Back; every
     button in it pressed (the chips, Schedule…, Save link, Mastodon's Save;
     each Open is a link to a network and is not); the phone's fit."""
     def open_it():
@@ -375,17 +401,14 @@ def share_view(page, size, mobile, srv, errs):
         page.evaluate("() => { if (document.body.classList.contains('dirty')) setClean(); "
                       "select(st.all.find(e => e.kind === 'work_log').id); }")
         page.wait_for_timeout(300)
-        if mobile:
-            if not tap(page, "#bEdMore", f"{size} the editor's ⋯ (for Share)"):
-                return False
-            page.wait_for_selector("#dlg .shtile")
-            i = page.evaluate("[...document.querySelectorAll('#dlg .shtile')].findIndex(t => /Share/.test(t.textContent))")
-            if i < 0:
-                check(False, f"{size}: the editor's ⋯ sheet has a Share tile")
-                return False
-            tap(page, f'#dlg .shtile[data-i="{i}"]', f"{size} ⋯ › Share")
-        else:
-            tap(page, "#bShare", f"{size} Share…")
+        if not tap(page, "#bEdMore", f"{size} the editor's ⋯ (for Share)"):
+            return False
+        page.wait_for_selector("#dlg .shtile")
+        i = page.evaluate("[...document.querySelectorAll('#dlg .shtile')].findIndex(t => /Share/.test(t.textContent))")
+        if i < 0:
+            check(False, f"{size}: the editor's ⋯ sheet has a Share tile")
+            return False
+        tap(page, f'#dlg .shtile[data-i="{i}"]', f"{size} ⋯ › Share")
         return until(page, "/\\/share\\/\\d+$/.test(location.pathname) && !!document.querySelector('#soc_cards')")
     page.evaluate("localStorage.removeItem('lcars.soc.mastodon'); localStorage.removeItem('lcars.soc.nets'); shx = null")
     ok = open_it()
@@ -433,6 +456,109 @@ def share_view(page, size, mobile, srv, errs):
     page.evaluate("() => { if (document.body.classList.contains('dirty')) setClean(); if (st.sel || st.isNew) closeEditor(); }")
 
 
+def rooms_view(page, size, srv, errs):
+    """The Rooms page (docs/design/rooms.md 6): no header button of its own;
+    its doors are the Chats list's Rooms row and the palette's row. From the
+    chats its ‹, Escape and Back go back to the chats; from the journal they
+    close it. Then every button in the list and in a room, pressed once.
+    The engineer routes are stood in for (the scratch server has none), and
+    the engineers feature taken as on."""
+    base = srv.base + "/ui/"
+    engs = {"engineers": [{"name": "number-one", "title": "Number One", "status": "idle", "active": 1},
+                          {"name": "obrien-x", "title": "Chief O'Brien", "status": "idle", "active": 2}],
+            "deploy": {}, "seat": None}
+    page.route("**/engineer**", lambda r: r.fulfill(json=engs if r.request.url.split("?")[0].endswith("/engineer")
+                                                    else {"ok": True, "status": "idle", "events": [], "next": 0, "first": 0}))
+    page.goto(base, wait_until="domcontentloaded")
+    page.wait_for_function("st.all.length > 0")
+    # the server's features first: set while /features was still on its way
+    # (a mirror paints the list before it answers), the answer landed after
+    # and put the engineers back off ("The engineers is off on this server")
+    until(page, "!!feat.map && !feat.ask", 10000)
+    page.evaluate("""() => { localStorage.setItem('lcars.deck.engkey', JSON.stringify('k-test-key-0123456789'));
+      if (feat.map) feat.map.set('engineers', { on: true, needs: [] }); }""")
+    page.wait_for_timeout(300)
+    in_chats = "!document.querySelector('#rmpage') && !!document.querySelector('#chrows')"
+
+    def door():
+        force_close(page)
+        # a close from the chats is a history step (writeState's go back):
+        # it lands before the chats open again, or they open into its popstate
+        until(page, "/\\/ui\\/?$/.test(location.pathname)", 2000)
+        page.wait_for_timeout(300)
+        page.evaluate("chatsUp(); chatsList(); engListFetch(true)")
+        until(page, "!!document.querySelector('#chrows [data-rooms]')")
+        tap(page, "#chrows [data-rooms]", f"{size} the Chats list's Rooms row")
+        # drawn at once, its url written on the next turn: a Back before
+        # that would be the step under the chats
+        return until(page, "!!document.querySelector('#rmlist') && location.pathname === '/ui/rooms'")
+    check(door() and rel(page, srv.base) == "/ui/rooms", f"{size}: rooms opens from the Chats list's row, at ./rooms  ({rel(page, srv.base)})")
+    if tap(page, "#rmback", f"{size} rooms ‹"):
+        check(until(page, in_chats), f"{size}: rooms' ‹ goes back to the chats")
+    door()
+    page.keyboard.press("Escape")
+    check(until(page, in_chats), f"{size}: Escape from rooms is the chats")
+    door()
+    page.go_back()
+    check(until(page, in_chats), f"{size}: Back from rooms is the chats")
+    force_close(page)
+    ran = page.evaluate("() => { const r = paletteRows().find(r => /^view · rooms/.test(r.label)); if (r) r.run(); return !!r; }")
+    check(ran and until(page, "!!document.querySelector('#rmlist')"), f"{size}: and from its palette row")
+    if tap(page, "#rmback", f"{size} rooms ‹ (Close)"):
+        check(until(page, OV_OFF), f"{size}: from the journal, its ‹ closes it")
+    for how in ("escape", "back"):
+        page.evaluate("openRooms()")
+        until(page, "!!document.querySelector('#rmlist')")
+        page.wait_for_timeout(200)
+        if how == "escape":
+            page.keyboard.press("Escape")
+        else:
+            page.go_back()
+        check(until(page, OV_OFF), f"{size}: {how} closes rooms opened from the journal")
+    # every button of the list and of a room (Number One's), pressed once
+    before = len(errs)
+    for where in ("", "main"):
+        js = f"openRooms({where!r})"
+        page.evaluate(js)
+        until(page, "!!document.querySelector('#rmpage')")
+        page.wait_for_timeout(300)
+        todo = [b for b in buttons_in(page, "#dlg") if b["id"] != "rmsend"]   # Send would say to the stand-in: no row
+        force_close(page)
+        for b in todo:
+            page.evaluate(js)
+            until(page, "!!document.querySelector('#rmpage')")
+            page.wait_for_timeout(200)
+            press_nth(page, "#dlg", b["i"])
+            last[0] = f"rooms {where or 'list'} › {b['id'] or b['t']}"
+            force_close(page)
+    check(len(errs) == before, f"{size}: the buttons in rooms pressed, no error" + ("" if len(errs) == before else ": " + "; ".join(errs[before:before + 3])))
+    # Archive (rooms.md 17): a crew room's ⋯ has it alone; the row goes under
+    # the Archived fold, whose Restore puts it back; a long press (here its
+    # contextmenu, which a desk's right click is too) shows a row's Archive
+    force_close(page)
+    # the close is a history step: let it land before opening again (door's wait)
+    until(page, "/\\/ui\\/?$/.test(location.pathname)", 2000)
+    page.wait_for_timeout(300)
+    page.evaluate("openRooms('main')")
+    until(page, "!!document.querySelector('#rmmore') && location.pathname === '/ui/rooms/main'")
+    if tap(page, "#rmmore", f"{size} rooms ⋯") and tap(page, "[data-rmarchone]", f"{size} rooms ⋯ Archive"):
+        check(until(page, "!!document.querySelector('#rmlist details[data-rmarchd] [data-rm=main]')"), f"{size}: the ⋯'s Archive: the room under Archived")
+        tap(page, "#rmlist details[data-rmarchd] summary", f"{size} rooms' Archived fold")
+        if tap(page, "#rmlist details[data-rmarchd] [data-rmunarch=main]", f"{size} rooms' Restore"):
+            check(until(page, "!document.querySelector('#rmlist details[data-rmarchd]') && !rm.arch.size"), f"{size}: Restore: back on the list")
+    page.evaluate("document.querySelector('#rmlist [data-rm=main]')?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))")
+    if until(page, "!!document.querySelector('#rmlist .rmheld [data-rmarch=main]')") and \
+            tap(page, "#rmlist .rmheld [data-rmarch=main]", f"{size} rooms' long-press Archive"):
+        check(until(page, "!!document.querySelector('#rmlist details[data-rmarchd] [data-rm=main]') && !rm.arch.size"),
+              f"{size}: a long press's Archive: the room under Archived")
+        page.evaluate("rmArchive('main', false)")
+        until(page, "!document.querySelector('#rmlist details[data-rmarchd]') && !rm.arch.size")
+    else:
+        check(False, f"{size}: a long press shows the row's Archive")
+    force_close(page)
+    page.unroute("**/engineer**")
+
+
 def run(p, srv, mobile):
     size = "phone" if mobile else "desktop"
     print(f"-- {size} --", flush=True)
@@ -462,7 +588,7 @@ def run(p, srv, mobile):
         press_view(page, mobile, sel)
         check(ov_on(page) and rel(page, srv.base).startswith("/ui/" + url),
               f"{size}: {name} opens from its button, at ./{url}  ({rel(page, srv.base)})")
-        ver_seen(page, size, name)
+        ver_seen(page, size, name, page.evaluate("document.body.dataset.stale === 'on'"))
         cb = close_button(page)
         check(cb is not None, f"{size}: {name} has a Close button")
         if cb and tap(page, cb, f"{size} {name} Close"):
@@ -546,6 +672,7 @@ def run(p, srv, mobile):
           + ("" if len(errs) == before else ": " + "; ".join(errs[before:before + 3])))
 
     day_pin(page, size)
+    rooms_view(page, size, srv, errs)
     shares_view(page, size, mobile, srv, errs)
     share_view(page, size, mobile, srv, errs)
 
@@ -593,6 +720,10 @@ PIC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
 
 def files_pass(page, size, mobile):
     force_close(page)
+    # a toast the passes before left up (the reader's last press: "no
+    # templates yet", with its action, stays a while) sits over the chip's
+    # row on a phone: gone before the chat is opened, as it would be
+    page.evaluate("hideToast()")
     page.evaluate("openChat()")
     until(page, "!!document.querySelector('.chth .chplus:not([hidden])')")
     chose = []
@@ -648,7 +779,7 @@ def dock_pass(p, srv):
     page.wait_for_function("st.all.length > 0 && dock.shown")
     page.wait_for_timeout(500)
     W = '#dock .dkwin[data-id="%s"]'
-    check(page.is_visible("#dock .dkpill"), "dock: the pill at the lower right")
+    check(not page.query_selector("#dock .dkpill"), "dock: no pill floats at the lower right (the header's Chats is its door)")
     check(page.is_visible("#dock .dkovf"), "dock: three windows and a tab at 1300px: the overflow tab")
     if tap(page, "#dock .dkovf .dkmore", "dock overflow tab"):
         check(page.is_visible("#dock .dkmenu"), "dock: the overflow tab opens its menu")
@@ -665,7 +796,7 @@ def dock_pass(p, srv):
     if tap(page, (W % cur) + " .dkx", "dock window close"):
         check(not page.query_selector(W % cur), "dock: × closes the window")
         undo = page.query_selector("#toast.on button")
-        check(undo is not None and undo.inner_text() == "Undo", "dock: Closed · Undo")
+        check(undo is not None and undo.text_content().strip() == "Undo", "dock: Closed · Undo")
     cur = page.evaluate("[...document.querySelectorAll('#dock .dkwin')].map(e => e.dataset.id)[0]")
     if tap(page, (W % cur) + " .dkfull", "dock window full view"):
         page.wait_for_timeout(300)
@@ -673,8 +804,8 @@ def dock_pass(p, srv):
         page.keyboard.press("Escape"); page.wait_for_timeout(200)
         page.keyboard.press("Escape"); page.wait_for_timeout(300)
         check(page.evaluate("!chatUp() && dock.shown"), "dock: and back when it closes")
-    if tap(page, "#dock .dkpill", "dock pill"):
-        check(page.is_visible("#dock .dklist"), "dock: the pill opens the list panel")
+    if tap(page, "#bChat", "header Chats (the dock's door)"):
+        check(page.is_visible("#dock .dklist"), "dock: the header's Chats opens the list panel")
     for b in page.evaluate("[...document.querySelectorAll('#dock .dklist .chhdr button')].map(b => b.dataset.dk)"):
         if not page.is_visible("#dock .dklist"):
             page.evaluate("dockExpand(false)"); page.wait_for_timeout(200)
@@ -684,7 +815,7 @@ def dock_pass(p, srv):
         if b == "list-full":
             check(page.evaluate("chatUp()"), "dock: the list's ⤢ is the full Chats list")
         elif b == "collapse":
-            check(page.is_visible("#dock .dkpill"), "dock: the list's ─ collapses it to the pill")
+            check(not page.is_visible("#dock .dklist"), "dock: the list's ─ shuts it")
         elif b == "new":
             check(page.evaluate("!!dockFm()"), "dock: the list's + is a new computer thread, in a window")
         page.evaluate("if (chatUp()) closeOv()"); page.wait_for_timeout(300)

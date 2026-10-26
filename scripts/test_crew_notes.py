@@ -967,7 +967,7 @@ class Turn(Base):
         self.assertEqual(self.srv.rows[e["id"]]["content"], "Gym.\n@yeoman log a gym session")
         # what the role was given: its note verbs, the note brief, the entry fenced
         argv = seen["argv"]
-        allowed = argv[argv.index("--allowedTools") + 1: argv.index("--permission-mode")]
+        allowed = argv[argv.index("--allowedTools") + 1: argv.index("--disallowedTools")]
         self.assertEqual(allowed, [f"Bash({C.TOOL} {v}:*)" for v in ("today", "list", "get")] + ["WebSearch"])
         self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "0.05")
         sysp = argv[argv.index("--append-system-prompt") + 1]
@@ -1088,7 +1088,7 @@ class Turn(Base):
         argv = C.claude_argv(C.note_fm(fm), "", tool="/x/crew_tool.py")
         tools = argv[argv.index("--tools") + 1].split(",")
         self.assertIn("WebSearch", tools)
-        self.assertIn("WebSearch", argv[argv.index("--allowedTools") + 1:argv.index("--permission-mode")])
+        self.assertIn("WebSearch", argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")])
         brief = argv[argv.index("--append-system-prompt") + 1]
         self.assertIn("read anything in the journal, of any date", brief)
         self.assertIn("--search <words>, --since/--until", brief)

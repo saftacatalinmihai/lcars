@@ -31,7 +31,12 @@ deck down, what is alive is the boot's and the two rooms built there.
 `--check` fails (exit 1) if a loop's end holds more live objects than the
 boot by BOUND["objects3d_over_boot"] (the leak: +20,000; fixed: +280), if
 the textures, geometries or GPU bytes at a loop's end exceed the first
-loop's end by more than BOUND's, if a context was lost on the walk, or if
+loop's end by more than BOUND's (textures by none: a loop ends where the
+first did, so one texture more is one made and never disposed - a crew
+member's bone texture, +1 a loop until 0.299.3), if a count rises at every
+loop's end, or the GL buffers do (a creep under the bounds: `--trace`
+names where a texture is made),
+if a context was lost on the walk, or if
 the deck does not say so and draw again when one is lost and restored.
 The heap is reported, not judged: after a collection it still varies
 by ~150 MB from run to run (the leak was +680 MB).
@@ -41,7 +46,7 @@ page asks WebGL for, which is what a phone's GPU process holds for it (an
 iPhone's driver adds its own); the milliseconds are not a phone's.
 
 Usage:  python3 test/deckmem.py [--gfx low|medium|high] [--size 393x852]
-        [--scale 3] [--loops 3] [--decks 12,3] [--json OUT] [--check]
+        [--scale 3] [--loops 3] [--decks 12,3] [--json OUT] [--check] [--trace]
         [--page DIR]   (~2 min a loop on the VPS; a heavy job)
 """
 import argparse
@@ -68,6 +73,7 @@ ap.add_argument("--loops", type=int, default=3)
 ap.add_argument("--decks", default="12,3", help="the decks visited each loop, besides 8")
 ap.add_argument("--json", default="")
 ap.add_argument("--check", action="store_true")
+ap.add_argument("--trace", action="store_true", help="name where the textures alive at a loop's end were made, and which grew")
 args = ap.parse_args()
 W, H = map(int, args.size.split("x"))
 
@@ -76,14 +82,24 @@ W, H = map(int, args.size.split("x"))
 # visit makes and every later one shares), none for a room's worth; and the
 # live objects over the boot's (two rooms are ~300, a deck's leaked rooms
 # were 20,000).
-BOUND = {"textures": 6, "geometries": 40, "gpu_mb": 8.0, "objects3d": 100, "objects3d_over_boot": 1500}
+BOUND = {"textures": 0, "geometries": 40, "gpu_mb": 8.0, "objects3d": 100, "objects3d_over_boot": 1500}
 
 # WebGL's own bookkeeping, counted at the context: what three asked for and
 # never deleted. Sizes are estimates by format (a mip chain a third more).
+# the rooms' models (ms): the KTX2 atlases' transcoder workers wait on the
+# main thread between maps, and in headless Chromium's software GL a frame
+# takes a second or more, so the boot's 30 maps take ~60 s here (2 s with
+# the frame loop held; a phone's frames are milliseconds)
+MODELS_WAIT = 180000
 WEBGL_COUNT = r"""(() => {
   const M = window.__glmem = { tex: new Map(), buf: new Map(), rb: new Map(), lost: 0, restored: 0 };
   const BPP = { 0x8058: 4, 0x8C43: 4, 0x881A: 8, 0x8814: 16, 0x822F: 4, 0x8230: 8, 0x8229: 1, 0x822B: 2, 0x822D: 2, 0x8D48: 1,
-                0x88F0: 4, 0x81A6: 4, 0x8CAC: 4, 0x81A5: 2, 0x8CAD: 8, 0x1908: 4, 0x1907: 3, 0x8C3A: 4, 0x8C3D: 4, 0x8DAB: 4 };
+                0x88F0: 4, 0x81A6: 4, 0x8CAC: 4, 0x81A5: 2, 0x8CAD: 8, 0x1908: 4, 0x1907: 3, 0x8C3A: 4, 0x8C3D: 4, 0x8DAB: 4,
+                // the compressed formats a KTX2 atlas is transcoded to (bytes a
+                // pixel): ASTC 4x4, ETC2 RGB(A), ETC1, S3TC DXT1/DXT5 and BC7,
+                // linear and sRGB - without them a texStorage2D of one counted 4
+                0x93B0: 1, 0x93D0: 1, 0x9274: 0.5, 0x9275: 0.5, 0x9278: 1, 0x9279: 1, 0x8D64: 0.5,
+                0x83F0: 0.5, 0x83F1: 0.5, 0x8C4C: 0.5, 0x8C4D: 0.5, 0x83F3: 1, 0x8C4F: 1, 0x8E8C: 1, 0x8E8D: 1 };
   const bpp = f => BPP[f] || 4;
   for (const C of [window.WebGL2RenderingContext, window.WebGLRenderingContext]) {
     if (!C) continue;
@@ -138,6 +154,37 @@ SAMPLE = """async () => {
            canvas: [cv.width, cv.height], pr: r.getPixelRatio(), frame_ms: dt.length ? Math.round(dt[dt.length >> 1] * 10) / 10 : null };
 }"""
 
+# --trace: every texture made after the boot, with where it was made (a
+# setter on Texture.prototype's uuid, which three's constructor assigns),
+# until it is disposed. Held strongly on purpose: three keeps no reference
+# of its own to a texture it uploaded (a WeakMap), so one never disposed
+# can be collected in JS while its GL copy stays - the leak this looks for.
+# That makes the heap meaningless with it on; the counts are not affected.
+TRACE = """() => {
+  const T = window.__deck.THREE, all = window.__texTrace = new Set();
+  Object.defineProperty(T.Texture.prototype, "uuid", { configurable: true,
+    get() { return this.__uuid; },
+    set(v) {
+      this.__uuid = v;
+      if (this.__made) return;
+      this.__made = (new Error().stack || "").split("\\n").slice(2, 10).map(l => l.trim().replace(/^at /, "").replace(/https?:[/][/][^/]+[/]/, "")).join(" < ");
+      all.add(this);
+      this.addEventListener("dispose", () => all.delete(this));
+    } });
+}"""
+# the traced textures still alive, uploaded (three's properties hold a GL
+# texture for them), by where they were made
+TRACE_COUNT = """() => {
+  const r = window.__deck.renderer, by = {};
+  for (const t of window.__texTrace) {
+    const p = r.properties.get(t);
+    if (!p.__webglTexture && !p.__webglInit) continue;
+    by[t.__made] = (by[t.__made] || 0) + 1;
+  }
+  return by;
+}"""
+traced = []
+
 # the walkable point of a room nearest its middle, for a generated room or one of deck 8's
 SPOTS = """deck => {
   const d = window.__deck, out = [];
@@ -182,7 +229,7 @@ def live3d(cdp):
 def stop(pg, where, loop, cdp=None):
     pg.wait_for_timeout(300)
     try:
-        pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=60000)
+        pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=MODELS_WAIT)
     except Exception:
         pass
     s = pg.evaluate(SAMPLE)
@@ -222,6 +269,8 @@ with sync_playwright() as p:
       return [0, 0]; }""")
     pg.evaluate("() => window.gc && window.gc()")
     stop(pg, "boot", 0, cdp)
+    if args.trace:
+        pg.evaluate(TRACE)
     decks = [int(n) for n in args.decks.split(",") if n.strip()]
     spots8 = pg.evaluate(SPOTS, 8)
     for loop in range(1, args.loops + 1):
@@ -236,6 +285,8 @@ with sync_playwright() as p:
         pg.wait_for_timeout(500)
         pg.evaluate("() => window.gc && window.gc()")
         stop(pg, "end of loop (concourse)", loop, cdp)
+        if args.trace:
+            traced.append(pg.evaluate(TRACE_COUNT))
     # the context lost and given back, as a phone's GPU process does: the
     # deck says so, and draws again (calls > 0) once it is back
     lose = pg.evaluate("""async () => {
@@ -262,6 +313,14 @@ for e in ends:
     print(f"loop {e['loop']} end: geo {e['geometries']} tex {e['textures']} gpu {e['gpu_mb']}MB heap {e['heap_mb']}MB live3d {e['objects3d']}")
 for e in errs:
     print("page error:", e, file=sys.stderr)
+# what the traced textures held at each loop's end, by where they were
+# made; a place whose count rose from one end to the next is the leak
+for i, by in enumerate(traced):
+    print(f"traced at loop {i + 1} end: {sum(by.values())} textures made since the boot")
+    prev = traced[i - 1] if i else {}
+    for k in sorted(by, key=lambda k: -by[k]):
+        if i == 0 or by[k] != prev.get(k, 0):
+            print(f"  {by[k]:3d}" + (f" ({by[k] - prev.get(k, 0):+d})" if i else "") + f"  {k}")
 if args.check:
     bad = []
     if any(s["lost"] for s in samples):
@@ -278,6 +337,14 @@ if args.check:
             lim = BOUND[k]
             if e[k] - first[k] > lim:
                 bad.append(f"loop {e['loop']} ends with {k} {e[k]}, the first loop {first[k]} (+{round(e[k] - first[k], 1)} > {lim})")
+    # a creep too slow for the bounds above: up at every loop's end
+    if len(ends) >= 3:
+        # nbuf: GL buffers at the context, which three's geometry count
+        # misses (an InstancedMesh's instanceMatrix is the mesh's own)
+        for k in ("textures", "geometries", "nbuf"):
+            if all(ends[i][k] > ends[i - 1][k] for i in range(1, len(ends))):
+                bad.append(f"{k} rise at every loop's end ({', '.join(str(e[k]) for e in ends)}): made each loop and never "
+                           "disposed (--trace names where)")
     if errs:
         bad.append(f"{len(errs)} page error(s)")
     if bad:

@@ -16,6 +16,15 @@ URL for the host is refused; the explainer (on R2, off the tree) played
 from $LCARS_LANDING_EXPLAINER_URL in the staged page, no mp4 of it staged
 (a preview's local copy included), and the URL refused when missing, not
 https, not an .mp4 or with a character a plain path does not have.
+Plausible: without LCARS_LANDING_PLAUSIBLE no script of it in any page, no
+plausible-init.js staged, the CSP as the tree's and the privacy note's
+"no analytics"; with a domain the script.js tag with data-domain, with a
+pa-<id>.js URL that tag, in every page after the init stub, the CSP's
+script-src and connect-src opened to https://plausible.io alone and the
+note naming Plausible; a value that is neither refused. The user manual
+(public/manual/): its __VERSION__ the console's APP_VERSION in the staged
+copy and kept in the tree's, its pictures staged, and the console's page
+missing or without a plain X.Y.Z refused.
 """
 import os
 import pathlib
@@ -60,6 +69,9 @@ check(HOST not in src and "__SITE__/og-card.jpg" in src, "the tree's page has th
 check('data-video="__EXPLAINER__"' in src and 'href="__EXPLAINER__"' in src and "explainer.mp4" not in src and "explainer-" not in src,
       "the tree's page plays __EXPLAINER__, no address of the cut")
 CUT_URL = "https://media.example.test/lcars-landing/explainer-e238b4ba.mp4"
+# the console's page, whose APP_VERSION the manual's __VERSION__ becomes
+APP_PAGE = ROOT.parent.parent / "lcars-ui" / "index.html"
+APP_VERSION = re.search(r'^const APP_VERSION = "([0-9.]+)";$', APP_PAGE.read_text(), re.M).group(1)
 
 with tempfile.TemporaryDirectory(prefix="lcars-landing-deploy-") as tmp:
     tmp = pathlib.Path(tmp)
@@ -84,7 +96,7 @@ fi
     subprocess.run(["cp", "-R", str(ROOT), str(site_copy)], check=True)
     (site_copy / "public" / "video" / "explainer.mp4").write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 4000)
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "LCARS_LANDING_D1_ID": DBID, "LCARS_LANDING_HOST": HOST,
-           "LCARS_LANDING_EXPLAINER_URL": CUT_URL,
+           "LCARS_LANDING_EXPLAINER_URL": CUT_URL, "LCARS_LANDING_APP_PAGE": str(APP_PAGE),
            "LCARS_LANDING_STAGE": str(stage), "CLOUDFLARE_API_TOKEN": "", "CLOUDFLARE_ACCOUNT_ID": "", "WRANGLER_SEND_METRICS": "false"}
     args = ["--dry-run"] + (["--outdir", str(tmp / "out")] if real else [])
     r = subprocess.run(["sh", str(site_copy / "deploy.sh"), *args], env=env, capture_output=True, text=True, timeout=120)
@@ -106,6 +118,13 @@ fi
     check("__EXPLAINER__" not in page, "no __EXPLAINER__ left in the staged page")
     check(sorted(p.name for p in (stage / "public" / "video").iterdir()) == ["loop-bridge.mp4", "loop-crew.mp4"], "the video folder is the two loops")
 
+    man = (stage / "public" / "manual" / "index.html").read_text()
+    tree_man = (ROOT / "public" / "manual" / "index.html").read_text()
+    check(f"For LCARS {APP_VERSION}," in man and "__VERSION__" not in man, f"the manual's version is the console's APP_VERSION ({APP_VERSION})")
+    check("__VERSION__" in tree_man and APP_VERSION not in tree_man.split("</header>")[0], "the tree's manual keeps the placeholder")
+    check(sorted(p.name for p in (stage / "public" / "manual" / "img").iterdir()) == sorted(p.name for p in (ROOT / "public" / "manual" / "img").iterdir()),
+          "the manual's pictures are staged")
+
     cfg = (tmp / "config.toml").read_text()
     check(f'database_id = "{DBID}"' in cfg, "the config has the database id")
     check(re.search(r'\[\[routes\]\]\s*pattern = "' + re.escape(HOST) + r'"\s*custom_domain = true', cfg) is not None, "and the custom domain")
@@ -121,6 +140,52 @@ fi
         check(r.returncode == 2 and "LCARS_LANDING_EXPLAINER_URL" in r.stderr, f"an explainer URL {what} is refused ({r.returncode}: {r.stderr.strip()[-80:]})")
     r = subprocess.run(["sh", str(ROOT / "deploy.sh"), "--dry-run"], env={k: v for k, v in env.items() if k != "LCARS_LANDING_EXPLAINER_URL"}, capture_output=True, text=True)
     check(r.returncode != 0 and "LCARS_LANDING_EXPLAINER_URL" in r.stderr, "no LCARS_LANDING_EXPLAINER_URL is refused")
+
+    # Plausible off (the run above): nothing of it staged
+    headers_tree = (ROOT / "public" / "_headers").read_text()
+    pages = {p.name: p.read_text() for p in (stage / "public").glob("*.html")}
+    check(set(pages) == {"index.html", "404.html"}, f"two pages staged ({sorted(pages)})")
+    check(all("plausible" not in t.lower() for t in pages.values()), "no Plausible in a page without LCARS_LANDING_PLAUSIBLE")
+    check(not (stage / "public" / "plausible-init.js").exists(), "and no plausible-init.js staged")
+    check((stage / "public" / "_headers").read_text() == headers_tree and "plausible" not in headers_tree, "and the CSP is the tree's, no plausible.io")
+    check("No tracking, no cookies, no analytics on this page" in pages["index.html"], "and the privacy note says no analytics")
+    check((ROOT / "public" / "plausible-init.js").exists() and "plausible" not in src.lower(), "the tree's page names no Plausible, the stub is beside it")
+
+    PA = "https://plausible.io/js/pa-AbC_12-x.js"
+    for value, want in [("visits.example.test", '<script defer data-domain="visits.example.test" src="https://plausible.io/js/script.js"></script>'),
+                        (PA, f'<script src="{PA}" defer></script>')]:
+        r = subprocess.run(["sh", str(site_copy / "deploy.sh"), "--dry-run"], env={**env, "LCARS_LANDING_PLAUSIBLE": value}, capture_output=True, text=True)
+        check(r.returncode == 0, f"deploy.sh with LCARS_LANDING_PLAUSIBLE={value} exits 0 ({r.returncode}: {r.stderr[-200:]})")
+        for name in ("index.html", "404.html"):
+            t = (stage / "public" / name).read_text()
+            check(t.count(want) == 1 and t.index('<script src="/plausible-init.js" defer></script>') < t.index(want) < t.index("</head>"),
+                  f"{name} has the tag once, after the init stub, in the head ({value})")
+            check(all(x not in t for x in ("__SITE__", "__EXPLAINER__")), f"no placeholder left in {name} ({value})")
+        t = (stage / "public" / "index.html").read_text()
+        check(t.index('src="/landing.js"') < t.index("/plausible-init.js"), "landing.js before the stub (defer order)")
+        check("no analytics" not in t and "visits are counted by <a href=\"https://plausible.io/data-policy\">Plausible Analytics</a>, which sets no cookie and collects no personal data" in t,
+              "the privacy note says Plausible counts visits")
+        check((stage / "public" / "plausible-init.js").read_bytes() == (ROOT / "public" / "plausible-init.js").read_bytes(), "the init stub is staged")
+        h = (stage / "public" / "_headers").read_text()
+        csp = next(l for l in h.splitlines() if "Content-Security-Policy" in l)
+        want_csp = next(l for l in headers_tree.splitlines() if "Content-Security-Policy" in l).replace(
+            "script-src 'self';", "script-src 'self' https://plausible.io;").replace("connect-src 'self';", "connect-src 'self' https://plausible.io;")
+        check(csp == want_csp, f"the CSP opens script-src and connect-src to https://plausible.io, nothing else ({csp.strip()[:200]})")
+        check(h.replace(csp, "") == headers_tree.replace(want_csp.replace(" https://plausible.io", ""), ""), "the rest of _headers is the tree's")
+    for bad in ["https://visits.example.test", "visits.example.test/x", "localhost", "a b.test", 'x".test', "x#y.test", "-x.test",
+                "https://plausible.io/js/pa-x&y.js", "https://evil.test/js/pa-x.js", "http://plausible.io/js/pa-x.js"]:
+        r = subprocess.run(["sh", str(ROOT / "deploy.sh"), "--dry-run"], env={**env, "LCARS_LANDING_PLAUSIBLE": bad}, capture_output=True, text=True)
+        check(r.returncode == 2 and "LCARS_LANDING_PLAUSIBLE" in r.stderr, f"LCARS_LANDING_PLAUSIBLE={bad!r} is refused ({r.returncode})")
+
+    for what, page_text in [("missing", None), ("with no APP_VERSION", "<script>const X = 1;</script>"),
+                            ("with an odd one", 'const APP_VERSION = "1.2.3#x";\n')]:
+        fake = tmp / "app.html"
+        if page_text is None:
+            fake.unlink(missing_ok=True)
+        else:
+            fake.write_text(page_text)
+        r = subprocess.run(["sh", str(site_copy / "deploy.sh"), "--dry-run"], env={**env, "LCARS_LANDING_APP_PAGE": str(fake)}, capture_output=True, text=True)
+        check(r.returncode == 1 and "APP_VERSION" in r.stderr, f"the console's page {what} is refused ({r.returncode}: {r.stderr.strip()[-80:]})")
 
     env["LCARS_LANDING_HOST"] = "https://" + HOST
     r = subprocess.run(["sh", str(ROOT / "deploy.sh"), "--dry-run"], env=env, capture_output=True, text=True)

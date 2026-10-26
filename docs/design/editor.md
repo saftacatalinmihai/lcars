@@ -31,7 +31,7 @@ already the captain's call and is not re-argued here).
 right half of a Read/Edit segment in the header (or `e`, a double-click on
 the text, "computer, edit"). The day view's rendered text opens the editor
 directly with the caret where it was tapped (`dayEditClick` →
-`editEntry(id, srcOffsetAt(…))`). `+`/`n`/the FAB's speed dial start a new
+`editEntry(id, srcOffsetAt(…))`). `+`/`n`/New and its speed dial (the phone's list foot) start a new
 entry; Duplicate, Continue and the day page start a pre-filled one.
 
 **The form, top to bottom** (phone, one column, `#edbody` 2120px tall in a
@@ -160,7 +160,7 @@ functions and their tests; **L** several days or a structural change.
 
 **P1. Hide the stray Chat button on phones.** *Built in 0.181.0*
 (`[hidden]` beats every display rule, page-wide; `#series`, `#ekchips`
-and `#esug` were shown the same way). `.pill[hidden]{display:none}`
+(gone since UI review slice 6) and `#esug` were shown the same way). `.pill[hidden]{display:none}`
 (or `display:none!important` for `[hidden]` under the phone media query),
 and look for other `hidden` pills the same rule shows. *Why:* point 1; it
 also gives the bar back a slot. **S.** Not a call: a bug.
@@ -200,7 +200,10 @@ points 6, 7 (the Read segment moves at once, the chip carries the save).
 the thumb wants while editing; ⋯ opens a sheet with Duplicate, Continue,
 Revert, Chat (crew entries only), Delete/Restore/Discard (red, last).
 Desktop keeps its labelled row. *Why:* 7-8 pills at 46px in 390px, Save
-beside Revert beside Dup. **S.**
+beside Revert beside Dup. **S.** Since UI review slice 6 Dictate is the
+bar's primary action on the phone: first, the wide segment, lit orange
+while idle (red with Pause while it dictates, as before); Video and ⋯ are
+plain keys at their own width.
 
 **P6. Fold the columns into "Details", in words.** *Built in 0.183.0*
 (the Scheduled range is two chips, start and end, each its own picker).
@@ -232,7 +235,9 @@ The editor's top becomes the reader's: the kind chip (tap → the kind
 picker, `openKindChoice`, which already exists) and the title as a large
 borderless field in the reader's `#rd_title` face. The full-width kind
 field goes. For a new entry the kind chips are one scrolling row under the
-title, not three wrapped rows. *Why:* point 5; Edit looks like Read with a
+title, not three wrapped rows (UI review slice 6 took that row away: the
+kind chip is a new entry's one kind control too, and its picker lists the
+same ranked kinds first; voice's "kind …" and K unchanged). *Why:* point 5; Edit looks like Read with a
 caret, so switching between them stops being a jump. **M.** Captain's
 call (look).
 
@@ -241,7 +246,11 @@ never empty.** *Built in 0.183.2* (a photo counts as words; a scaffold
 left untouched is not kept, with a Reopen in the toast; the speed dial's
 microphone and camera rows do not raise the keyboard). + focuses the content box inside the tap (keyboard up, one
 tap, as a messaging app opens a thread); Save/the chip is *Write something
-first* until there is a title or text; once there is, it autosaves like any
+first* until there is a title or text (said once, by the chip: on a
+phone the copy on the content's label, the head's hidden while it says
+it; Read, Ctrl+S and a spoken save shake that chip and put the caret in
+the box rather than toast it again, `nudgeEmpty`, UI review slice 6);
+once there is, it autosaves like any
 entry (the first save creates the row: the url becomes `./entry/<id>`, the
 list gets the row). The scaffolds that open full (Duplicate, the day page,
 a template) keep today's rule — nothing written until a first edit or Save
@@ -307,6 +316,102 @@ no to it explicitly. **L.** Captain's call.
    rest.
 
 Then P8 and P7 once the captain has decided them, P9-P13 as small follow-ups.
+
+## 3a. iOS: AutoFill Contact, and the caret under the top (0.311.x)
+
+Two iPhone Safari faults in the content box, the captain's report of
+2026-10-23, fixed from what WebKit's source does rather than by trial.
+Neither can be seen off a device: Playwright's WebKit is WPE on Linux,
+with no iOS keyboard, no form assistant and none of Safari's own AutoFill.
+
+### AutoFill Contact
+
+**What Safari reads.** `autocomplete="off"` does not stop it. WebKit
+hands the focused field to Safari as `FocusedElementInformation`
+(`focusedElementInformation` in `Source/WebKit/WebProcess/WebPage/ios/WebPageIOS.mm`):
+its `<label>`'s text, `title`, `aria-label`, `placeholder`, value and
+autocomplete token; `WKContentViewInteraction.mm` maps only the token to
+a `textContentType` (`contentTypeFromFieldName`), so with "off" the call
+is Safari's. Safari's classifier is closed (its injected bundle reads the
+DOM around the field; the AutoFill button comes back through
+`_WKFormInputSession`); the public record is practitioners' findings, none
+of it from Apple: the name, then the placeholder, then the label are read
+for keywords; `name="search"` is skipped for contact AutoFill; a dashed
+name is a phone field (Apple developer forums thread 764041; Grubhub's
+"Disabling Safari AutoFill for a single line address input"; Cloud Four's
+"Autofill: what web devs should know"). On a page with no `<form>` one
+field taken for a contact's makes every field a contact form's,
+the body included (0.241.1, 0.256.3).
+
+**What brought it back.** A dialog's markup stays in the page after it
+closes (`closeOv`), so every chat, thread and room field opened since the
+page loaded sits beside the editor. Rooms (0.310.0) and the threads
+(0.284.1) added fields that read as a message to a person and carried no
+search name: the room's box, its placeholder set in the script to "to
+Lt. Elena Mendez" or "to Number One" beside a "To …" chip; "an opening
+message to Number One"; "what to call the room/thread"; "Reply to
+<crew member>" on an entry's note thread. `test/check.py` did not see
+them: "number", "call" and the recipient words were not in its list, it
+did not read `title` or placeholders the script sets, and it did not
+require the search name.
+
+**The rule now** (`test/check.py`, cases in `test/test_check_contact.py`,
+the open page in the behaviour suite): every text field the file can
+render (markup, templates, `createElement`), open or not -
+
+1. no contact word in its id, name, placeholder, aria-label, title or the
+   label or text before it: a person's names and titles, an organisation,
+   mail, phone, number, call, an address, a birthday, an account or a
+   recipient;
+2. nothing addressing someone: no `to ${who}`, no placeholder set to
+   "to " + a name - the To chip says whom a message goes to;
+3. `name="search…"`, no dash, on every text, search, url and untyped
+   input and every textarea.
+
+A login's own fields are the exception and say so
+(`autocomplete="username"`, a password token): WebKit takes those for
+credentials (`AutofillElements`), the Passwords key, not a contact. The
+words used instead: "heading" for what a room, thread, course or passkey
+is called, "No.1" in a field's text, "your message", "add an engineer".
+
+### The caret under the top
+
+**Cause.** When a field is focused on an iPhone, WebKit pans the page in
+`-[WKWebView _zoomToFocusRect:selectionRect:…]`
+(`Source/WebKit/UIProcess/API/ios/WKWebViewIOS.mm`). It places the
+field's box first and the caret second: a box that fits in the room left
+above the keyboard is **centred** there; a taller one keeps the current
+offset as long as its top is in the upper half; then the offset is clamped
+so the caret is at least 8px inside. On a phone a textarea needs the form
+assistant (`requiresAccessoryView`), which makes it `forceScroll`, so the
+"already visible, leave it" shortcut is skipped and the placement runs on
+every focus. The body's box was 44vh (~400px with the safe areas) and the
+room above the keys ~470-520px: it fitted, was centred, and its top lines,
+the one just tapped among them, went under the status bar at the
+screen's top edge. Holding the space bar moves the caret through
+WebKit's selection reveal instead, which centres it: hence the captain's
+workaround.
+
+**Fix.** The phone's box is 66vh, taller than that room in portrait on
+every iPhone (the keys and their bar take a third of the screen or more).
+The page then stays where it is when the line tapped is above the keys,
+and when the keys would cover it the pan lifts it to just above them. No
+script: `caretReveal` still only follows typing and dictation.
+
+**What does not apply.** `scroll-padding`/`scroll-margin` are not inputs
+to that pan (it is the UI process's, on the WKScrollView), and
+`#edbody`'s own scroll is not what moves the line. `interactive-widget`:
+WebKit implemented it in August 2026 (`MetaViewportInteractiveWidgetEnabled`,
+on for Cocoa; `_sizeResizedByInteractiveWidget`), but no shipped iOS
+Safari has it yet (Bramus, "WebKit supports interactive-widget", 2026-09;
+MDN browser-compat-data #29011). The page already asks for
+`resizes-content`; once Safari ships it the layout shrinks above the keys,
+the document has no room to pan, and the 66vh box is 66% of what is left.
+Recheck the editor on the first iOS that does.
+
+**On the phone:** open a long entry, Edit, tap a line in the top third of
+the box: the keyboard rises and the line stays where it was. Tap one in
+the bottom third: it rises to just above the keys, never to the top.
 
 ## 4. Immediate feedback audit
 

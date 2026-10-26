@@ -1,0 +1,4 @@
+CHANGELOG.md merge=lcars-changelog
+# git's built-in union merge: two branches adding items at the same place
+# both land (both sides kept, order not guaranteed) - CLAUDE.md, TODO.md
+TODO.md merge=union

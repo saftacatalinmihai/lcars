@@ -333,14 +333,38 @@ with sync_playwright() as p:
     order("close", HID.format("#menu"))
     for g in ["medium", "high", "low"]:
         order(f"graphics {g}", f"window.__deck.gfx === '{g}'")
-    for s, want in [("sound on", "on"), ("sound quiet", "quiet"), ("mute", "off")]:
+    for s, want in [("sound on", "on"), ("mute", "off"), ("unmute", "on")]:
         order(s, f"window.__deck.sound === '{want}'")
+    # the announcements: their own switch, off by default (the browser's voice)
+    for s, want in [("announcements on", "true"), ("no announcements", "false"), ("make announcements", "true"), ("sound quiet", "false")]:
+        order(s, f"window.__deck.announceOn === {want}")
     hint("call the crew", "reporting")
     # the one called stands in front of you: talked to, or looked past
     order("talk to them", VIS.format("#talk") + " || window.__deck.lastHint.includes('Look at someone')")
     order("close", HID.format("#talk") + " && " + HID.format("#console"))
     hint("run a program", "Stand in a holodeck")
     hint("cancel", "Nothing to cancel")
+
+    # ---- the rooms (docs/design/rooms.md 6.2, 10.6): a room order stands
+    # only for a crew room's name before the word room - "go to the ready
+    # room" stays the deck's. The demo has no engineers: the frame is given
+    # a crew room and the key, and the feature taken as on.
+    ev("""(() => { const w = document.querySelector('#cframe').contentWindow, st = w.eval('st'), at = '2026-10-20 10:00:00';
+      w.featureOff = () => false;
+      w.localStorage.setItem('lcars.deck.engkey', JSON.stringify('k'));
+      const r = { id: 990001, kind: 'crew_room', title: 'Deck redesign', content: 'id:: deck\\nby:: captain', done_bool: 0, deleted: 0,
+                  created_at_utc: at, last_modified_at_utc: at };
+      st.all.unshift(r); st.byId.set(r.id, r); w.eval('rm.gen++'); })()""")
+    rmlog = "!!document.querySelector('#cframe').contentDocument.querySelector('#rmlog')"
+    rmlist = "!!document.querySelector('#cframe').contentDocument.querySelector('#rmlist')"
+    order("take me to ten forward", f"{ROOM} === 'Ten Forward'", "(to Ten Forward first)", 60000)
+    order("go to the ready room", f"window.__deck.deck() === 8 && {ROOM} === 'Ready room'", '"go to the ready room" is the deck\'s, not a room order', 60000)
+    order("go to the deck redesign room", VIS.format("#console") + " && " + rmlog,
+          '"go to the deck redesign room": the console sheet up at that room')
+    check("and the deck stays where it was", ev(ROOM) == "Ready room")
+    order("back to the deck", HID.format("#console"), '"back to the deck" from the room')
+    order("rooms", VIS.format("#console") + " && " + rmlist, '"rooms": the console sheet up at the Rooms page')
+    order("back to the deck", HID.format("#console"), '"back to the deck" from the rooms')
 
     # ---- not an order: a sentence said to somebody else moves nothing
     y1 = ev("window.__deck.yaw")

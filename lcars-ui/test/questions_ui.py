@@ -15,9 +15,13 @@ phone's size against a scratch server with Number One's login:
      and its context, [[a title]] and ((id)) each open the entry, and Back
      (the browser's, the reader's ‹, Escape) brings the questions again with
      the card scrolled into view as it was and its typed draft in its box; a
-     #id the journal does not hold is drawn gone, says so, and goes nowhere.
+     #id the journal does not hold is drawn gone, says so, and goes nowhere;
+  6. Later snoozes one (0.299.0): its choices, the card gone and the Chats
+     button's count down at once, kept across a reload in the Later row,
+     opened there to answer, Now bringing it back.
 
     python3 test/questions_ui.py               # builds the server first (~30s)
+    python3 test/questions_ui.py --shots DIR   # and keeps the snooze's phone screenshots
     LCARS_TEST_BIN=/path/to/lcars python3 test/questions_ui.py
 
 Nothing here touches the journal or a running server.
@@ -104,13 +108,62 @@ def run(b, srv, qa, qb):
         check(r.get("done_bool") == 1, "and done")
         check(p.evaluate("oqCount()") == 1, "the count drops")
         p.wait_for_selector("#toast.on .tact", timeout=3000)
-        check(p.inner_text("#toast .tact") == "Undo", "a toast with Undo")
+        check(p.text_content("#toast .tact").strip() == "Undo", "a toast with Undo")
         p.click("#toast .tact")
         p.wait_for_selector(ca, timeout=5000)
         r = row(srv, qa)
         check(r.get("done_bool") == 0 and r.get("content") == "Sato built them.\nMy recommendation: ship.\n" + "more\n" * 8,
               "Undo: open again, the content as it was")
         check(p.input_value(ca + " .oqa") == DRAFT, "the answer back in its box")
+        check(errs == [], f"no page errors ({errs[:2]})")
+    finally:
+        ctx.close()
+
+
+def snooze(b, srv, qd, shots):
+    ctx = b.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, device_scale_factor=2)
+    cfg = {"base": f"http://127.0.0.1:{srv.port}", "user": F.USER, "pass": F.PASS}
+    ctx.add_init_script(f"localStorage.setItem('lcars.cfg', {json.dumps(json.dumps(cfg))});")
+    p = ctx.new_page()
+    errs = []
+    p.on("pageerror", lambda e: errs.append(str(e)))
+    cd = f'#oqrows .oqcard[data-oqid="{qd}"]'
+    shot = lambda name: shots and p.screenshot(path=str(pathlib.Path(shots) / f"{name}.png"))
+    badge = lambda: p.evaluate("chatUnreadTotal() + engAnswerCount()")
+    try:
+        p.goto(cfg["base"] + "/ui/")
+        p.wait_for_function(f"typeof oqCount === 'function' && st.byId.has({qd})", timeout=20000)
+        n0, b0 = p.evaluate("oqCount()"), badge()
+        p.evaluate("openQuestions()")
+        p.wait_for_selector(cd, timeout=5000)
+        p.evaluate(f"document.querySelector('{cd}').scrollIntoView({{block: 'start'}})")
+        p.tap(cd + " [data-oqlater]")
+        check(p.query_selector(f'[data-oqsnz="{qd}:am"]') is not None, "Later: its choices under the card")
+        p.evaluate(f"document.querySelector('{cd} .oqpickl').scrollIntoView({{block: 'end'}})")
+        shot("1-later-choices")
+        p.tap(f'[data-oqsnz="{qd}:3h"]')
+        check(p.query_selector(cd) is None, "a choice: the card leaves the list")
+        check(p.evaluate("oqCount()") == n0 - 1 and badge() == b0 - 1, "out of the count and the Chats button's")
+        check("later, until" in p.inner_text("#toast"), "a toast says until when, with Undo")
+        p.evaluate("document.querySelector('#oqrows').scrollTop = 1e6")
+        shot("2-snoozed-toast")
+        p.reload()
+        p.wait_for_function(f"typeof oqCount === 'function' && st.byId.has({qd})", timeout=20000)
+        check(p.evaluate("oqCount()") == n0 - 1, "still snoozed after a reload")
+        p.evaluate("openQuestions()")
+        p.wait_for_selector("#oqrows .oqlrow", timeout=5000)
+        check("Later" in p.text_content("#oqrows .oqlrow") and p.text_content("#oqrows .oqlrow .oqlc") == "1",
+              "the Later row at the bottom, its count a fact of its own")
+        p.tap("#oqrows [data-oqlrow]")
+        p.tap(f'#oqrows [data-oqpeek="{qd}"]')
+        p.wait_for_selector(f'.oqlrow .oqcard[data-oqid="{qd}"] [data-oqc]', timeout=3000)
+        check(p.evaluate("oqCount()") == n0 - 1, "opened in the Later row, still snoozed")
+        p.evaluate("document.querySelector('#oqrows .oqlrow').scrollIntoView({block: 'start'})")
+        shot("3-later-row-open")
+        w = p.evaluate("document.documentElement.scrollWidth")
+        check(w <= 390, f"no wider than the phone ({w})")
+        p.tap(f'#oqrows [data-oqwake="{qd}"]')
+        check(p.query_selector(cd) is not None and p.evaluate("oqCount()") == n0, "Now: back in the list, counted")
         check(errs == [], f"no page errors ({errs[:2]})")
     finally:
         ctx.close()
@@ -173,6 +226,9 @@ def links(b, srv, qc, target):
 
 
 def main():
+    shots = sys.argv[sys.argv.index("--shots") + 1] if "--shots" in sys.argv else ""
+    if shots:
+        pathlib.Path(shots).mkdir(parents=True, exist_ok=True)
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -207,6 +263,10 @@ def main():
                 post(srv, (F.USER, F.PASS), {"kind": "task_crew", "title": f"Filler ask {i}?",
                                              "created_at_utc": f"2026-10-18 1{i}:00:00", "content": "line\n" * 3})
             links(b, srv, qc, target)
+            qd = post(srv, NO1, {"kind": "task_no1", "title": "Rename the lounge on deck 10?", "created_at_utc": "2026-10-19 10:00:00",
+                                 "content": "Ten Forward's sign reads Lounge.\nQ1: Rename it Ten Forward?\nOptions: A) yes, now B) after the refit\n"
+                                            "Recommendation: A\nQ2: Light the windows at night?"})
+            snooze(b, srv, qd, shots)
             b.close()
     finally:
         srv.stop()

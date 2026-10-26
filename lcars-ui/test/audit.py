@@ -26,7 +26,10 @@ for sel in [".brand", ".pill", ".lbl", ".day", ".seg button", ".dlg h2", ".mini"
 
 # --- 1.8 aria ---
 chk('id="toast" role="status" aria-live="polite"' in src, "1.8 toast is a live region")
-for bid in ["bNew", "bReload", "bCfg", "bBack", "bClose", "bRefresh", "bFilters", "bVoice"]:
+# (#bFilters is named by its text, "Filters" and the count of those on:
+# a label would hide the count from a reader, slice F)
+chk(re.search(r'id="bFilters">Filters<span id="fcount">', src), "1.8 #bFilters is named by its words and count")
+for bid in ["bNew", "bReload", "bCfg", "bBack", "bClose", "bRefresh", "bVoice"]:
     m = re.search(r'id="%s"[^>]*' % bid, src)
     chk(m and "aria-label" in m.group(0), f"1.8 #{bid} has an aria-label")
 
@@ -38,7 +41,7 @@ chk("scrollbar-color" in style, "1.9 firefox scrollbars themed")
 chk("header::after" in style and "linear-gradient" in style, "2.2 segmented header strip")
 chk("#elbow" in style and "#elbow::after" in style, "2.1 LCARS elbow present")
 chk('data-tag="' in src, "2.1 decorative numeric tags on the section bars")
-chk(re.search(r"\.lbl\s*\{[^}]*border-radius:0 12px 12px 0", style) is not None,
+chk(re.search(r"\.lbl\s*\{[^}]*border-radius:0 var\(--r12\) var\(--r12\) 0", style) is not None,
     "2.1 section bars are right-rounded")
 chk("prefers-reduced-motion: no-preference" in style, "2.3 motion is opt-in")
 chk("prefers-reduced-motion: reduce" in style, "2.3 existing transitions respect reduce")
@@ -64,6 +67,12 @@ for name, fg in [("amber", "ffcc66"), ("orange", "ff9900"), ("purple", "cc99cc")
                  ("blue", "99ccff"), ("green", "99cc66"), ("red", "cc6666")]:
     rr = ratio(fg, "0d0d10")
     chk(rr >= 4.5, f"2.6 {name} on panel is AA ({rr:.2f}:1)")
+# slice E's text tokens, read from :root: a text colour is checked where it is named
+for name in ("soft", "txt2", "red-light", "red-lighter"):
+    m = re.search(r"--%s:\s*#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b" % re.escape(name), style)
+    fg = m and (m.group(1) if len(m.group(1)) == 6 else "".join(c * 2 for c in m.group(1)))
+    rr = ratio(fg, "0d0d10") if fg else 0
+    chk(rr >= 4.5, f"2.6 --{name} on panel is AA ({rr:.2f}:1)")
 
 # --- bleeding section bars are not clipped by their own scroller ---
 # .shead/.kh reach past the dialog's padding with a negative margin; the
@@ -148,15 +157,16 @@ chk("t.stop()" in src and "getTracks()" in src,
     "voice: stopping closes the microphone rather than leaving the light on")
 
 # it takes a corner of the screen that other things already live in
-for sel in ["#fab", "#side", "#edactions"]:
+for sel in ["#lfoot", "#side", "#edactions"]:
     chk('body[data-voice="on"]' in style and re.search(
         r'body\[data-voice="on"\][^{]*%s\s*\{' % re.escape(sel), style) is not None,
         f"voice: {sel} moves clear of the read-out")
+# rule:frame (ui-rules.md, "The phone's frame"): the foot and what docks above it
 # the toast is placed by measurement rather than by a rule per neighbour: it
 # dodges the read-out along with everything else docked to the bottom edge
 m = re.search(r"const TOAST_DODGE = \[([^\]]*)\]", src)
-chk(m and all(q in m.group(1) for q in ['"#vhud"', '"#edactions"', '"#fab"']),
-    "toast: placeToast dodges the read-out, the action bar and the FAB")
+chk(m and all(q in m.group(1) for q in ['"#vhud"', '"#edactions"', '"#lfoot"']),
+    "toast: placeToast dodges the read-out, the action bar and the list's foot (New)")
 
 # --- the task board ---
 # The renderer paints task markers and the board collects them. If the two ever
@@ -169,7 +179,7 @@ chk('new RegExp("^(" + TASK_WORDS.join("|")' in src,
     "tasks: the renderer's marker regex is built from that list")
 chk('TASK_WORDS.join("|")' in src.split("const TASK_LINE")[1][:200],
     "tasks: so is the board's")
-chk(".tkrow" in style and ".tkage.cold" in style, "tasks: the board has its staleness colours")
+chk(".tkrow" in style and ".tkage.old" in style and ".tktick" in style, "tasks: the board has its tick and its staleness colour")
 
 # --- new since the last visit ---
 chk(".item.fresh" in style and ".newtag" in style,
@@ -203,7 +213,10 @@ for cls in [".calyr", ".calmg", ".calwk", ".calcol", ".calday", ".calhr", ".mce"
     chk(cls in style, f"calendar: {cls} is styled")
 chk("[data-drop].drop" in style, "calendar: a drop target lights up under a carried entry")
 cal = src.split("const CAL_HTML")[0]
-for layout, want in [("calYearHtml", 1), ("calMonthHtml", 1), ("calWeekHtml", 1), ("calDayHtml", 1)]:
+# the month's cells are calCellHtml's (shared with the phone's strip, slice 4)
+chk("calCellHtml(" in cal.split("function calMonthHtml(")[1].split("\nfunction ")[0],
+    "calendar: calMonthHtml draws its days as calCellHtml's cells")
+for layout, want in [("calYearHtml", 1), ("calCellHtml", 1), ("calWeekHtml", 1), ("calDayHtml", 1)]:
     body = cal.split("function %s(" % layout)[1].split("\nfunction ")[0]
     chk(body.count("data-drop=") >= want,
         f"calendar: {layout} draws somewhere to drop an entry")
@@ -231,7 +244,7 @@ chk('await api("/entries/" + id)' in mv and "last_modified_at_utc" in mv,
 chk("lcarsConfirm(" in mv, "move: and it asks, in the app's own voice, before it does")
 
 # --- naming a block in place ---
-ren = src.split("function calRenameOpen(")[1][:1600]
+ren = src.split("function calRenameOpen(")[1][:2200]
 chk("lane.appendChild(inp)" in ren and "blk.appendChild" not in ren,
     "rename: the field is laid over the block, not inside the button")
 chk(".calren{" in style.replace(" ", "") and "pointer-events:auto" in style,
@@ -354,10 +367,13 @@ missing = sorted(u for u in used - defined if u not in ("--k", "--c", "--dc"))
 chk(not missing, "css: every var() resolves" + (" — missing " + ", ".join(missing) if missing else ""))
 
 # --- the constraints the plan said not to regress ---
+# rule:keep (ui-rules.md, "Keep"), with 2.3, 2.4 and 2.6's lines above
 chk("-webkit-overflow-scrolling:touch" in style, "constraint: momentum scrolling kept")
 chk("env(safe-area-inset" in style, "constraint: safe-area insets kept")
 chk("100dvh" in style, "constraint: dvh height kept")
-chk("font-size:16px" in style, "constraint: 16px inputs (no iOS focus zoom)")
+# the inputs take --fs-body (ui-rules.md's scale), which must stay 16px
+chk("--fs-body:16px" in style and ("font-size:var(--fs-body)" in style or "font-size:16px" in style),
+    "constraint: 16px inputs (no iOS focus zoom)")
 chk("histOk = false" in src, "constraint: file:// pushState degrades")
 chk("if (limit > 15)" in src, "constraint: 1MB arena page halving kept")
 chk("last_modified_at_utc is deliberately never sent on PUT" in src,

@@ -637,7 +637,7 @@ var window = {
   addEventListener: function (t, fn) { (this._on[t] = this._on[t] || []).push(fn); },
   isSecureContext: false,
   // the chat dock asks for a desk (min-width:900px, a fine pointer): TEST.desk
-  matchMedia: function (q) { return { matches: /max-width:820px/.test(q) ? TEST.mobile : /min-width:900px/.test(q) ? !!TEST.desk : false }; },
+  matchMedia: function (q) { return { matches: /max-width:820px/.test(q) ? TEST.mobile : /hover:none/.test(q) ? !!TEST.touch : /min-width:900px/.test(q) ? !!TEST.desk : false }; },
 };
 var navigator = { clipboard: null };
 var location = { protocol: "http:", origin: "http://127.0.0.1:8099", host: "127.0.0.1:8099",
@@ -842,6 +842,16 @@ function ok(cond, msg) {
 function eq(a, b, msg) {
   ok(String(a) === String(b), msg + "  (got " + JSON.stringify(String(a)).slice(0, 220) +
      " want " + JSON.stringify(String(b)).slice(0, 220) + ")");
+}
+// A check a later slice makes pass (ui-rules.md, "Every rule ships with its
+// check"): it fails today and says so without failing the run; once it
+// holds it fails (XPASS), so the slice turns it into an ok().
+function xfail(cond, msg, until) {
+  TEST.asserts++;
+  if (cond) {
+    TEST.fails.push(msg + " (XPASS)");
+    console.log("  FAIL XPASS " + msg + ": it holds now, make it an ok() (" + until + ")");
+  } else console.log("  xfail " + msg + " (expected to fail until " + until + ")");
 }
 // the whole url the page has written: its path, query and hash
 function locUrl() { return location.pathname + location.search + location.hash; }

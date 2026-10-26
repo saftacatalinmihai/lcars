@@ -20,8 +20,14 @@ The bridge's carpet and wall tiles. Generated with Higgsfield (Seedream 5.0 Flas
 == concourse.glb, concourse_{base,norm,orm}.webp
 Built in Blender by scripts/deck-models/concourse.py, part of this repository.
 
+== conference.glb, conference_{base,norm,orm}.webp
+Built in Blender by scripts/deck-models/conference.py, part of this repository.
+
 == corridor.glb, corridor_{base,norm,orm}.webp
 Built in Blender by scripts/deck-models/corridor.py, part of this repository.
+
+== engineering.glb, engineering_{base,norm,orm}.webp
+Built in Blender by scripts/deck-models/engineering.py, part of this repository.
 
 == hull.glb, hull_{base,norm,orm}.webp
 Built in Blender by scripts/deck-models/hull.py, part of this repository.
@@ -31,6 +37,12 @@ Built in Blender by scripts/deck-models/lab.py, part of this repository.
 
 == lounge.glb, lounge_{base,norm,orm}.webp
 Built in Blender by scripts/deck-models/lounge.py, part of this repository.
+
+== mess.glb, mess_{base,norm,orm}.webp
+Built in Blender by scripts/deck-models/mess.py, part of this repository.
+
+== quarters.glb, quarters_{base,norm,orm}.webp
+Built in Blender by scripts/deck-models/quarters.py, part of this repository.
 
 == readyroom.glb, readyroom_{base,norm,orm}.webp
 Brass Vase 03 (brass_vase_03) by Rico Cilliers
@@ -42,6 +54,9 @@ https://polyhaven.com/a/carved_wooden_elephant
 Licence: CC0 1.0 Universal (public domain), https://creativecommons.org/publicdomain/zero/1.0/
 These converted by common.import_pack; the rest:
 Built in Blender by scripts/deck-models/readyroom.py, part of this repository.
+
+== school.glb, school_{base,norm,orm}.webp
+Built in Blender by scripts/deck-models/school.py, part of this repository.
 
 == sickbay.glb, sickbay_{base,norm,orm}.webp
 Built in Blender by scripts/deck-models/sickbay.py, part of this repository.

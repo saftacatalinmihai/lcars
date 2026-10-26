@@ -52,8 +52,11 @@ def main():
         res.append(bool(ok))
         print(("  ok   " if ok else "  FAIL ") + what, flush=True)
 
+    # the demo is never stale (no update check): the mark as a stale page shows it
     def mark_clear(pg, when):
+        pg.evaluate("document.body.dataset.stale = 'on'")
         m = pg.evaluate(MARK)
+        pg.evaluate("delete document.body.dataset.stale")
         ck(m["shown"] and not m["onText"] and not m["onReset"], f"{when}: the version mark is clear of the strip {m}")
 
     with sync_playwright() as p:

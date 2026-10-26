@@ -20,7 +20,11 @@ and started again.
   3. PUT and PATCH moving created_at_utc the same way;
   4. malformed stamps: 400, naming the accepted shapes, and nothing written;
   5. no seed: the new database has no row; a copy of it with every row
-     taken out, started on again, still has none.
+     taken out, started on again, still has none;
+  6. a report entry's body (docs/design/reports-as-entries.md, "The cold
+     load"): /dump and /entries?report_body=0 send its first line alone,
+     content_length whole; GET /entries/<id>, /entries and report_body=1
+     the whole; another kind, a link-only report, content=0 untouched.
 
     python3 test/api.py               # builds the server first (~30s)
     LCARS_TEST_BIN=/path/to/lcars python3 test/api.py
@@ -230,6 +234,51 @@ def run(s):
     st, err = s.json("PATCH", f"/entries/{eid}", {"classification": 7})
     check(st == 400, f"an unknown level -> 400 ({st})")
     check(s.json("GET", f"/entries/{eid}")[1].get("classification") == 0, "and the row is as it was")
+
+    reports(s)
+
+
+def reports(s):
+    print("report entries: the first line alone in /dump and the sweep, whole by id")
+    head = "report:: html media/reports/2026/10/fleet-1a2b3c4d.html"
+    body = head + "\n\n<!doctype html><p>\u00e9t\u00e9 \"quoted\" \U0001F680</p>\n" + "x" * 5000
+    crlf = "report:: md media/reports/2026/10/week-0b0b0b0b.md\r\n\r\n# Week\r\n"
+    link = "report:: pdf media/reports/2026/10/audit-0c0c0c0c.pdf"
+    ids = {}
+    for name, kind, content in (("html", "report", body), ("crlf", "report", crlf),
+                                ("link", "report", link), ("other", "note", body)):
+        st, row = s.json("POST", "/entries", {"kind": kind, "title": name, "content": content})
+        ids[name] = row["id"] if st in (200, 201) else None
+    check(all(ids.values()), f"four rows written ({ids})")
+    whole = {n: s.json("GET", f"/entries/{i}")[1] for n, i in ids.items()}
+    check(whole["html"].get("content") == body, "GET /entries/<id>: a report's body whole")
+    full_len = whole["html"]["content_length"]
+
+    def by_id(rows):
+        return {r["id"]: r for r in rows} if isinstance(rows, list) else {}
+    st, dump = s.json("GET", "/dump?deleted=all")
+    d = by_id(dump)
+    r = d.get(ids["html"], {})
+    check(st == 200 and r.get("content") == head, f"/dump: a report's content is its first line (got {r.get('content', '')[:80]!r})")
+    check(r.get("content_length") == full_len, f"and content_length the whole row's ({r.get('content_length')} == {full_len})")
+    check(d.get(ids["crlf"], {}).get("content") == crlf.split("\r\n")[0], "a CRLF first line without its CR")
+    check(d.get(ids["link"], {}).get("content") == link and
+          d[ids["link"]].get("content_length") == len(link), "a report that is its first line alone: whole, length equal")
+    check(d.get(ids["other"], {}).get("content") == body, "another kind with the same text: whole")
+    st, dump1 = s.json("GET", "/dump?deleted=all&report_body=1")
+    check(by_id(dump1).get(ids["html"], {}).get("content") == body, "/dump?report_body=1: whole")
+    st, _ = s.json("GET", "/dump?report_body=maybe")
+    check(st == 400, f"report_body=maybe: a 400 ({st})")
+    st, lst = s.json("GET", "/entries?deleted=all&limit=1000")
+    check(by_id(lst).get(ids["html"], {}).get("content") == body, "/entries (the CLI's, the crew's): whole by default")
+    st, swp = s.json("GET", "/entries?deleted=all&limit=1000&report_body=0")
+    e = by_id(swp)
+    check(e.get(ids["html"], {}).get("content") == head and e[ids["html"]].get("content_length") == full_len,
+          "/entries?report_body=0 (the page's sweep): the first line, content_length whole")
+    check(e.get(ids["other"], {}).get("content") == body, "and another kind whole there too")
+    st, meta = s.json("GET", "/dump?deleted=all&content=0")
+    m = by_id(meta).get(ids["html"], {})
+    check("content" not in m and m.get("content_length") == full_len, "content=0: no content key, as before")
 
 
 def unseeded(binary, tmp):

@@ -5,6 +5,8 @@
 #
 #   scripts/deck-models/build.sh            # every room and pack
 #   scripts/deck-models/build.sh bridge     # one (or a few)
+#   scripts/deck-models/build.sh --ktx2 [ROOM ...]  # the KTX2 alone, from the webps
+#   scripts/deck-models/build.sh --ktx2 maps        # the bridge's tiles and skylight alone
 #
 # Niced and ioniced throughout: a bake takes every core it is given, and
 # the live server on this box must always get the CPU first (Number One's
@@ -64,7 +66,9 @@ pack() {
 }
 PACKS=""
 ROOMS=$(cd "$here" && ls *.py | sed 's/\.py$//' | grep -vxE 'common|pack|fetch_polyhaven')
+ktx2only=; [ "${1:-}" = --ktx2 ] && { ktx2only=1; shift; }
 want=${*:-$ROOMS $PACKS}
+[ -n "$ktx2only" ] && want=
 for r in $want; do
   echo "== $r"
   if [ -f "$here/$r.py" ]; then bl "$here/$r.py" -- "$raw" $(fetch "$r")
@@ -76,7 +80,24 @@ if [ ! -d "$cache/node/node_modules/meshoptimizer" ]; then
   mkdir -p "$cache/node"
   (cd "$cache/node" && low npm i --silent --no-save --no-package-lock @gltf-transform/core@4 @gltf-transform/functions@4 @gltf-transform/extensions@4 sharp meshoptimizer)
 fi
+# KTX-Software's ktx, which writes the atlases' KTX2 (deck-model-assets.mjs):
+# its release's x86_64 tarball, checked against its sha1, unpacked in the
+# cache. Elsewhere (arm64, no network) the cleaner writes webp alone, and
+# the page loads those.
+KTXV=4.4.2 KTXSHA=c6b08c817f8c8dd299deccae4f2fbb8d55e9acd2
+ktxd="$cache/ktx/KTX-Software-$KTXV-Linux-x86_64"
+if [ ! -x "$ktxd/bin/ktx" ] && [ "$(uname -m)" = x86_64 ]; then
+  mkdir -p "$cache/ktx"
+  t="$cache/ktx/KTX-Software-$KTXV-Linux-x86_64.tar.bz2"
+  curl -fsSL -o "$t" "https://github.com/KhronosGroup/KTX-Software/releases/download/v$KTXV/KTX-Software-$KTXV-Linux-x86_64.tar.bz2" &&
+    echo "$KTXSHA  $t" | sha1sum -c --quiet && tar xjf "$t" -C "$cache/ktx" || echo "ktx: not fetched, KTX2 skipped" >&2
+fi
+if [ -x "$ktxd/bin/ktx" ]; then
+  export KTX="$ktxd/bin/ktx" LD_LIBRARY_PATH="$ktxd/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 # the cleaner resolves its imports from beside itself: lend it the cache's
 # (scripts/node_modules is ignored)
 ln -sfn "$cache/node/node_modules" "$repo/scripts/node_modules"
-low node "$repo/scripts/deck-model-assets.mjs" "$raw" "$repo/lcars-ui/deck/"
+if [ -n "$ktx2only" ]; then low node "$repo/scripts/deck-model-assets.mjs" --ktx2 "$repo/lcars-ui/deck/" "$@"
+else low node "$repo/scripts/deck-model-assets.mjs" "$raw" "$repo/lcars-ui/deck/"
+fi

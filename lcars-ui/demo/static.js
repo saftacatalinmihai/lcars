@@ -341,6 +341,12 @@
       }) });
     }
     if (path === "/kinds/roles") return off("Changing the kinds");
+    // GET/PUT /theme (lcars_theme.h): the demo keeps no entry for it - the
+    // theme stays this browser's own (localStorage), and a write is taken
+    // as done so the picker says nothing it need not
+    if (path === "/theme" && (method === "GET" || method === "PUT"))
+      return json(200, { name: method === "PUT" && body.name || "lcars", fmt: method === "PUT" && body.text ? "omarchy" : "builtin",
+                         text: method === "PUT" && body.text || "", entry: null, error: "" });
     if (path === "/embeddings" && method === "GET") {
       var e = state.emb;
       if (!e) return off("The star chart");
