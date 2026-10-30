@@ -61,8 +61,6 @@ import time
 from playwright.sync_api import sync_playwright
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-import killclean  # noqa: E402  (a SIGTERM takes the browser with it)
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--page", default=str(HERE.parent), help="the lcars-ui directory to serve")
@@ -74,6 +72,9 @@ ap.add_argument("--decks", default="12,3", help="the decks visited each loop, be
 ap.add_argument("--json", default="")
 ap.add_argument("--check", action="store_true")
 ap.add_argument("--trace", action="store_true", help="name where the textures alive at a loop's end were made, and which grew")
+# more of the page's query, "&"-joined after ?demo&touch (e.g. lightmap: the
+# lightmap pilot, deck-remodel slice 8)
+ap.add_argument("--query", default="")
 args = ap.parse_args()
 W, H = map(int, args.size.split("x"))
 
@@ -211,7 +212,7 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
 
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=args.page))
 threading.Thread(target=srv.serve_forever, daemon=True).start()
-URL = f"http://127.0.0.1:{srv.server_address[1]}/deck.html?demo&touch"
+URL = f"http://127.0.0.1:{srv.server_address[1]}/deck.html?demo&touch" + ("&" + args.query if args.query else "")
 samples, errs = [], []
 t0 = time.time()
 
@@ -249,7 +250,11 @@ def walk(pg, spots, loop, every=1):
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, args=["--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-precise-memory-info",
                                                 "--js-flags=--expose-gc"])
-    killclean.child(b)
+    # nothing to give killclean: the browser is Playwright's child, on a
+    # pipe, and goes when this process does (a SIGTERM's default end
+    # included), as in deckshots.py and perf.py - and a Browser is no
+    # Popen, which its handler needs (a job timeout mid-walk ended
+    # in an AttributeError, not a stop)
     ctx = b.new_context(viewport={"width": W, "height": H}, device_scale_factor=args.scale, has_touch=True, is_mobile=True)
     ctx.add_init_script(WEBGL_COUNT)
     ctx.add_init_script(f"""localStorage.setItem("lcars.deck.gfx", {json.dumps(json.dumps(args.gfx))});

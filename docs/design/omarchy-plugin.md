@@ -296,5 +296,6 @@ offered by Set up….
    `scripts/omarchy-publish.sh`, the export audit clean (zimmerman-c39);
    the scripts moved into `omarchy/bin/` with links left behind
    (O'Brien).
-4. The captain's checklist on the laptop (section 4); fixes.
+4. The captain's checklist on the laptop (section 4); fixes. Done: the
+   captain tested it on his laptop and it works (2026-10-28).
 5. The repo, the first publish, the listing - the captain's word at each.

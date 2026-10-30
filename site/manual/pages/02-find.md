@@ -26,7 +26,9 @@ Tap **Filters**{ui} (on a phone it opens as a drawer; tap **Done**{ui} to close 
 
 ### Save a filter you use often
 
-Set the search, the filters and the sort, then tap **+ Save this view**{ui} under **Views**{ui} (or press **V**) and give it a name. The view's chip brings it all back with one tap. Views are kept in this browser, so each device has its own.
+Set the search, the filters and the sort, then tap **+ Save this view**{ui} under **Views**{ui} (or press **V**) and give it a name. The view's chip brings it all back with one tap; its ✕ forgets it. A new view goes first. Views are kept in the journal, so every device has the same ones.
+
+To put them in your own order, tap **⇅ Arrange**{ui} beside it (shown once there are two) and move each view with its up and down buttons, then **Done**{ui}. Or say "computer, move the view tasks up" (or down, first, last); "computer, arrange the views" opens the sheet.
 
 ### Go to a day or a month
 

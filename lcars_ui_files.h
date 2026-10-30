@@ -76,7 +76,9 @@ static const UIType g_ui_types[] = {
     {"ico", "image/x-icon", false},
     {"glb", "model/gltf-binary", true},
     {"gltf", "model/gltf+json", true},
-    {"bin", "application/octet-stream", false},
+    // (a lightmap's UVs, deck/lm_<room>.bin: 16-bit pairs, 940 kB to 142
+    // gzipped for Ten Forward's)
+    {"bin", "application/octet-stream", true},
     // the deck's atlases (deck-model-assets.mjs): Basis data, already
     // compressed (ETC1S's own coding, UASTC's zstd)
     {"ktx2", "image/ktx2", false},

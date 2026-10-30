@@ -9,7 +9,8 @@ Coordinates: metres, Blender's +Z up, each prop's front toward -Y (glTF's
 +Z once exported). Each is built to its stand-in in deck.html, whose origin
 it keeps (the floor under the middle of the bed):
 - `biobed`, over `biobed()`: the head end at +Y (the page's local -z,
-  against the wall), the pad's top at 0.75, and the head display on an arm
+  against the wall), the pad's top at 0.75 sunk in a tub whose lip is at
+  0.785, a readout on its foot end, and the head display on an arm
   over the pillow - the stand-in's screen (0.6 x 0.34, its own texture) is
   kept, 3 cm in front of the middle of a housing at (0, 0.86, 1.38) tilted
   0.3 toward the foot, and the housing is built round it;
@@ -20,7 +21,8 @@ it keeps (the floor under the middle of the bed):
 - `instrument_tray`, over `instrumentTray()`: a tray at 0.97 on a post,
   dressing (at most 200 triangles: no bevels).
 - `wall_cabinet`, over `cabinet()` at 1.4 x 2.0 (0.55 deep, its doors at
-  the page's local +z): two doors with a dark window in each upper half,
+  the page's local +z): two doors, a frosted pane in a frame over each
+  upper half (shelves and jars behind it as shadows), a raised panel under,
   a 4 cm slot between them where the stand-in's blue strip (y 0.3-1.7,
   z 0.28) is kept, handles beside it, a dark kick under them;
 - `hypospray_rack`, on the wall over no stand-in: its origin the plate's
@@ -46,28 +48,57 @@ from mathutils import Matrix  # noqa: E402
 
 import common as C  # noqa: E402
 
+C.PALETTE["med_red"] = (0x9a2a26, 0.5, 0.0, None)
+# slice 10 (deck-remodel.md): the beds' readouts, baked (the page's lit
+# screen stays the one display that glows), and the cabinets' frosted panes
+C.PALETTE["lcars_orange"] = (0xe8963c, 0.5, 0.0, None)
+C.PALETTE["lcars_lilac"] = (0xb490c0, 0.5, 0.0, None)
+C.PALETTE["lcars_blue"] = (0x8aa8d8, 0.5, 0.0, None)
+C.PALETTE["cab_glass"] = (0xb4c4cc, 0.12, 0.0, None)
+
 
 def biobed():
-    """A curved base on a dark kick, a shell tray, the soft blue pad and a
-    pillow, and at the head an arm up to the display's housing."""
+    """A curved base on a dark kick, and on it the tub: a shell whose lip
+    rolls over 3 cm above the soft blue pad sunk in it (the bed reads as a
+    tub with a mattress, not a slab on a box); a pillow; the foot's
+    readout, a sloped plate with the LCARS bars at the tub's end; and at
+    the head an arm up to the display's housing."""
     parts = [
         C.loft("kick", [(0.0, 0.54, 1.62, 0), (0.07, 0.54, 1.62, 0)], "black", r=0.12),
-        # the base swells from its kick to the tray: narrow at the floor,
+        # the base swells from its kick to the tub: narrow at the floor,
         # rounded out under the bed, as the TNG beds are
         C.loft("base", [(0.06, 0.6, 1.7, 0), (0.18, 0.63, 1.75, 0), (0.33, 0.7, 1.84, 0), (0.46, 0.8, 1.93, 0),
-                        (0.56, 0.87, 1.98, 0), (0.61, 0.9, 2.0, 0)], "sick_white", r=0.16),
-        C.box("tray", (0.92, 2.02, 0.04), (0, 0, 0.62), "sick_white", bevel=0.015, segments=2),
-        C.pad("pad", (0.82, 1.9, 0.1), (0, 0, 0.7), "bed_pad"),
+                        (0.56, 0.87, 1.98, 0), (0.6, 0.9, 2.0, 0)], "sick_white", r=0.16),
+        # the tub, one skin: out and up its outer wall, over the rounded lip,
+        # down the inner wall to the floor the pad lies on (0.65, under the
+        # pad's bottom: no seam shows); a band of trim under the lip
+        C.loft("tub", [(0.6, 0.9, 2.0, 0), (0.7, 0.94, 2.04, 0), (0.77, 0.96, 2.06, 0), (0.785, 0.93, 2.03, 0),
+                       (0.775, 0.88, 1.98, 0), (0.65, 0.86, 1.96, 0)], "sick_white", r=0.12, k=2),
+        C.loft("band", [(0.705, 0.947, 2.047, 0), (0.725, 0.952, 2.052, 0)], "trim", r=0.12, k=2),
+        C.pad("pad", (0.84, 1.94, 0.1), (0, 0, 0.7), "bed_pad"),
         C.box("pillow", (0.56, 0.32, 0.06), (0, 0.72, 0.775), "bed_pad", bevel=0.025, segments=2),
         C.box("post", (0.07, 0.07, 0.74), (0, 0.97, 0.98), "sick_white", bevel=0.02, segments=1),
         C.box("elbow", (0.06, 0.12, 0.06), (0, 0.92, 1.33), "sick_white"),
     ]
+    # the foot's readout, on the tub's end, sloped up to whoever stands
+    # there: a black face with the bars (+0 calls: baked colours, not lit)
+    rd = [C.box("plate", (0.5, 0.03, 0.16), (0, 0, 0), "sick_white"),
+          C.box("face", (0.44, 0.004, 0.11), (0, -0.016, 0), "black"),
+          C.box("bar0", (0.12, 0.003, 0.025), (-0.13, -0.019, 0.03), "lcars_orange"),
+          C.box("bar1", (0.22, 0.003, 0.025), (0.06, -0.019, 0.03), "lcars_lilac"),
+          C.box("bar2", (0.08, 0.003, 0.025), (-0.15, -0.019, -0.01), "lcars_blue"),
+          C.box("bar4", (0.06, 0.003, 0.025), (0.16, -0.019, -0.03), "lcars_lilac")]
+    C.placed(rd, Matrix.Translation((0, -1.05, 0.68)) @ Matrix.Rotation(-0.35, 4, "X"))
+    parts += rd
     # the housing, in its own frame (the stand-in's display group): the
-    # screen lies at Y -0.03, in front of a black bezel and inside a rim
+    # screen lies at Y -0.03, in front of a black bezel and inside a rim;
+    # under the screen a sill of the bars
     hs = [C.box("shell", (0.72, 0.06, 0.46), (0, 0.01, 0), "sick_white", bevel=0.015, segments=2),
           C.box("bezel", (0.64, 0.006, 0.38), (0, -0.021, 0), "black"),
           C.box("rimT", (0.72, 0.03, 0.04), (0, -0.035, 0.21), "sick_white"),
-          C.box("rimB", (0.72, 0.03, 0.04), (0, -0.035, -0.21), "sick_white")]
+          C.box("rimB", (0.72, 0.05, 0.05), (0, -0.045, -0.215), "sick_white"),
+          C.box("sill0", (0.2, 0.003, 0.018), (-0.2, -0.071, -0.215), "lcars_orange"),
+          C.box("sill1", (0.3, 0.003, 0.018), (0.1, -0.071, -0.215), "lcars_lilac")]
     for sx in (-1, 1):
         hs.append(C.box(f"rim{sx}", (0.04, 0.03, 0.38), (sx * 0.34, -0.035, 0), "sick_white"))
     C.placed(hs, Matrix.Translation((0, 0.86, 1.38)) @ Matrix.Rotation(0.3, 4, "X"))
@@ -147,8 +178,13 @@ def instrument_tray():
 
 
 def wall_cabinet():
-    """The carcass, two doors either side of the lit slot, dark windows in
-    their upper halves, handles, a kick and a cap."""
+    """The carcass, two doors either side of the lit slot. Each door a
+    frame round a pane of frosted glass over its upper half, the shelves
+    and the jars behind it showing through as shadows, and a raised panel
+    under it; a bar handle beside the slot; a kick and a
+    cap. No bevels on the door's parts: the cabinets stand a dozen to a
+    bay, and slice 10's budget is 5 k triangles a room. (Until slice 10 the panes were black: the cabinets read as white
+    boxes with black faces.)"""
     parts = [C.box("carcass", (1.4, 0.53, 1.9), (0, 0.01, 1.03), "sick_white", bevel=0.02, segments=2),
              C.box("kick", (1.34, 0.49, 0.08), (0, 0.03, 0.04), "black"),
              C.box("cap", (1.42, 0.56, 0.04), (0, 0.0, 1.98), "sick_white", bevel=0.012, segments=2),
@@ -156,8 +192,20 @@ def wall_cabinet():
     for sx in (-1, 1):
         x = sx * 0.355
         parts += [C.box(f"door{sx}", (0.66, 0.02, 1.84), (x, -0.265, 1.03), "sick_white", bevel=0.008, segments=1),
-                  C.box(f"window{sx}", (0.5, 0.004, 0.62), (x, -0.276, 1.5), "black"),
-                  C.box(f"handle{sx}", (0.02, 0.02, 0.32), (sx * 0.075, -0.286, 1.0), "trim", bevel=0.005, segments=1)]
+                  # the pane, set 4 mm into the door, and what is behind it
+                  C.box(f"pane{sx}", (0.5, 0.004, 0.62), (x, -0.2765, 1.5), "cab_glass"),
+                  C.box(f"handle{sx}", (0.022, 0.03, 0.4), (sx * 0.085, -0.29, 1.0), "trim"),
+                  C.box(f"panel{sx}", (0.5, 0.012, 0.66), (x, -0.279, 0.62), "sick_white")]
+        # the pane's frame, proud of the door by a centimetre
+        for dz in (-0.32, 0.32):
+            parts.append(C.box(f"fh{sx}{dz}", (0.54, 0.014, 0.025), (x, -0.281, 1.5 + dz), "sick_white"))
+        for dx in (-0.26, 0.26):
+            parts.append(C.box(f"fv{sx}{dx}", (0.025, 0.014, 0.66), (x + dx, -0.281, 1.5), "sick_white"))
+        # the shelves behind the frosting: a darker line each, and jars
+        for zz in (1.32, 1.58):
+            parts.append(C.box(f"sh{sx}{zz}", (0.48, 0.003, 0.012), (x, -0.2795, zz), "lab_grey"))
+            for i, dx in enumerate((-0.14, 0.1)):
+                parts.append(C.box(f"jar{sx}{zz}{i}", (0.05, 0.003, 0.09 - 0.02 * (i % 2)), (x + dx, -0.2795, zz + 0.05), "lab_grey"))
     return C.smooth(C.join("wall_cabinet", parts), 35)
 
 
@@ -194,7 +242,6 @@ def office_desk():
     return C.smooth(C.join("office_desk", parts), 35)
 
 
-C.PALETTE["med_red"] = (0x9a2a26, 0.5, 0.0, None)
 
 
 def sick_shelf():

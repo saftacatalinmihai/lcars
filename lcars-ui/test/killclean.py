@@ -81,7 +81,14 @@ def child(proc):
     """A Popen the run started - a scratch lcars server, a shard of itself -
     ended with it when it is killed (SIGTERM, a short grace, SIGKILL), before
     its directories go. A normal exit is the test's own business, as before:
-    it stops its server itself. Returns proc."""
+    it stops its server itself. Returns proc.
+
+    Only a Popen, refused at once otherwise: the handler calls poll() on it
+    when the run is killed, and anything else ended that in an
+    AttributeError, the stop it was there to make not made (deckmem.py
+    handed it a Playwright Browser, which goes with the run by itself)."""
+    if not all(hasattr(proc, a) for a in ("poll", "terminate", "kill", "wait")):
+        raise TypeError(f"killclean.child takes a subprocess.Popen, not {type(proc).__name__}")
     _arm()
     _procs.append(proc)
     return proc

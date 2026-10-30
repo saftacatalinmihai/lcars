@@ -6,6 +6,7 @@
 //
 //   GET  /say                     {"provider":"deepgram"}, or 503 when off
 //   POST /say {"text","voice"}    audio/mpeg, chunked, as the provider makes it
+//   POST /say {...,"style":{...}}  a voice tuned (SayStyle, below)
 //   POST /say {...,"format":"pcm"} the same as raw 16-bit mono PCM at 24kHz,
 //                                 little-endian, no header (audio/L16): what
 //                                 the deck plays chunk by chunk as it comes
@@ -393,6 +394,65 @@ static int SayCurlProgress(void *user, curl_off_t dltotal, curl_off_t dlnow,
   return 0;
 }
 
+// A voice tuned by the page (POST /say's "style", an engineer's own voice:
+// index.html's SAY_PERSONAS and the `voices` settings entry):
+//   fallback   the Aura-2 voice Deepgram speaks it in when ElevenLabs
+//              cannot, over SayFallbackVoice's table - a voice chosen for
+//              one engineer is in no table here
+//   stability  ElevenLabs' 0..1: high is an even, unvaried delivery
+//   speed      ElevenLabs' 0.7..1.2
+// Deepgram's Aura-2 has neither knob: its line is the voice alone.
+typedef struct SayStyle {
+  const char *fallback; // NULL: the table's
+  double stability;     // < 0: ElevenLabs' default
+  double speed;         // 0: ElevenLabs' default
+} SayStyle;
+
+static bool SayVoiceOk(const char *v);
+
+// A JSON number's value, or -1 for anything else ("0.9" quoted, true): out
+// of every range SayStyleParse allows, so refused rather than read as 0.
+static double SayNumber(JsonSpan v) {
+  if (v.len == 0 || !(isdigit((unsigned char)v.data[0]) || v.data[0] == '-')) {
+    return -1;
+  }
+  return json_span_double(v);
+}
+
+// `style` from the body into *out: 0, or which member is wrong (1 the
+// fallback, 2 stability, 3 speed). Absent, or not an object, is no style.
+static int SayStyleParse(Arena *arena, const char *body, SayStyle *out) {
+  assert(arena_valid(arena));
+  assert(body != NULL && out != NULL);
+  JsonSpan top = {body, strlen(body)}, st, v;
+  if (!json_member(top, "style", &st) || st.len < 2 || st.data[0] != '{') {
+    return 0;
+  }
+  if (json_member(st, "fallback", &v)) {
+    const char *f =
+        v.len >= 2 && v.data[0] == '"' ? json_span_string(arena, v) : NULL;
+    if (!f || !SayVoiceOk(f) || strncmp(f, "aura-", 5) != 0) {
+      return 1;
+    }
+    out->fallback = f;
+  }
+  if (json_member(st, "stability", &v)) {
+    double d = SayNumber(v);
+    if (!(d >= 0 && d <= 1)) {
+      return 2;
+    }
+    out->stability = d;
+  }
+  if (json_member(st, "speed", &v)) {
+    double d = SayNumber(v);
+    if (!(d >= 0.7 && d <= 1.2)) {
+      return 3;
+    }
+    out->speed = d;
+  }
+  return 0;
+}
+
 // Whether a voice name can go into the provider's URL as it is.
 static bool SayVoiceOk(const char *v) {
   size_t n = strlen(v);
@@ -425,11 +485,12 @@ static void SayLog(const char *fmt, ...) {
 // curl's own limits alone.
 static int SayRelayOnce(SayRelay *r, HTTPBodyStream *s, int client_fd,
                         Arena *arena, SayProvider p, const char *auth,
-                        const char *text, const char *voice, bool pcm,
-                        int first_byte, CURLcode *rc_out) {
+                        const char *text, const char *voice,
+                        const SayStyle *style, bool pcm, int first_byte,
+                        CURLcode *rc_out) {
   assert(r != NULL && s != NULL);
   assert(client_fd >= 0);
-  assert(text != NULL && voice != NULL && auth != NULL);
+  assert(text != NULL && voice != NULL && auth != NULL && style != NULL);
   assert(p != SAY_OFF);
 
   char url[512];
@@ -458,6 +519,20 @@ static int SayRelayOnce(SayRelay *r, HTTPBodyStream *s, int client_fd,
              "%s" SAY_ELEVENLABS_SPEAK "%s/stream?output_format=%s",
              g_say.eleven_base, voice, pcm ? "pcm_24000" : "mp3_44100_128");
     jsonbuf_append(&req, ",\"model_id\":\"" SAY_ELEVENLABS_MODEL "\"");
+    // A voice tuned: ElevenLabs takes voice_settings whole, so the two it
+    // leaves at their defaults are named with them (0.75 and speaker boost
+    // on, its documented defaults), else a stability alone would reset them.
+    if (style->stability >= 0 || style->speed > 0) {
+      char vs[160];
+      int n = snprintf(vs, sizeof(vs),
+                       ",\"voice_settings\":{\"stability\":%.2f,"
+                       "\"similarity_boost\":0.75,\"style\":0,"
+                       "\"use_speaker_boost\":true,\"speed\":%.2f}",
+                       style->stability >= 0 ? style->stability : 0.5,
+                       style->speed > 0 ? style->speed : 1.0);
+      assert(n > 0 && (size_t)n < sizeof(vs));
+      jsonbuf_append(&req, vs);
+    }
   }
   jsonbuf_append(&req, "}");
   if (req.overflow) {
@@ -562,9 +637,12 @@ static bool SayFallsThrough(const SayRelay *r) {
 }
 
 static int SayRelayText(int client_fd, Arena *arena, const char *text,
-                        const char *voice, bool pcm) {
+                        const char *voice, const SayStyle *style, bool pcm) {
   assert(client_fd >= 0);
-  assert(text != NULL && voice != NULL);
+  assert(text != NULL && voice != NULL && style != NULL);
+  // the seat's Aura-2 voice when ElevenLabs cannot: the page's, or the table's
+  const char *aura =
+      style->fallback ? style->fallback : SayFallbackVoice(voice);
   assert(g_say.provider != SAY_OFF);
 
   HTTPBodyStream s;
@@ -579,9 +657,8 @@ static int SayRelayText(int client_fd, Arena *arena, const char *text,
     pthread_mutex_unlock(&g_say.hold_lock);
     if (now < until) {
       // remembered: straight to Deepgram, without asking ElevenLabs again
-      int st =
-          SayRelayOnce(&r, &s, client_fd, arena, SAY_DEEPGRAM, g_say.grant_auth,
-                       text, SayFallbackVoice(voice), pcm, 0, &rc);
+      int st = SayRelayOnce(&r, &s, client_fd, arena, SAY_DEEPGRAM,
+                            g_say.grant_auth, text, aura, style, pcm, 0, &rc);
       if (st >= 0) {
         SayLog("Say: elevenlabs held off (%s, %lds more), deepgram spoke "
                "%zu chars\n",
@@ -598,9 +675,9 @@ static int SayRelayText(int client_fd, Arena *arena, const char *text,
                            why, dg, r.err);
     }
   }
-  int st =
-      SayRelayOnce(&r, &s, client_fd, arena, g_say.provider, g_say.auth, text,
-                   voice, pcm, fallback ? SAY_FIRST_BYTE_SECONDS : 0, &rc);
+  int st = SayRelayOnce(&r, &s, client_fd, arena, g_say.provider, g_say.auth,
+                        text, voice, style, pcm,
+                        fallback ? SAY_FIRST_BYTE_SECONDS : 0, &rc);
   if (st >= 0) {
     // A line a request: what the voice costs is counted in characters
     // (ElevenLabs' credits, Deepgram's dollars), and the log is where the
@@ -637,7 +714,7 @@ static int SayRelayText(int client_fd, Arena *arena, const char *text,
   char el[SAY_ERR_BODY_MAX + 1];
   snprintf(el, sizeof(el), "%s", r.err);
   st = SayRelayOnce(&r, &s, client_fd, arena, SAY_DEEPGRAM, g_say.grant_auth,
-                    text, SayFallbackVoice(voice), pcm, 0, &rc);
+                    text, aura, style, pcm, 0, &rc);
   if (st >= 0) {
     SayLog("Say: elevenlabs refused (%s), deepgram spoke %zu chars%s\n", why,
            strlen(text), hold ? "; elevenlabs held off a while" : "");
@@ -699,6 +776,14 @@ static int HandleSay(int client_fd, Arena *arena, const char *method,
                          "at most %d",
                          SAY_VOICE_MAX);
   }
+  SayStyle style = {NULL, -1, 0};
+  int bad = SayStyleParse(arena, body, &style);
+  if (bad) {
+    return SendJSONError(client_fd, 400,
+                         bad == 1   ? "'style.fallback' is an Aura-2 voice name"
+                         : bad == 2 ? "'style.stability' is 0 to 1"
+                                    : "'style.speed' is 0.7 to 1.2");
+  }
   bool pcm = false;
   if (json_get_string_arena(arena, body, "format", &format) && format &&
       format[0]) {
@@ -712,7 +797,7 @@ static int HandleSay(int client_fd, Arena *arena, const char *method,
     return SendJSONError(client_fd, 429, "Already speaking %d replies",
                          SAY_MAX_CONCURRENT);
   }
-  int status = SayRelayText(client_fd, arena, text, voice, pcm);
+  int status = SayRelayText(client_fd, arena, text, voice, &style, pcm);
   atomic_fetch_sub(&g_say.live, 1);
   return status;
 }

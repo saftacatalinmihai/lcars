@@ -252,7 +252,7 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
   - `test/config.py` (~30s): `lcars_config.h` - the version (`lcars
     version`, the start log), `lcars.env` found by `--data`,
     `$LCARS_DATA_DIR` or the working directory, its format, the real
-    environment winning, `LCARS_PORT`, the start log's `Config:` line;
+    environment winning, `LCARS_PORT`, the start log's `Config:` line, `GET /zone` (`LCARS_TZ`, the deck's night watch);
     `lcars init` (what it makes, a server started on it, a second run
     changing no byte, the refusals).
   - `test/onebin.py` (~60s): `make lcars-one` - serving from `--data`
@@ -409,6 +409,15 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     hourly pass - start/end pairing (a mis-tapped start, an orphan end, out
     of range, creation order), the stopwatch's one-row spans counted once,
     gym sessions, ownership, and that `--dry-run` writes nothing.
+  - `python3 scripts/test_steward.py` (~2s): `scripts/steward.py`, the
+    engineers' data fixes, against test_crew_notes' stand-in journal -
+    every op (`new` too), the 412, a refused kind, the `crew_fix` record, who from
+    the worktree, and no secret of `~/.env` in any output.
+  - `python3 scripts/test_voices.py` (~2s): `scripts/voices.py`, the
+    captain's ElevenLabs account for the engineers' voices
+    (docs/design/engineer-voices.md) - `account`, `design` and `create`
+    against a stand-in, the refusals before a request, the previews saved
+    where they belong, and no key in any output.
   - `python3 scripts/test_crew_notes.py` (~2s; `--real` ~40s against a
     scratch build): crew notes - `scripts/crew_notes.py`, `crew.py notes
     watch` and `note`: the note rule (and the page's copy, in node), the
@@ -566,8 +575,12 @@ make lcars-static     # the release binary: lcars-embed, -static, musl - in Alpi
     `--audit-only`'s groups.
   - `python3 scripts/test_no1.py` (~4s): `no1.py journal` - which
     lcars-cli it runs, with Number One's login, and that lcars-cli has no
-    `--db` at all; the refresh (its log, the Stop hook's clear), and
-    `launched_bare`, a session herdr relaunched without its hooks.
+    `--db` at all; the refresh, `engineer.py refresh <name>`
+    (docs/design/context-refresh.md): Number One's (its log, the Stop
+    hook's clear) and an engineer's (the turn that read the [refresh]
+    ends in the clear, the handover typed back with its crew_msg row, one
+    out of the seat queued, the refusals); and `launched_bare`, a session
+    herdr relaunched without its hooks.
 - The on-screen keyboard is the browser's: nothing in the page fits the
   layout to it (iOS pans to the field, Android resizes). `test/keyboard.py`
   opens every view, palette row, the editor and the reader at a phone's size
@@ -682,6 +695,16 @@ is the JSON scanner both programs share.
   `lcars-ui/manual/` at `/ui/manual/`, both committed with the change); `site/manual/test/manual.py`,
   in run.sh, fails until it does (docs/design/manual.md). A new feature a
   newcomer would look for gets its lines there too.
+- **Data fixes to the captain's journal** (a title trimmed, a field set,
+  a text replaced) only on the captain's word, given through Number One,
+  and only through `scripts/steward.py` in the live checkout (Number One:
+  `no1.py steward`): `get ID --json` first, one change to one entry per
+  call, `get` again to read it back (`new kind=K title=T TEXT` makes
+  an entry of his, its id printed). It writes with the steward login
+  (the server's gate: the captain's kinds only), refuses a row that moved
+  since the read (412), and records each fix as a `crew_fix` entry naming
+  who made it, the op and the old and new value. Never `~/.env` read by
+  hand, never the main login, never `lcars.db`.
 - **State the captain or the crew should see lives in the journal**, as
   entries of a kind the writer's login owns (`crew_*` for the crew,
   `no1_*` for Number One), not in files on the box: he can read and edit

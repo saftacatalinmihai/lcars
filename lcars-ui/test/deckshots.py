@@ -47,7 +47,9 @@ ap.add_argument("--shots", action=argparse.BooleanOptionalAction, default=True)
 # a close look at one thing (a model, docs/design/deck-pipeline.md): NAME,x,z,yaw[,pitch],
 # stood at (x, z) looking yaw (0 the bow, as above), or prop:PROP[,metres], a
 # placed model (`model()` in the page) seen from its front, 1.4 m off by
-# default (prop:PROP,metres,degrees: that many degrees round from it); or crew:N[,metres[,degrees]], the Nth of the crew (`__deck.crew()`,
+# default (prop:PROP,metres,degrees: that many degrees round from it;
+# prop:PROP,metres,degrees,K the Kth placement alone, where a room places
+# dozens: chairs, desks); or crew:N[,metres[,degrees]], the Nth of the crew (`__deck.crew()`,
 # in buildCrew's order) seen from their front, or that many degrees round
 # from it, crew:N,metres,degrees,height looking at that height, 1.3 m by
 # default (the chest; 1.62 the face), or crew:ROOM the first of a generated
@@ -103,6 +105,9 @@ ap.add_argument("--match", default="")
 # ROOM=I[,J...]: only those of a room's four looks (0 the bow, as YAWS),
 # for ROOMS and GEN alike; repeatable
 ap.add_argument("--pick", action="append", default=[])
+# more of the page's query, "&"-joined after ?demo&touch (e.g. lightmap: the
+# lightmap pilot, deck-remodel slice 8)
+ap.add_argument("--query", default="")
 args = ap.parse_args()
 PICK = {k: [int(i) for i in v.split(",")] for k, v in (p.split("=", 1) for p in args.pick)}
 OUT = pathlib.Path(args.out)
@@ -136,7 +141,7 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
 
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=args.page))
 threading.Thread(target=srv.serve_forever, daemon=True).start()
-URL = f"http://127.0.0.1:{srv.server_address[1]}/deck.html?demo&touch"
+URL = f"http://127.0.0.1:{srv.server_address[1]}/deck.html?demo&touch" + ("&" + args.query if args.query else "")
 
 # frames: rAF deltas would be the 60Hz clock in headless; the time inside
 # the deck's own frame callback is what a slower machine would feel
@@ -453,6 +458,8 @@ with sync_playwright() as p:
             if not spots:
                 print(f"  prop {name}: not placed", file=sys.stderr)
             for k, q in enumerate(spots):
+                if len(far) > 2 and k != int(far[2]):
+                    continue
                 fx = q["fx"] * math.cos(a) + q["fz"] * math.sin(a)
                 fz = q["fz"] * math.cos(a) - q["fx"] * math.sin(a)
                 x, z = q["x"] + fx * d, q["z"] + fz * d

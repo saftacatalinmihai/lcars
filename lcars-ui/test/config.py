@@ -87,6 +87,16 @@ class Run:
         c.close()
         return st
 
+    def zone(self, user, pw):
+        """GET /zone's answer, the captain's zone from LCARS_TZ."""
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        auth = base64.b64encode(f"{user}:{pw}".encode()).decode()
+        c.request("GET", "/zone", headers={"Authorization": "Basic " + auth})
+        r = c.getresponse()
+        got = (r.status, r.read().decode())
+        c.close()
+        return got
+
     def lines(self):
         return self.log_path.read_text().splitlines()
 
@@ -126,6 +136,7 @@ def envfile(binary, tmp):
         check(s.line("Config: ") == f"Config: no lcars.env in {d.resolve()} (the environment only)",
               f"no file: said (got {s.line('Config: ')!r})")
         check(s.status("u", "p") == 200, "the environment's login stands")
+        check(s.zone("u", "p") == (200, '{"zone":null}'), f"no LCARS_TZ: GET /zone says null (got {s.zone('u', 'p')})")
         want = f"Media: {d.resolve()}/media (the default; LCARS_MEDIA_ROOT moves it)"
         check(s.line("Media: ") == want, f"no LCARS_MEDIA_ROOT: <data dir>/media, absolute (got {s.line('Media: ')!r})")
     finally:
@@ -166,6 +177,8 @@ def envfile(binary, tmp):
             check(s.status("fileuser", pw) == 200,
                   f"{how}: its port and its login, export and quotes stripped, # kept in a value")
             check(s.status("fileuser", "wrong") == 401, f"{how}: a wrong password still refused")
+            check(s.zone("fileuser", pw) == (200, '{"zone":"Europe/London"}'),
+                  f"{how}: GET /zone is the file's LCARS_TZ (got {s.zone('fileuser', pw)})")
             got = s.line("Config: read")
             check(got == f"Config: read {f.resolve()}: 4 set, 0 already in the environment, 3 skipped",
                   f"{how}: the start log names the file and its counts (got {got!r})")
@@ -190,6 +203,8 @@ def envfile(binary, tmp):
     try:
         check(s.status("fileuser", "envpass") == 200, "the environment's password, the file's user")
         check(s.status("fileuser", pw) == 401, "the file's password refused")
+        check(s.zone("fileuser", "envpass") == (200, '{"zone":"UTC"}'), "GET /zone: the environment's LCARS_TZ")
+        check(s.zone("fileuser", "wrong")[0] == 401, "GET /zone wants the login")
         got = s.line("Config: read")
         check(got == f"Config: read {f.resolve()}: 2 set, 2 already in the environment, 3 skipped",
               f"the counts say so (got {got!r})")

@@ -394,6 +394,23 @@ estimate includes one re-roll of its images.
    Two first-bake faults caught in the looks: a brushed rim lofted as a
    full-width solid capped over the table's wood and the desks' colour
    (now each rim tops out under the top it rings).
+   **The normal maps made smaller** (2026-10-29): the three were encoded
+   from Blender's PNGs, whose bake noise (under a level, the webp's q90
+   smooths it) UASTC's RDO cannot pack: 218-261 kB each for maps nearly
+   flat (their relief under 2 degrees at the 99th percentile against a
+   flat map). Six more rooms' were UASTC at 5-11 times their webp
+   (arboretum, concourse, lounge, sickbay, engineering, lab). All nine
+   are ETC1S now, from the start (`NORM_ETC1S` in
+   `deck-model-assets.mjs`, so a rebuild keeps it): 2-18 kB each, 1097 to
+   68 kB together, the conference 502 to 277 kB on the wire, the school
+   431 to 218, the mess 431 to 173. ETC1S drops the sub-degree relief
+   (half size UASTC was 13-49 kB and kept some); at high, main beside the
+   branch, the conference chair and table, two classroom desks, a mess
+   table and the arboretum, lounge and concourse look the same by eye.
+   Not changed: Ten Forward (2.4 times its webp) and the bridge's tiles,
+   whose relief is real (ETC1S 14 degrees off at the 99th percentile on
+   the wall's), nor the base and ORM maps. deckmem `--check` at low
+   passes (textures at a walk's end 273.6 MB).
 8. **Lightmap pilot, Ten Forward.** The room's shell and its baked
    props exported from the page (three's `GLTFExporter` in headless
    Chromium, the merged static meshes of that room), a second UV set and
@@ -404,6 +421,36 @@ estimate includes one re-roll of its images.
    and what does it cost a room. Budgets: +0 calls, +0 triangles, +1
    texture (~0.7-1.5 MB GPU), boot within noise, the shadows' look kept.
    0 credits. If it wins, a slice a room.
+   **Built** (2026-10-29, 0 credits), behind `deck.html?lightmap`
+   (`?lightmap=H,E,K` sets the fill and the gain, to compare): the page
+   records which triangles of each merged material lie in the room
+   (`lmSelect`, at the merge, before a stand-in collapses), and
+   `scripts/deck-models/lightmap.py` exports them as drawn with three's
+   GLTFExporter (fetched into the build cache, not shipped) in headless
+   Chromium - 19 deck materials and the room's glb, 121,892 triangles -
+   then `lightmap_bake.py` in Blender welds, smart-unwraps and packs
+   them into one 1024² atlas and bakes the four pooled lamps (Cycles
+   diffuse, direct and indirect, no colour, 256 samples, 97 s; three's
+   decay-1.6 lamps matched at 3.5 m from a measured watt), written as
+   `lm_tenforward.ktx2` (ETC1S sRGB, 163 kB), `.bin` (a 16-bit UV per
+   corner, 1.4 MB, 359 kB gzipped: `/ui/` now gzips `.bin`) and `.json`
+   (each material's count, checked before it is applied). The page puts
+   `uv1` on each whole merged buffer (the room's corners in the atlas,
+   the rest at its black corner), `lightMap` on the material, takes the
+   lamps out of the light pool and the room's fill to 0.4/0.25 with the
+   bake at 1.6x (picked by eye from three). Measured at low: calls +0
+   (one view of four +1, not explained), triangles +0, one texture of
+   1.3 MB, boot within noise (57.2 s main, 54.0-55.8 branch), deckmem
+   `--check` passes; but **GPU +15.3 MB** at boot and at a walk's end
+   (buffers 92.5 to 106.4 MB: the second UV set over deck-wide merged
+   buffers), 8 programs more, heap +27 MB at boot. **Verdict: no win,
+   no slice a room.** Low already looked grounded under the furniture
+   (the floors' baked occlusion and the contact patches); the bake adds
+   warm pools and gradation on the ceiling, beams and walls, and the
+   bar's foot, for memory the phone has least of. Kept for later: the
+   tool works; a room with its own materials first (+1 call a shared
+   material) would cut the buffers to ~1 MB. The report:
+   <https://<server>/media/reports/2026/10/lightmap-pilot-ten-forward-deck-remodel-slice-8-f19fd879.html>.
 9. **`gen.py`** (section 3.4) and the prompt kit in deck-pipeline.md's
    steps. Built when 5 or 7 first takes the generated road. 0 credits
    to build.
@@ -415,6 +462,31 @@ estimate includes one re-roll of its images.
     Scripted; a generated plant pack (**~11-12**) only if the current
     foliage is judged the weak part. Budgets: ≤ 5 k triangles a room,
     +0 calls (into the sickbay atlas already there).
+    **Built** (2026-10-29, 0 credits): hydroponics in code
+    (`hydroponics()`): `MX.growLight` a lens at emissive 0.95 under a
+    metal housing (was a magenta `glow` at 2.2: blown out at high), and
+    a magenta pool spot (`light()`, 6, 4.5 m) a metre over the leaves,
+    one a trough, two past 4 m; the trough a stainless body (`M.metal`,
+    which the room's pipe already drew: `M.trim` there was its own draw,
+    +1 in every look, `--calls-by`), a kick in the soil's dark, a rim of
+    four rails, the soil 4 cm under it; the rails, kick and housing plain
+    boxes (`sbox`: six rounded ones a trough were +9 k a bay). Sickbay in
+    `sickbay.py`: the biobed a tub (one loft out, over the lip, down to
+    the pad), a trim band, a sloped readout with the LCARS bars at its
+    foot and a sill of them under the head display (baked, +0 calls; the
+    page's lit screen stays the one that glows), 1120 to 1292
+    triangles; the wall cabinet's black windows frosted panes in frames,
+    shelves and jars behind them, a raised panel under, bar handles
+    beside the lit strip, no bevels on the door's parts (440 to 640: a
+    bay stands a dozen). Wire 398 kB with the KTX2 atlas (382 on main).
+    deckshots at low against main (decks 8 and 12 sickbay, hydroponics on
+    11 and 26 - deck 8 has no hydroponics bay): calls +0 (a ±1 in a look
+    the noise seen before), triangles +1.9 k (deck 8's sickbay), +3.6 k
+    (deck 12's), +0.3 k (hydroponics); boot 41.4 and 36.9 s against
+    41.5; deckmem `--check` at low over decks 12 and 11 passes (peak 478
+    MB, nothing growing). The foliage (three crossed leaf cards) stays
+    green under the magenta and reads flat close up: the weak part left,
+    the plant pack the captain's to decide.
 
 **The credits, all ten:** 1.5-3 (4) + 0-24 (5) + 0-12 (7) + 0-12 (10):
 **about 2-50 Higgsfield credits**, most of it only if a scripted sofa,

@@ -7,7 +7,7 @@
 // both together (minor for a feature, patch for a fix) - test/run.sh fails
 // when they disagree. It stays in the file's first kilobyte: that is all the
 // update check reads of the server's copy (updFetchVersion, a ranged GET).
-const APP_VERSION = "0.339.3";
+const APP_VERSION = "0.347.2";
 </script>
 <script>
 /* ===================== csp =====================
@@ -413,6 +413,18 @@ body[data-alert="yellow"] header::after{box-shadow:0 0 12px var(--alert-yellow-g
   text-transform:uppercase;font-family:var(--disp);letter-spacing:.06em}
 .halert[data-level="red"]{background:var(--alert-red);border-color:var(--alert-red);color:var(--ink)}
 .halert[data-level="yellow"]{background:none;border-color:var(--alert-yellow);color:var(--alert-yellow)}
+/* the alert's sheet (openAlert): a row per overdue task in its kind's colour,
+   then the other reasons; a thumb's 56px each, as the task board's rows */
+.alrows{display:flex;flex-direction:column;gap:6px}
+.alrow{display:flex;flex-direction:column;justify-content:center;gap:2px;width:100%;min-height:56px;box-sizing:border-box;
+  padding:6px 12px;text-align:left;background:var(--well);color:var(--txt);font:inherit;
+  border:0;border-left:3px solid var(--k,var(--line));border-radius:0 var(--r6) var(--r6) 0}
+.alrow.red:not([style]){border-left-color:var(--alert-red)}
+button.alrow{cursor:pointer}
+button.alrow:active,button.alrow.busy{background:var(--panel2)}
+@media (hover:hover){ button.alrow:hover{background:var(--panel2)} }
+.alrow .alt{overflow-wrap:anywhere}
+.alrow .alm{color:var(--dim);font-size:var(--fs-meta)}
 /* the outbox's capsule (obPaint): offline, waiting, or something to resolve */
 .hq{white-space:nowrap;border-color:var(--orange);color:var(--orange);display:inline-flex;align-items:center;gap:8px}
 .hq.bad{background:var(--red);border-color:var(--red);color:var(--ink)}
@@ -2778,6 +2790,16 @@ body.caldrag .calgrip{background:transparent}
    pretending a click would change something */
 .vc.on{background:var(--sky);border-color:var(--sky)}
 .vc.on .vcl,.vc.on .vcx{color:var(--ink)}
+.vbtns{display:flex;flex-wrap:wrap;gap:6px;align-self:flex-start}
+/* the arrange sheet (openArrangeViews): a row per view at a thumb's 56px,
+   its name and its two moves, as the alert sheet's rows */
+.varows{display:flex;flex-direction:column;gap:6px}
+.varow{display:flex;align-items:center;gap:6px;min-height:56px;box-sizing:border-box;
+  padding:6px 12px;background:var(--well);border-left:3px solid var(--sky);border-radius:0 var(--r6) var(--r6) 0}
+.varow .van{flex:1;min-width:0;color:var(--sky);overflow-wrap:anywhere}
+.varow .vam{min-width:44px;min-height:44px;font-size:var(--fs-body)}
+.varow .vam:disabled{opacity:.35}
+.varow.moved{background:var(--panel2)}
 /* the pinned entries, above the list: the same chip in gold, one scrolling
    row so eight never push the list down by more than a line */
 .pinrow{display:flex;gap:6px;padding:4px 10px 6px;overflow-x:auto;flex:0 0 auto;scrollbar-width:none}
@@ -3144,6 +3166,9 @@ button.qitem:focus-visible,button.qitem:active{background:var(--panel)}
 .chgauge small{font:600 var(--fs-cap) var(--disp);letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
 .chgauge b{font:600 var(--fs-meta) var(--sans);margin-top:2px}
 .chgauge.over b,.chgauge.over small{color:var(--amber)}
+/* past the mark it is a control (engGaugeTap): its hit area 44px wide */
+.chgauge.over{position:relative;cursor:pointer}
+.chgauge.over::before{content:"";position:absolute;inset:-6px -7px}
 .chrt .chrc{flex:0 0 auto;font-style:normal;color:var(--dim)}
 .chrt .chrc.over{color:var(--amber)}
 .chrt .chinq{color:var(--purple);margin-right:4px}
@@ -3383,17 +3408,25 @@ button.qitem:focus-visible,button.qitem:active{background:var(--panel)}
    Helvetica Neue, wider): 2px short, and ⋯ wrapped to a row of its own
    (QA 2026-10-13 #14). Here the title's floor is 80px (still five or six
    letters), the pills and gaps a touch tighter: ~30px more room. The
-   context gauge (an engineer's) costs ~25px of it: with the fallback font
-   the row then fits with a few px to spare (qa_chat's engineer pass). */
+   context gauge (an engineer's) costs ~25px of it, and the 44px back
+   button (the targets' rule) 10px more: with the fallback font the row
+   fits with 3px gaps and 5px pill padding, a few px to spare (qa_chat's
+   engineer pass; at 4px and 6px ⋯ wrapped again, 6px short). */
 @media (max-width:400px){
-  .chth .chhdr{gap:4px}
+  .chth .chhdr{gap:3px}
   .chth .chtitle{min-width:80px}
-  .chth .chvoice,.chth .chmodel{letter-spacing:.03em;padding:0 6px}
+  .chth .chvoice,.chth .chmodel{letter-spacing:.03em;padding:0 5px}
   .chth .chgauge{min-width:0;padding:0;margin:0 -2px}   /* no border: the gaps can close up */
   .chth .chgauge b{font-size:var(--fs-cap);letter-spacing:-.03em}
 }
-.chtalk{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+.chtalk{flex:0 0 auto;display:flex;flex-wrap:nowrap;align-items:center;gap:8px;position:relative;
   padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px))}
+/* Nothing in the talk row moves while it is held (the captain, 2026-10-27:
+   "the UI jumps around"): the row never wraps (the speaking mark used to
+   push it onto two lines, and a press - which stops the voice - took the
+   mark away and dropped the box under the finger: the keyboard), Hold to
+   talk keeps one width whatever its label says, and in a conversation,
+   where it is off, it gives its place to the conversation's own pills */
 .chtalk[hidden]{display:none}
 /* the home indicator's inset goes under the last row: the box's when it is
    the last, the talk row's when that is up (QA 2026-10-13 #6: a hold on
@@ -3401,7 +3434,9 @@ button.qitem:focus-visible,button.qitem:active{background:var(--panel)}
 .chcomp:has(+ .chtalk:not([hidden])){padding-bottom:0}
 .chtalk button{min-height:40px;border-radius:var(--r20);border:0;background:var(--panel2);color:var(--txt);cursor:pointer;
   font:600 var(--fs-body) var(--disp);letter-spacing:.08em;text-transform:uppercase;padding:0 14px;white-space:nowrap}
-#talkptt{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;background:var(--amber);color:var(--ink)}
+#talkptt{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;background:var(--amber);color:var(--ink);
+  min-width:8.6em;text-align:center}
+.chtalk.conv #talkptt{display:none}
 #talkptt.on{background:var(--red);animation:chsay .5s ease-in-out infinite alternate}
 #talkptt.busy{background:var(--sky)}
 #talkptt:disabled{opacity:.35;cursor:default}
@@ -3413,6 +3448,14 @@ button.qitem:focus-visible,button.qitem:active{background:var(--panel)}
 #talkout{background:none;border:1px solid var(--panel2);text-transform:none;letter-spacing:0;font:var(--fs-body) var(--sans)}
 #talkout[hidden]{display:none}
 #chsay{background:none;border:1px solid var(--sky);color:var(--sky);text-transform:none;letter-spacing:0;font:var(--fs-body) var(--sans)}
+/* the speaking mark floats over the thread's foot, above the box, rather
+   than taking a place in the talk row: it comes and goes with every reply,
+   and the row and the box stay where they are; the thread keeps room under
+   its last line for it */
+.chcomp{position:relative}
+.chcomp #chsay{position:absolute;right:8px;bottom:calc(100% + 6px);z-index:1;background:var(--bg);
+  min-height:40px;border-radius:var(--r20);cursor:pointer;padding:0 14px;white-space:nowrap}
+.chth:has(#chsay:not([hidden])) .chlog{padding-bottom:52px}
 #chsay[hidden]{display:none}
 #chsay::before{content:"\25A0  "}
 #chsay.on{animation:chsay 1.2s ease-in-out infinite alternate}
@@ -5164,14 +5207,18 @@ input[type=range].fine::-moz-range-track{
     </div>
 
     <!-- A filter combination is already a query string; a saved view is that
-         string with a name on it. Kept in localStorage, like every other
-         preference here — the server has no idea these exist. -->
+         string with a name on it. Kept in the journal's `views` settings
+         entry (viewsDoc), in the order Arrange gives them. -->
     <div class="grp" id="viewgrp">
       <div class="lbl" style="--c:var(--sky)" data-tag="01-664" data-stat="views">Views</div>
       <div id="views" class="chips"></div>
       <div class="hint" id="viewhint"></div>
-      <button type="button" class="mini" id="bSaveView" style="align-self:flex-start"
-              title="Pin the search, the filters and the sort under a name (V)">&#43; Save this view</button>
+      <div class="vbtns">
+        <button type="button" class="mini" id="bSaveView"
+                title="Pin the search, the filters and the sort under a name (V)">&#43; Save this view</button>
+        <button type="button" class="mini" id="bArrViews" hidden
+                title="Put the saved views in the order you want">&#8645; Arrange</button>
+      </div>
     </div>
 
     <div class="grp">
@@ -9268,7 +9315,7 @@ async function loadAll() {
   // What the next boot syncs forward from, as this load will vouch for it.
   // The first page is one consistent answer, and anything written after it
   // was served is stamped no earlier than its newest row.
-  mirror.mark = maxStamp(first);
+  mirror.mark = markClamp(maxStamp(first), stats.now_utc);
   mirror.maxId = pin;
 
   const dump = await dumpP;
@@ -9288,9 +9335,12 @@ async function loadAll() {
       }
     }
     out[1] = rows;                           // flush() adds the ones not yet held
-    flush(true);
+    // Finished before the last paint, not after: an empty journal has no row
+    // for a later paint to come with, and the list would say "scanning…" for
+    // ever (the paged path below has always done it in this order).
     st.loading = false;
-    mirror.mark = maxStamp(rows, mirror.mark);
+    flush(true);
+    mirror.mark = markClamp(maxStamp(rows, mirror.mark), stats.now_utc);
     if (!pin) for (const r of rows) if (r.id > mirror.maxId) mirror.maxId = r.id;
     console.info(`lcars: ${rows.length} rows in one /dump`);
     obOverlay();
@@ -9546,6 +9596,18 @@ function maxStamp(rows, from) {
   return m;
 }
 
+/* The mark, never ahead of the server's clock. POST /entries takes a client's
+   last_modified_at_utc as given, so a row can carry a stamp hours in the
+   future (a scheduled one, shots.py's rig, a skewed importer); a mark taken
+   from it would make modified_since skip every real edit until that hour came
+   round. `now` is /stats' now_utc, the server's own clock as it answered -
+   the clock every write is stamped by - so anything written after it is
+   stamped at or above it. Lowering the mark only asks again for rows already
+   held (the future one, each sync, until its hour), never misses one. A
+   server without now_utc leaves the mark as it was: the device's clock is
+   never a stand-in (the section comment). */
+const markClamp = (mark, now) => (now && mark > now ? now : mark);
+
 /* The IndexedDB backend. Kept behind three calls so the tests, which run in a
    JS engine without IndexedDB, can swap in a Map. Every call is best-effort:
    a private window, a full disk or a browser that refuses storage all read as
@@ -9703,6 +9765,10 @@ async function deltaSync(again) {
       api("/stats?deleted=all"),
     ]);
   } catch (e) { return { error: e }; }
+  // A mark kept from before markClamp, ahead of the server's clock: the
+  // answer above may have skipped edits stamped between now and it, and
+  // nothing but a full load can say which.
+  if (stats.now_utc && since > stats.now_utc) return { reload: true };
 
   const seen = new Map();
   for (const r of mod) seen.set(r.id, r);
@@ -9725,7 +9791,7 @@ async function deltaSync(again) {
   }
   // The mark moves only as far as the modified_since answer itself vouches
   // for; the id ceiling only as far as the min_id answer saw.
-  mirror.mark = maxStamp(mod, since);
+  mirror.mark = markClamp(maxStamp(mod, since), stats.now_utc);
   for (const r of fresh) if (r.id > mirror.maxId) mirror.maxId = r.id;
   if (seen.size) mirrorWrite([...seen.values()], false);
 
@@ -9870,6 +9936,8 @@ const srvSeen = new Map();
 const OB_ROW = { kind: "", title: "", content: "", value_int: 0, value_float: 0, done_bool: 0,
                  deleted: 0, created_at_utc: "", last_modified_at_utc: "", start_date: "", end_date: "" };
 const obSame = (a, b) => String(a ?? "") === String(b ?? "");
+// a column's: an empty title and the server's placeholder are one (titleOwn)
+const obSameF = (f, a, b) => f === "title" ? obSame(titleOwn(a ?? ""), titleOwn(b ?? "")) : obSame(a, b);
 const obLen = s => new TextEncoder().encode(String(s || "")).length;
 
 /* /entries and /entries/<id> are the outbox's; nothing else is. `remapped`
@@ -10131,7 +10199,7 @@ async function obSendCreate(op) {
   // Edited while it was on its way: what moved since is an edit of the new row.
   if (op.ver !== ver) {
     const row = Object.assign({}, op.row, { id: fresh.id });
-    const fields = OB_FIELDS.filter(f => f !== "last_modified_at_utc" && !obSame(row[f], fresh[f]));
+    const fields = OB_FIELDS.filter(f => f !== "last_modified_at_utc" && !obSameF(f, row[f], fresh[f]));
     if (fields.length) {
       ob.ops.set(fresh.id, { id: fresh.id, create: false, base: plainRow(fresh), row, fields,
                              ver: 1, at: op.at, held: false });
@@ -10202,8 +10270,8 @@ function obMerge(op, server) {
   const send = {}, clash = [];
   for (const f of op.fields) {
     const mine = op.row[f], theirs = server[f], base = op.base ? op.base[f] : undefined;
-    if (obSame(mine, theirs)) continue;
-    if (op.base && obSame(theirs, base)) { send[f] = mine; continue; }
+    if (obSameF(f, mine, theirs)) continue;
+    if (op.base && obSameF(f, theirs, base)) { send[f] = mine; continue; }
     const c = { f, mine, theirs };
     if (f === "content") Object.assign(c, merge3(base, mine, theirs));
     clash.push(c);
@@ -10226,7 +10294,7 @@ function obSettle(op, ver, fresh, sent) {
   // An open, unsaved editor is only brought up to date when the server's row
   // is exactly what this device sent, so its next save is not a conflict with
   // itself; anything the server merged in is for that save's own check.
-  const pure = OB_FIELDS.every(f => f === "last_modified_at_utc" || obSame(fresh[f], op.row[f]));
+  const pure = OB_FIELDS.every(f => f === "last_modified_at_utc" || obSameF(f, fresh[f], op.row[f]));
   if (editing && !pure) return;
   landBody(e, fresh);
   if (still) Object.assign(e, still.row);
@@ -10572,11 +10640,13 @@ function signInCap() {
   h.appendChild(b);
 }
 
-$("#hq").onclick = () => {
+// the outbox's capsule, and the alert sheet's rows for the link and the writes
+function obTap() {
   if (ob.conflicts.length) { obAsk(); return; }
   toast(ob.ops.size || ob.media.length ? "trying the server…" : "checking the link…");
   obTry();
-};
+}
+$("#hq").onclick = obTap;
 
 function showOffline(e) {
   $("#count").textContent = "offline";
@@ -11975,7 +12045,18 @@ function noteSeen() {
   if (!seenId) seenId = top;
 }
 
-const freshCount = () => (seenId > 0 ? st.all.filter(isFresh).length : 0);
+// What the list would show of them, not every row above the mark: the crew's
+// kinds, the deleted and whatever else narrows the list hide new rows too, and
+// a toast saying 6 over a list of 5 sends the captain looking for the sixth.
+// makeRowFilter is the list's own predicate (the fresh filter itself among
+// its narrowings, which every row counted here passes anyway).
+function freshCount() {
+  if (!(seenId > 0)) return 0;
+  const shown = makeRowFilter();
+  let n = 0;
+  for (const e of st.all) if (isFresh(e) && shown(e)) n++;
+  return n;
+}
 
 /* The sidebar's own line about it, and the way to see only those. The filter
    itself is one more row in CONTROLS — a hidden input holding "1" or "" — so
@@ -13908,10 +13989,17 @@ function dayMapSaid(which) {
    an empty title, are shown as the body's first line instead (cut at about
    SHOWN_TITLE_MAX characters), with derived set so the caller can dim it:
    it is the entry's opening, not a name anyone gave it. Only what is drawn
-   changes - the stored title and the editor's title field keep the real one.
+   changes - the stored title keeps the placeholder (the linker finds what to
+   name by it). The editor's title field shows it as empty (setForm, titleOwn):
+   shown there as if it were a title, it was typed in front of, and saved as
+   "<the title>HTTP Entry" (entry 17058, 26 Oct 2026). An empty field and the
+   placeholder are the same title to every save (updateBody, the outbox), so
+   opening an untitled entry and saving it never blanks the stored one.
    A row whose body has not been fetched yet has no first line to borrow, and
    is "(untitled)" until it has. */
 const PLACEHOLDER_TITLE = "HTTP Entry";
+// a title as the writer sees it: the server's placeholder is no title
+const titleOwn = t => t === PLACEHOLDER_TITLE ? "" : t;
 const SHOWN_TITLE_MAX = 60;
 function shownTitle(e) {
   if (clsLocked(e)) return { t: clsPlaceholder, derived: true };
@@ -14246,7 +14334,10 @@ function renderMore(n = FILL_ROWS) {
         st.kinds.length === 1 && st.kinds[0] !== NOKIND ? esc(kindLabel(rawKind(st.kinds[0]))) + " " : ""
       }&ldquo;${esc(searchTitle())}&rdquo;</button>` : ""}
       ${!st.loading && narrowed ? '<button class="pill go" id="bClearF">Clear filters</button>' : ""}
+      ${!st.loading && !st.all.length && !searchTitle() ? '<button class="pill go" id="bNewFirst">+ New entry</button>' : ""}
     </div>`;
+    const nf = $("#bNewFirst");
+    if (nf) nf.onclick = () => newEntry();
     const cf = $("#bClearF");
     if (cf) cf.onclick = clearFiltersAsked;
     const nq = $("#bNewQ");
@@ -15325,7 +15416,7 @@ function formValues() {
 }
 function setForm(e) {
   $("#e_kind").value = e.kind || "";
-  $("#e_head").value = e.title || "";
+  $("#e_head").value = titleOwn(e.title || "");
   // A body that has not arrived is not an empty one: an editable blank box here
   // would let a save write the real content away.
   const pend = needsBody(e);
@@ -18152,7 +18243,8 @@ function updateBody(v, cur) {
   const body = {};
   const strEq = (a, b) => String(a ?? "") === String(b ?? "");
   if (!strEq(v.kind, cur.kind)) body.kind = v.kind.trim();
-  if (!strEq(v.title, cur.title)) body.title = v.title;
+  // an empty field over the server's placeholder is no change (titleOwn)
+  if (!strEq(titleOwn(v.title), titleOwn(cur.title))) body.title = v.title;
   if (!strEq(v.content, cur.content)) body.content = v.content;
   if (Number(v.value_int) !== Number(cur.value_int)) body.value_int = Number(v.value_int) || 0;
   if (Number(v.value_float) !== Number(cur.value_float)) body.value_float = Number(v.value_float) || 0;
@@ -19456,11 +19548,13 @@ function statTopicsHtml(r) {
   const echoes = r.echoes.length ? `<div class="shead2">Echoes</div>` + r.echoes.map(x => {
     const a = st.byId.get(x.a), b = st.byId.get(x.b);
     if (!a || !b) return "";
+    // each side's day in words, as the Findings say it: an ISO date is the
+    // database's (the design pass, rule:words)
     const lbl = e => esc(statLabel(e));
     return `<div class="secho"><a data-id="${a.id}" tabindex="0" role="button">` +
-      `<span>${dayKey(a.created_at_utc)}</span>${lbl(a)}</a>` +
+      `<span>${esc(dayLabelText(dayKey(a.created_at_utc)))}</span>${lbl(a)}</a>` +
       `<em title="how alike, once what every entry shares is taken out">${Math.round(x.s * 100)}%</em>` +
-      `<a data-id="${b.id}" tabindex="0" role="button"><span>${dayKey(b.created_at_utc)}</span>${lbl(b)}</a></div>`;
+      `<a data-id="${b.id}" tabindex="0" role="button"><span>${esc(dayLabelText(dayKey(b.created_at_utc)))}</span>${lbl(b)}</a></div>`;
   }).join("") + `<div class="hint">recent entries, and the entry from over ${Math.round(STAT_ECHO_OLD / 30)} months ago most like each in meaning</div>` : "";
   return `<div class="sduo">` +
     `<svg class="sdonut" viewBox="0 0 200 200" role="img" aria-label="topics by share">${ring}` +
@@ -20754,7 +20848,8 @@ function socFromEntry(e) {
   const img = /!\[([^\]]*)\]\(([^)\s]+)/.exec(c);
   const paras = c.split(/\n[ \t]*\n/).map(p => p.trim())
     .filter(p => p && !/^!\[/.test(p) && !/^https?:\/\/\S+$/.test(p) && !/^[-*]\s+(TODO|DONE)\b/.test(p));
-  const title = String(e.title || "").trim();
+  // the server's placeholder is no title to post (titleOwn)
+  const title = titleOwn(String(e.title || "").trim());
   const first = paras.length ? paras[0].replace(/^#+\s*/, "") : "";
   const text = [title, first].filter(Boolean).join("\n\n");
   let on = lsGet(SOC_ON, null);
@@ -20802,7 +20897,7 @@ function socSave() {
       else {
         const src = st.byId.get(s.id);
         const r = await api("/entries", { method: "POST", body: { kind: SOC_KIND, content: body,
-          title: "Share · " + ((src && src.title) || "#" + s.id) } });
+          title: "Share · " + ((src && titleOwn(src.title || "")) || "#" + s.id) } });
         s.post = r.id;
         // into the list now, so a sheet opened again finds it before a sync does
         api("/entries/" + r.id).then(row => { if (row && !st.byId.has(row.id)) insertRow(row); }, () => {});
@@ -21979,6 +22074,12 @@ function calRestamp(e, key, hour, field) {
     d.setHours(hour == null ? 9 : hour, 0, 0, 0);
     return d.toISOString().slice(0, 19).replace("T", " ");
   }
+  // A drop back on its own day (and hour) is no move. Asked of the day, not
+  // of the rebuilt stamp: setFullYear rebuilds the wall clock, and in the
+  // hour an autumn clock change repeats, that is the hour's first pass - a
+  // stamp in its second pass came back an hour early, and the drop wrote
+  if (d.getFullYear() === y && d.getMonth() === m - 1 && d.getDate() === da && (hour == null || d.getHours() === hour))
+    return null;
   d.setFullYear(y, m - 1, da);
   if (hour != null) d.setHours(hour);
   const to = d.toISOString().slice(0, 19).replace("T", " ");
@@ -25061,7 +25162,15 @@ function shareTarget() {
    a feature.
 
    The selection is deliberately not part of it: a view is a way of looking at
-   the journal, not a bookmark to one entry. */
+   the journal, not a bookmark to one entry.
+
+   The chips are in the array's order: a new view goes first (saveView), and
+   the captain puts them in his own order with the Arrange sheet
+   (openArrangeViews: a row per view, up and down) or by voice ("move the
+   view tasks up", "... first", "... last"), each move through moveView,
+   written by saveViews like any save, so it is on every device. No drag:
+   the chips wrap, and a drag in the sheet would fight the phone's scroll
+   for two buttons' worth of gain. */
 const VIEW_MAX = 12;        // a sidebar of chips, not a second navigation tree
 let views = lsGet("lcars.views", []);
 if (!Array.isArray(views)) views = [];
@@ -25302,6 +25411,7 @@ function paintViews(force) {
   $("#viewhint").textContent = views.length
     ? `${views.length} saved · click one to apply it`
     : "no views pinned yet";
+  $("#bArrViews").hidden = views.length < 2;   // one view has no order
 }
 
 function applyView(v) {
@@ -25354,6 +25464,75 @@ function dropView(i) {
         { label: "Undo", fn: () => { views = [v, ...views].slice(0, VIEW_MAX); saveViews(); paintViews(); } });
 }
 
+/* The view at i to place `to` (clamped): the chips and the sheet repaint in
+   the frame of the tap, the order is written like any save, and the toast
+   says where it went, with Undo putting the list back as it was. False when
+   it was already there. */
+function moveView(i, to) {
+  const v = views[i];
+  if (!v) return false;
+  to = Math.max(0, Math.min(views.length - 1, to));
+  if (to === i) {
+    toast(`“${v.name}” is already ${i ? "last" : "first"}`);
+    return false;
+  }
+  const was = views.slice();
+  views = views.filter((_, j) => j !== i);
+  views.splice(to, 0, v);
+  saveViews();
+  paintViews();
+  varPaint(to);
+  sfx("tap");
+  const where = to === 0 ? "first" : to === views.length - 1 ? "last" : to < i ? "up" : "down";
+  toast(`moved “${v.name}” ${where} · ${to + 1} of ${views.length}`, false,
+        { label: "Undo", fn: () => { views = was; saveViews(); paintViews(); varPaint(); } });
+  return true;
+}
+
+// the Arrange sheet: a row per view, its name and an up and a down button
+function openArrangeViews() {
+  if (views.length < 2) {
+    toast(views.length ? "one view has no order to arrange" : "no views saved yet");
+    return;
+  }
+  openDialog(`
+    <h2 id="dlgh">Arrange views</h2>
+    <p class="hint">the order of the chips, on every device</p>
+    <div class="sscroll varows" id="varows"></div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="pill go" id="va_done">Done</button>
+    </div>`, { cls: "vadlg" });
+  varPaint();
+  $("#va_done").onclick = shutOv;
+  $("#varows").onclick = ev => {
+    const b = ev.target.closest("button[data-mv]");
+    if (!b || b.disabled) return;
+    const d = Number(b.dataset.mv), i = Number(b.closest(".varow").dataset.i);
+    if (!moveView(i, i + d)) return;
+    // the focus follows the view, on the same arrow while it can go on
+    const row = $("#varows").children[i + d];
+    const next = row && (row.querySelector(`[data-mv="${d}"]:not([disabled])`) ||
+                         row.querySelector("[data-mv]:not([disabled])"));
+    if (next) next.focus();
+  };
+  openOv();
+}
+// the sheet's rows, if it is in the dialog (a closed one repaints unseen,
+// harmlessly); `moved` lit for the one that just moved
+function varPaint(moved) {
+  const box = $("#varows");
+  if (!box) return;
+  const last = views.length - 1;
+  box.innerHTML = views.map((v, i) =>
+    `<div class="varow${i === moved ? " moved" : ""}" data-i="${i}">` +
+      `<span class="van">${esc(v.name)}</span>` +
+      `<button type="button" class="mini vam" data-mv="-1" aria-label="Move ${esc(v.name)} up"` +
+        ` title="Up"${i ? "" : " disabled"}>&#9650;</button>` +
+      `<button type="button" class="mini vam" data-mv="1" aria-label="Move ${esc(v.name)} down"` +
+        ` title="Down"${i < last ? "" : " disabled"}>&#9660;</button>` +
+    `</div>`).join("");
+}
+
 $("#views").addEventListener("click", ev => {
   const x = ev.target.closest(".vcx");
   if (x) { dropView(Number(x.dataset.x)); return; }
@@ -25361,6 +25540,7 @@ $("#views").addEventListener("click", ev => {
   if (b) applyView(views[Number(b.dataset.i)]);
 });
 $("#bSaveView").onclick = saveView;
+$("#bArrViews").onclick = openArrangeViews;
 
 /* ---------- pinned entries ----------
    A favourite page one tap away: up to PIN_MAX entries pinned from the
@@ -31805,6 +31985,7 @@ function paletteRows() {
   add("filters · clear every one", "c", clearFiltersAsked);
   add("message · dismiss the toast", "", dismissToastSaid);
   add("alert · why the alert" + (alrt.shown ? ` (${alrt.shown})` : ", or condition green"), "", alertWhy, !!alrt.shown);
+  add("alert · show the overdue tasks and the other reasons", "", openAlert, !!alrt.shown);
 
   /* One row per saved view, above the action that makes them: a view is a
      filter by another name, and this is where filters are reached. */
@@ -31816,6 +31997,7 @@ function paletteRows() {
     add(on ? "pinned · unpin this entry" : "pinned · pin this entry", "", pinToggle, on);
   }
   add("filters · save this view", "V", saveView);
+  if (views.length > 1) add("filters · arrange the saved views, their order", "", openArrangeViews);
 
   add("view · today, the day's entries by time", "", openToday);
   add("view · statistics", "", openStats);
@@ -32475,6 +32657,9 @@ const VCMDS = [
   { say: "why the alert", alias: ["why are we on alert", "why red alert", "why yellow alert", "why the red alert",
       "why the yellow alert", "what is the alert", "whats the alert", "alert status", "why alert"],
     help: "what the red or yellow alert is about, in a toast &mdash; offline, overdue tasks, a save", fn: () => alertWhy() },
+  { say: "show the overdue tasks", alias: ["open the overdue", "open the overdue tasks", "show the overdue", "show overdue tasks",
+      "whats overdue", "what is overdue", "show the alert", "open the alert"],
+    help: "the alert's sheet: each overdue task, the most overdue first, a tap opening it, and the alert's other reasons", fn: () => openAlert() },
   { say: "pin this page", alias: ["pin this entry", "pin this", "pin it", "pin the page", "pin this one"],
     help: "the open entry pinned to the top of the list (8 at most), on every device", fn: () => pinSaid(true) },
   { say: "unpin this page", alias: ["unpin this entry", "unpin this", "unpin it", "unpin the page", "unpin this one"],
@@ -32514,6 +32699,19 @@ const VCMDS = [
     help: "a saved view, by name", fn: a => voiceView(a.text) },
   { say: "save this view", alias: ["save the view", "save view"],
     help: "the search, filters and sort as a named view", fn: () => saveView() },
+  { say: "arrange the views", alias: ["arrange views", "arrange the saved views", "reorder the views", "reorder views",
+      "order the views"],
+    help: "the saved views' order: a row per view, up and down", fn: () => openArrangeViews() },
+  { say: "move the view {*} up", alias: ["move view {*} up"],
+    help: "a saved view a place up (left) among the chips", fn: a => viewMoveSaid(a.text, "up") },
+  { say: "move the view {*} down", alias: ["move view {*} down"],
+    help: "a saved view a place down", fn: a => viewMoveSaid(a.text, "down") },
+  { say: "move the view {*} first", alias: ["move view {*} first", "move the view {*} to the top",
+      "move view {*} to the top", "move the view {*} to the front"],
+    help: "a saved view first", fn: a => viewMoveSaid(a.text, "first") },
+  { say: "move the view {*} last", alias: ["move view {*} last", "move the view {*} to the bottom",
+      "move view {*} to the bottom", "move the view {*} to the end"],
+    help: "a saved view last", fn: a => viewMoveSaid(a.text, "last") },
   { say: "first entry", alias: ["top of the list", "the newest"],
     help: "the top of the list", fn: () => gotoIndex(0) },
   { say: "last entry", alias: ["bottom of the list", "end of the list"],
@@ -32833,7 +33031,11 @@ const VCMDS = [
   { say: "number one {*}", alias: ["tell number one {*}", "first officer {*}", "ask number one {*}"],
     help: "an order for Number One, said into his conversation", fn: a => engNo1(a.text) },
   { say: "refresh number one", alias: ["refresh the first officer", "refresh number one's context", "number one handover"],
-    help: "a fresh context for Number One: a handover note in the log, the conversation cleared, carried on from the note", fn: () => engNo1Refresh() },
+    help: "a fresh context for Number One: a handover note in the log, the conversation cleared, carried on from the note", fn: () => engRefresh(NO1) },
+  { say: "refresh engineer {*}", alias: ["refresh the context of {*}", "handover and clear {*}"],
+    help: "a fresh context for that engineer: their handover as the turn's last message, the conversation cleared, the handover typed back", fn: a => engRefreshSaid(a.text) },
+  { say: "refresh this engineer", alias: ["refresh their context", "refresh this engineer's context"],
+    help: "the same for the engineer whose conversation is open", fn: () => engRefreshSaid("this engineer") },
   { say: "number one threads", alias: ["number one's threads", "show the threads", "show number one's threads", "the threads sheet"],
     help: "Number One's threads: the sheet &mdash; each one to show, a new one (a name, an opening message)", fn: () => engThreadsSheet() },
   { say: "switch to {*} thread", alias: ["switch to the {*} thread", "switch thread to {*}", "switch to thread {*}", "show the {*} thread"],
@@ -33786,14 +33988,25 @@ function voiceOnlyKind(text) {
 
 // Saved views by name: as said, else every word in it, else a view whose
 // name holds every word said.
-function voiceView(text) {
+function viewNamed(text) {
   const said = vWords(text).map(vNorm).filter(Boolean);
   const words = v => vWords(v.name).map(vNorm).filter(Boolean);
-  const v = views.find(x => words(x).join(" ") === said.join(" ")) ||
-            views.find(x => said.every(w => words(x).includes(w)));
+  return views.find(x => words(x).join(" ") === said.join(" ")) ||
+         views.find(x => said.every(w => words(x).includes(w)));
+}
+function voiceView(text) {
+  const v = viewNamed(text);
   if (!v) { vRefuse(views.length ? "no view called " + text : "no views saved yet"); return; }
   applyView(v);
   vNote("view · " + v.name);
+}
+// "move the view tasks up": where is up, down, first or last
+function viewMoveSaid(text, where) {
+  const v = viewNamed(text);
+  if (!v) { vRefuse(views.length ? "no view called " + text : "no views saved yet"); return; }
+  const i = views.indexOf(v);
+  const to = where === "up" ? i - 1 : where === "down" ? i + 1 : where === "first" ? 0 : views.length - 1;
+  if (moveView(i, to)) vNote(`view · ${v.name} ${where}`);
 }
 
 function voicePick(id) {
@@ -37000,11 +37213,27 @@ function chatRetry(i) {
   if (!u.text && !files) return;
   chatSend(u.text, files || u.spoken ? Object.assign(files ? { files } : {}, u.spoken ? { spoken: true } : {}) : undefined);
 }
-// the box grows with what is typed, up to its max-height, and back
-function chatGrow(b) {
+// the box grows with what is typed, up to its max-height, and back;
+// `lines`, while words are being heard into it, stops it sooner (the
+// thread above does not climb a line at every word) and keeps the last
+// words in sight
+function chatGrow(b, lines) {
   b.style.height = "";
-  if (b.scrollHeight > b.clientHeight) b.style.height = b.scrollHeight + 2 + "px";
+  if (b.scrollHeight > b.clientHeight) {
+    let h = b.scrollHeight + 2;
+    if (lines) {
+      const cs = getComputedStyle(b), lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
+      h = Math.min(h, Math.ceil(lines * lh + (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)) + 2);
+      b.style.height = h + "px";
+      b.scrollTop = b.scrollHeight;
+      return;
+    }
+    b.style.height = h + "px";
+  }
 }
+// how many lines the box may grow to while a hold or a conversation is
+// heard into it
+const CHAT_TALK_LINES = 3;
 
 /* One question to POST /chat, its stream folded into `m` as it arrives and
    `paint` called after each batch. Shared by the computer's panel and a
@@ -37176,8 +37405,13 @@ function chatSheet(which, o, m = chatFm()) {
       // an earlier one on screen is not what Clear would clear
       (e.view ? "" : opt("clear", "Clear conversation", "a fresh one; this one kept, named, for /resume",
                          r.status === "working" || r.status === "blocked" || r.status === "off")) +
-      (e.name === NO1 ? opt("refresh", "Refresh context", "a handover note in the log, the conversation cleared, carried on from it",
-                            r.status === "blocked" || r.status === "off") : "") +
+      // Number One's handover is a log entry; an engineer's the turn's last
+      // message, typed back. One off duty but in the seat's line gets it in
+      // their inbox (a message brings them back): only Number One's needs it on
+      (e.view ? "" : opt("refresh", "Refresh context", e.name === NO1
+        ? "a handover note in the log, the conversation cleared, carried on from it"
+        : "a handover as their last message, the conversation cleared, carried on from it",
+        r.status === "blocked" || (r.status === "off" && (e.name === NO1 || r.dismissed)))) +
       (r.preview ? opt("page", "Their page", "the console as their branch has it") : "") +
       opt("read", "Read it out", "the last answer, aloud") +
       opt("rooms", "Rooms", "every room's messages, one timeline each") +
@@ -37212,6 +37446,7 @@ function chatSheetTap(ev) {
   if (act === "clear" && !b.classList.contains("pill")) { engClearSheet(); return; }
   const named = $("#chclearhead") ? $("#chclearhead").value : "";
   if (act === "rollback" && !b.classList.contains("pill")) { engDeploySheet("rollback"); return; }
+  const who = chat.eng && chat.eng.name;
   chatSheet("");
   if (act === "new") chatNew();
   else if (act === "read") chatReadLast();
@@ -37222,7 +37457,7 @@ function chatSheetTap(ev) {
   else if (act === "pastlist") engPastSheet();
   else if (act === "rooms") openRooms();
   else if (act === "current") engPast("");
-  else if (act === "refresh") engNo1Refresh();
+  else if (act === "refresh") engRefresh(who);
   else if (act === "clear") engClear(named);
   else if (act === "page") window.open(chat.eng.st.preview, "_blank", "noopener");
   else if (act === "dismiss") engDismiss(chat.eng.name, false);
@@ -37438,13 +37673,13 @@ function chatPaneInner(mode) {
         <textarea class="chbox" name="searchmsg" rows="1" aria-label="your message" enterkeyhint="send"
                   autocomplete="off" autocorrect="on" autocapitalize="sentences"
                   placeholder="ask about the journal${chatTouch() ? "" : " — Enter sends, Shift+Enter is a new line"}"></textarea>
-        <button type="button" class="chsend">Send</button>
+        <button type="button" class="chsend">Send</button>${dock ? "" : `
+        <button type="button" id="chsay" hidden title="Stop the voice (Esc)">speaking</button>`}
       </div>${dock ? "" : `
       <div class="chtalk" id="chtalk" hidden>
         <button type="button" id="talkptt" title="Hold, speak, let go (Space, in the empty box)"><span id="pttl">Hold to talk</span></button>
         <button type="button" id="talkconv" title="Keep listening: each thing you say is sent when you stop (Esc ends it)"><span id="convl">Start conversation</span><small id="convst"></small></button>
         <button type="button" id="talkout" hidden title="Where the voice comes out: Speaker lets go of the microphone while they speak (louder, no talking over them); Earpiece keeps it open">Speaker</button>
-        <button type="button" id="chsay" hidden title="Stop the voice (Esc)">speaking</button>
       </div>`}
       <div class="chscrim" hidden><div class="chsheet" role="dialog" aria-label="choices"></div></div>
 `;
@@ -37571,6 +37806,8 @@ function chatPaneWire(m) {
   m.send.onclick = () => (chat.busy && !box.value.trim() && !chat.att.length ? chatStop() : chatSend());
   m.model.onclick = () => chatSheet("model");
   m.more.onclick = () => chatSheet("more");
+  m.gauge.onclick = () => engGaugeTap(chat);
+  m.gauge.onkeydown = ev => { if ((ev.key === "Enter" || ev.key === " ") && m.gauge.classList.contains("over")) { ev.preventDefault(); engGaugeTap(chat); } };
   m.scrim.onclick = chatSheetTap;
   m.ctx.onclick = () => { const c = m.ctx; c.setAttribute("aria-expanded", String(c.getAttribute("aria-expanded") !== "true")); };
   log.onclick = ev => {
@@ -37859,11 +38096,15 @@ function chatsBack() {
   routeAs("chats");
 }
 // the url's way in (a reload, Back/Forward into the chats from outside):
-// a cold deep link has the list put under the thread, as chatsOpen does
+// a cold deep link has the list put under the thread, as chatsOpen does.
+// Cold is "the url last written is not the chats'": the boot opens its page
+// once the rows are in, and the list's own url has been written by then, so
+// lastUrl is "" there rather than null; Back or Forward into the chats has
+// set it to the chats' own url before this runs (applyPage)
 function chatsRoute(a) {
   const nt = a[0] && chatFind(a[0]);
   if (nt && nt.nav) { navOpen(nt.nav); return; }
-  if (a[0] && lastUrl === null) { chatsOpen(a[0]); return; }
+  if (a[0] && (lastUrl === null || urlKind(lastUrl) !== "chats")) { chatsOpen(a[0]); return; }
   chatsUp();
   chatsShow(a[0] || null);
   routeAs("chats", ...(a[0] && (chatFind(a[0]) || engThreadFor(a[0])) ? [a[0]] : []));
@@ -38971,9 +39212,70 @@ function sayFetch(method, body, signal, sub = "") {
   if (body) headers["Content-Type"] = "application/json";
   return fetch(cfg.base.replace(/\/+$/, "") + "/say" + sub, { method, headers, signal, body: body ? JSON.stringify(body) : undefined });
 }
+/* An engineer's own voice, chosen rather than drawn from SAY_VOICES by a
+   hash of the name: one per provider, and for ElevenLabs a style (POST
+   /say's: stability 0..1, speed 0.7..1.2, and the Aura-2 voice Deepgram
+   stands in with). Keyed by the engineer's name ("data-lqj") or its first
+   word ("data", every Data). The built-in ones are below; a `settings`
+   entry titled `voices` holding the same JSON adds to them and wins, so the
+   captain gives anyone a voice, or changes Data's, by editing an entry.
+   Data: a voice designed for him (the captain's word, 2026-10-27; until
+   then ElevenLabs' premade Eric), a light, exact American tenor in Brent
+   Spiner's register, held very steady (0.92: the even, unvaried delivery
+   of an android with no emotion chip) and a touch quick (1.05: he never
+   hesitates); Deepgram's Orpheus, its clear, precise one, when ElevenLabs
+   cannot. The others are voices designed for them
+   on the captain's account (docs/design/engineer-voices.md: the brief,
+   the previews; scripts/voices.py made them): their ids are his
+   account's, and speak only with his key. */
+const SAY_PERSONAS = {
+  data: { elevenlabs: "F878ZnHzQZOEg8lM1EYW", deepgram: "aura-2-orpheus-en", stability: 0.92, speed: 1.05 },
+  obrien: { elevenlabs: "6ijMa1V79cSgKFajQ1MJ", deepgram: "aura-2-jupiter-en", stability: 0.55, speed: 1.0 },
+  jake: { elevenlabs: "D5jX9uNN2gWmpGT5wjgu", deepgram: "aura-2-aries-en", stability: 0.5, speed: 1.0 },
+  zimmerman: { elevenlabs: "NW8z12mbEc5OMACVQnTn", deepgram: "aura-2-hermes-en", stability: 0.4, speed: 1.1 },
+  mendez: { elevenlabs: "maqNAqQFaOeQR9UiWrYj", deepgram: "aura-2-callista-en", stability: 0.6, speed: 1.05 },
+  sato: { elevenlabs: "MvvRmmFIVfFYwEMPohl9", deepgram: "aura-2-harmonia-en", stability: 0.65, speed: 1.0 },
+  kim: { elevenlabs: "jXGs9HQNLAMsGHceIqAi", deepgram: "aura-2-atlas-en", stability: 0.55, speed: 1.05 },
+  okafor: { elevenlabs: "yIsaMLKSEBHinbKOp2v3", deepgram: "aura-2-saturn-en", stability: 0.7, speed: 0.95 },
+  laforge: { elevenlabs: "e5RaTgzIYa1kZn0EPWCj", deepgram: "aura-2-mars-en", stability: 0.5, speed: 1.05 },
+  esposito: { elevenlabs: "YiahGdOf4Xvr3BfPfcKM", deepgram: "aura-2-apollo-en", stability: 0.45, speed: 1.05 },
+};
+const SAY_PERSONAS_TITLE = "voices";
+const sayPersonas$ = { src: null, map: SAY_PERSONAS };
+// (the journal may not be there: test/speech.py runs this block alone)
+function sayPersonas() {
+  let row = null;
+  for (const e of (typeof st === "object" && st.all) || []) {
+    if (e.kind !== "settings" || e.title !== SAY_PERSONAS_TITLE || e.deleted) continue;
+    if (!row || e.id < row.id) row = e;
+  }
+  const src = row && !needsBody(row) ? row.content || "" : "";
+  if (src !== sayPersonas$.src) {
+    sayPersonas$.src = src;
+    let d = null;
+    try { d = src ? JSON.parse(src) : null; } catch (e) { d = null; }
+    sayPersonas$.map = d && typeof d === "object" && !Array.isArray(d) ? Object.assign({}, SAY_PERSONAS, d) : SAY_PERSONAS;
+  }
+  return sayPersonas$.map;
+}
+function sayPersona(who) {
+  if (who === "host" || who === "computer") return null;
+  const m = sayPersonas(), w = String(who).toLowerCase(), p = m[w] || m[w.split("-")[0]];
+  return p && typeof p === "object" ? p : null;
+}
+// what POST /say takes beside the voice: {} for a voice with no style
+function sayStyle(prov, who) {
+  const p = sayPersona(who), o = {};
+  if (!p || prov !== "elevenlabs" || typeof p.elevenlabs !== "string") return o;
+  if (typeof p.deepgram === "string" && /^aura-[\w-]+$/.test(p.deepgram)) o.fallback = p.deepgram;
+  if (typeof p.stability === "number" && p.stability >= 0 && p.stability <= 1) o.stability = p.stability;
+  if (typeof p.speed === "number" && p.speed >= 0.7 && p.speed <= 1.2) o.speed = p.speed;
+  return Object.keys(o).length ? { style: o } : o;
+}
 // who speaks: "host", "computer", or a persona's key and sex
 function sayVoice(prov, who, female) {
-  const t = SAY_VOICES[prov];
+  const t = SAY_VOICES[prov], p = sayPersona(who);
+  if (p && typeof p[prov] === "string" && /^[\w-]{1,64}$/.test(p[prov])) return p[prov];
   if (who === "host" || who === "computer") return t[who];
   const l = female ? t.f : t.m;
   let h = 0;
@@ -39163,7 +39465,7 @@ async function sayGet(run, it) {
   try {
     const prov = await sayProvider();
     if (!prov || !sayLive(run)) throw new Error("no voice");
-    const res = await sayFetch("POST", { text: it.text, voice: sayVoice(prov, run.who, run.female), format: "pcm" }, ac ? ac.signal : undefined);
+    const res = await sayFetch("POST", Object.assign({ text: it.text, voice: sayVoice(prov, run.who, run.female), format: "pcm" }, sayStyle(prov, run.who)), ac ? ac.signal : undefined);
     if (res.status === 503) say.prov = null;   // the server lost its voice
     if (!res.ok) throw new Error("/say " + res.status);
     actx = actx || new AudioContext();
@@ -39261,7 +39563,7 @@ const CHAT_CONV_END = /^(computer[,.]?\s+)?(end|stop|close) (the |this )?convers
 const talkHost = {
   box: () => chatEl("box"),
   get: () => (chatEl("box") || {}).value || "",
-  put: v => { const b = chatEl("box"); if (b) { b.value = v; chatGrow(b); chatChrome(); } },
+  put: v => { const b = chatEl("box"); if (b) { b.value = v; chatGrow(b, ptt.cur || conv.cur ? CHAT_TALK_LINES : 0); chatChrome(); } },
   hint: t => { const b = chatEl("box"); if (b && !b.disabled) b.placeholder = t || chatPlaceholder(chat); },
   up: () => !!(chatEl("box") && chatShown() === chat && $("#ov").classList.contains("on") && sayOn() && !chatEl("box").disabled),
   // Space holds only in the empty box: elsewhere it is the console's (a
@@ -39591,6 +39893,10 @@ function talkWire() {
     pttDown();
   });
   for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) b.addEventListener(t, () => { if (!ptt.key) pttUp(); });
+  // and the touch itself is taken: a phone otherwise makes a click of it
+  // where the finger lifts, and focuses whatever is there by then - the box,
+  // opening the keyboard (the captain, 2026-10-27)
+  b.addEventListener("touchstart", ev => { if (ev.cancelable) ev.preventDefault(); }, { passive: false });
   b.addEventListener("contextmenu", ev => ev.preventDefault());   // a long press is not a menu
   b.addEventListener("click", ev => ev.preventDefault());         // nor a submit
   cb.addEventListener("click", ev => { ev.preventDefault(); if (conv.cur) convEnd(); else convStart(); });
@@ -39826,6 +40132,7 @@ function convPaint() {
     o.setAttribute("aria-pressed", String(conv.out === "speaker"));
   }
   if ($("#talkptt")) $("#talkptt").disabled = !!c;
+  $("#chtalk")?.classList.toggle("conv", !!c);
   if (c || !ptt.cur) talkHost.hint(c ? (c.heard ? "hearing…" : "listening… just talk") : "");
 }
 // the box shows what was in it before, then the utterance as it is heard
@@ -40034,7 +40341,8 @@ function chatWho(t) {
     if (t.eng.name === "host") return { who: "host", female: true };
     const seat = /-(c\d+)$/.exec(t.eng.name), title = t.eng.title || "";
     const female = CHAT_NAMES_F.some(n => title.includes(n)) ? true : CHAT_NAMES_M.some(n => title.includes(n)) ? false : !!(hash(t.eng.name) & 2);
-    return { who: seat ? seat[1] : t.eng.name, female };
+    // a voice of their own (sayPersona) is found by the name, not the seat
+    return { who: seat && !sayPersona(t.eng.name) ? seat[1] : t.eng.name, female };
   }
   if (t.role) return { who: "role-" + t.role.kind, female: !!(hash(t.role.kind) & 2) };
   if (t.person) return { who: t.person.key, female: !!t.person.female };
@@ -47659,9 +47967,22 @@ function engGaugePaint(t, m = chatMountFor(t)) {
   const txt = n < 0 ? "…" : n ? engCtxPct(n) : "—";
   const v = g.querySelector("b");
   if (v.textContent !== txt) v.textContent = txt;
-  g.classList.toggle("over", n > ENG_CTX_HANDOVER);
+  const over = n > ENG_CTX_HANDOVER && !e.view;
+  g.classList.toggle("over", over);
   g.title = n > 0 ? "context " + Math.round(n / 1000) + "k of the " + ENG_CTX_HANDOVER / 1000 + "k handover mark" +
-    (n > ENG_CTX_HANDOVER ? ": past it, time to hand over" : "") : "context: not known yet";
+    (over ? ": past it, tap to refresh the context" : "") : "context: not known yet";
+  // past the mark it is a control: the refresh, asked first (engGaugeTap)
+  if (over) { g.setAttribute("role", "button"); g.tabIndex = 0; g.setAttribute("aria-label", "Refresh context, " + txt + " of the handover mark"); }
+  else if (g.hasAttribute("role")) { g.removeAttribute("role"); g.removeAttribute("tabindex"); g.removeAttribute("aria-label"); }
+}
+// the amber gauge tapped: the sheet asks, its Refresh is the ⋯ row's
+function engGaugeTap(t) {
+  const e = t && t.eng, m = chatMountFor(t);
+  if (!e || !m || !m.gauge.classList.contains("over")) return;
+  chatSheet("confirm", { title: "Refresh " + e.title + "'s context?", ok: "Refresh", act: "refresh",
+    body: e.name === NO1
+      ? "Number One writes a handover note in the log and ends the turn; the conversation is cleared (kept, named after its task) and the fresh one reads the note back."
+      : "They commit their work in progress and end the turn with a handover; the conversation is cleared (kept, named after its task) and the handover is typed into the fresh one." });
 }
 // their estimate at the top of the thread while they work (etaBarHtml);
 // redrawn only when what it shows changes: chatChrome runs per keystroke
@@ -49541,23 +49862,44 @@ async function engNo1(text) {
   const say = String(text || "").trim();
   if (say) engSend(t, say);
 }
-// A fresh context without losing the thread (engineer.py refresh): Number
-// One writes a handover entry in the log and ends the turn, the
-// conversation is cleared (kept, named after the task), and the new one is
-// told to read the log back. The script does the waiting; this only asks.
-async function engNo1Refresh() {
-  if (!await engKeyAsk()) return;
-  const t = chatFind("eng-" + NO1), line = t && { role: "sys", text: "Refreshing the context…", live: true };
+// A fresh context without losing the thread (engineer.py refresh), for
+// Number One and any engineer: a handover (Number One's an entry in its
+// log, an engineer's the turn's last message), the conversation cleared
+// (kept, named after the task), and the fresh one carried on from it; one
+// out of the seat gets it in their inbox. The script does the waiting;
+// this only asks.
+async function engRefresh(name) {
+  if (!name) { toast("open an engineer's conversation first", true); return; }
+  const x = (eng.list || []).find(e => e.name === name), title = name === NO1 ? NO1_TITLE : (x && x.title) || name;
+  // the line first, in the same frame as the tap: the key's question may come after
+  const t = chatFind("eng-" + name), line = t && { role: "sys", text: "Refreshing the context…", live: true };
   if (line) { t.eng.done.push(line); chatDraw(); }
+  if (!await engKeyAsk()) {
+    if (line) { line.live = false; line.cls = "bad"; line.text = "Not refreshed: no engineer key"; chatDraw(); }
+    return;
+  }
   try {
-    const r = await engApi("/" + NO1 + "/refresh", { method: "POST", body: {}, timeout: 60000 });
-    if (line) { line.live = false; line.text = r.note || "A handover note is being written"; }
-    else toast(r.note || "Number One is writing a handover note");
+    const r = await engApi("/" + name + "/refresh", { method: "POST", body: {}, timeout: 60000 });
+    if (line) { line.live = false; line.text = r.note || "A handover is being written"; }
+    else toast(r.note || title + " is writing a handover");
   } catch (e) {
     if (line) { line.live = false; line.cls = "bad"; line.text = "Not refreshed: " + e.message; }
-    else toast("Number One's context was not refreshed: " + e.message, true);
+    else toast(title + "'s context was not refreshed: " + e.message, true);
   }
   if (t) { chatDraw(); engPoll(t); }
+}
+// "refresh engineer Reyes", "refresh this engineer": by name from the list
+async function engRefreshSaid(who) {
+  const t = chatShown(), w = String(who || "").toLowerCase().replace(/[’']/g, "").trim();
+  if (/^(this|the) engineer$|^(him|her|them)$/.test(w)) {
+    if (t && t.eng) return engRefresh(t.eng.name);
+    toast("open an engineer's conversation first", true); return;
+  }
+  if (/^(number one|the first officer|first officer)$/.test(w)) return engRefresh(NO1);
+  if (!eng.list) { if (!await engKeyAsk()) return; await engListFetch(true); }
+  const x = engFind(eng.list || [], w);
+  if (!x) { toast("no engineer called " + who, true); return; }
+  return engRefresh(x.name);
 }
 // The slug is scripts/engineer.py's NAME_RE (^[a-z][a-z0-9-]{0,23}$): the
 // name's last word and a random tail, as the deck's engSlug puts a crew
@@ -49636,8 +49978,15 @@ $("#bCourse").onclick = () => openCourse();
    chrome changes - the LCARS colours the header, its strip, the elbows, the
    pills and the accents are drawn in (body[data-alert] redefines them) - and
    never --txt, the colour everything written is in. A short line in the
-   header says why ("offline", "2 overdue", "saving"); a tap on it, and
-   "computer, why the alert", say it in a toast.
+   header says why ("offline", "2 overdue", "saving"); "computer, why the
+   alert" says it in a toast, and a tap on it (or "computer, show the overdue
+   tasks") opens the alert's sheet (openAlert): headed by the toast's line,
+   a row per overdue task, the most overdue first, its title and how late in
+   words, a tap opening the entry; then the other reasons, each a row saying
+   what it means and leading where the page has a place for it (the outbox's
+   try or its conflict question, the entry whose save failed). A single
+   overdue task and nothing else is opened straight away, with a toast: the
+   sheet would be one row to tap through.
 
    A condition must hold for ALERT_HOLD_MS before the palette moves, either
    way: an autosave is on the wire for a fraction of a second, and a console
@@ -49648,20 +49997,22 @@ $("#bCourse").onclick = () => openCourse();
    is already in memory, and the overdue sweep is cached on the rows. */
 const ALERT_HOLD_MS = 2000;
 const ALERT_TICK_MS = 500;
-const alrt = { shown: "", want: "", since: 0, why: "", painted: null, odSig: "", od: 0 };
-// open task rows past due, at `now`; cached on the rows and the half minute
+const alrt = { shown: "", want: "", since: 0, why: "", painted: null, odSig: "", od: 0, odRows: [] };
+// open task rows past due, at `now`; cached on the rows and the half minute.
+// The count; the rows themselves, as {e, t: the due time}, in alrt.odRows
 function alertOverdue(now) {
   const sig = st.all.length + ":" + st.bodyGen + ":" + Math.floor(now / 30000);
   if (sig === alrt.odSig) return alrt.od;
-  let n = 0;
+  const rows = [];
   for (const e of st.all) {
     if (!e.start_date || e.deleted || Number(e.done_bool) || !taskKind(e.kind) || crewWritten(e.kind)) continue;
     const t = utcMs(e.start_date);
-    if (t === t && t < now) n++;
+    if (t === t && t < now) rows.push({ e, t });
   }
   alrt.odSig = sig;
-  alrt.od = n;
-  return n;
+  alrt.od = rows.length;
+  alrt.odRows = rows;
+  return rows.length;
 }
 // the condition right now: {level: "red" | "yellow" | "", why}
 function alertState(now) {
@@ -49703,16 +50054,91 @@ function alertPaint() {
   b.textContent = alrt.shown ? alrt.why : "";
   b.setAttribute("aria-label", alrt.shown ? `${alrt.shown} alert: ${alrt.why}` : "");
 }
-// what the toast says: the condition shown, and what is changing under it
-function alertWhy() {
+// what the toast says: the condition shown, and what is changing under it;
+// {lvl, msg}, lvl "" when green
+function alertLine() {
   const now = alertState(Date.now());
-  if (!alrt.shown && !now.level) { toast("condition green · all clear"); return; }
+  if (!alrt.shown && !now.level) return { lvl: "", msg: "condition green · all clear" };
   const lvl = alrt.shown || now.level;
-  const msg = `${lvl} alert · ${alrt.shown ? alrt.why : now.why}` +
-    (now.level !== alrt.shown ? (now.level ? ` (now ${now.level}: ${now.why})` : " (clearing)") : "");
-  toast(msg, lvl === "red");
+  return { lvl, msg: `${lvl} alert · ${alrt.shown ? alrt.why : now.why}` +
+    (now.level !== alrt.shown ? (now.level ? ` (now ${now.level}: ${now.why})` : " (clearing)") : "") };
 }
-$("#halert").addEventListener("click", () => { sfx("tap"); alertWhy(); });
+function alertWhy() {
+  const a = alertLine();
+  toast(a.msg, a.lvl === "red");
+}
+// how late, in words: "20 minutes", "5 hours", "3 days", "2 weeks", "4 months"
+function overdueWords(ms) {
+  const m = Math.max(1, Math.floor(ms / 60000)), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  const n = (k, w) => k + " " + w + (k === 1 ? "" : "s");
+  if (m < 60) return n(m, "minute");
+  if (h < 24) return n(h, "hour");
+  if (d < 14) return n(d, "day");
+  if (d < 60) return n(Math.floor(d / 7), "week");
+  if (d < 730) return n(Math.max(2, Math.floor(d / 30.4)), "month");
+  return n(Math.floor(d / 365.25), "year");
+}
+/* The sheet's other rows, by the same reading alertState makes: what each
+   reason means, and `go` where the page has a place for it. The outbox's
+   capsule is that place for the link and the writes (obTap: its conflict
+   question, else a try); a failed save is its entry. */
+function alertReasons() {
+  const r = [];
+  let stuck = 0;
+  for (const op of ob.ops.values()) if (op.stuck || op.held) stuck++;
+  const waiting = ob.ops.size - stuck + ob.media.length;
+  if (ob.offline) r.push({ red: 1, t: "offline", m: "the server cannot be reached; writes wait on this device. Tap to try the link", go: obTap });
+  if (stuck) r.push({ red: 1, t: `${stuck} not sent`, go: obTap, m: ob.conflicts.length
+    ? "edited here and on the server: tap to choose what to keep" : "the server refused them or they wait on a conflict. Tap to try again" });
+  if (document.body.dataset.save === "failed" && st.sel && !st.isNew)
+    r.push({ red: 1, t: "a save failed", m: `#${st.sel.id} ${st.sel.title || ""}: not saved; its text is kept here. Tap to open it`, id: st.sel.id });
+  let saving = document.body.dataset.save === "saving";
+  for (const a of away.values()) {
+    if (a.state === "failed") r.push({ red: 1, t: "a save failed", m: `#${a.row.id} ${a.row.title || ""}: not saved; its text is kept here. Tap to open it`, id: a.row.id });
+    else saving = true;
+  }
+  if (saving) r.push({ t: "saving", m: "a save is on its way to the server" });
+  if (waiting && !ob.offline) r.push({ t: `${waiting} waiting`, m: "writes queued on this device, about to be sent. Tap to send them now", go: obTap });
+  return r;
+}
+let alRows = [];
+function openAlert() {
+  const now = Date.now(), a = alertLine();
+  if (!a.lvl) { toast(a.msg); return; }
+  alertOverdue(now);
+  const od = alrt.odRows.slice().sort((x, y) => x.t - y.t), other = alertReasons();
+  // one overdue task and nothing else: the sheet would be a single row to tap through
+  if (od.length === 1 && !other.length) {
+    toast(`${a.msg} · opened #${od[0].e.id}, ${overdueWords(now - od[0].t)} overdue`, true);
+    closeOv(); select(od[0].e.id);
+    return;
+  }
+  alRows = od.map(x => ({ red: 1, id: x.e.id, k: x.e.kind, t: x.e.title || "#" + x.e.id,
+    m: `${kindName(x.e.kind || "")} · ${overdueWords(now - x.t)} overdue` })).concat(other);
+  const row = (r, i) => {
+    const inner = `<span class="alt">${esc(r.t)}</span><span class="alm">${esc(r.m)}</span>`;
+    const cls = `alrow${r.red ? " red" : ""}`, k = r.k ? ` style="--k:${kindColor(r.k)}"` : "";
+    return r.go || r.id ? `<button type="button" class="${cls}" data-al="${i}"${k}>${inner}</button>`
+      : `<div class="${cls} info" role="note">${inner}</div>`;
+  };
+  openDialog(`
+    <h2 id="dlgh">${esc(a.msg)}</h2>
+    <div class="sscroll alrows" id="alrows">${alRows.map(row).join("")}</div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="pill go" id="al_close">Close</button>
+    </div>`, { cls: "aldlg" });
+  $("#al_close").onclick = shutOv;
+  $("#alrows").onclick = ev => {
+    const b = ev.target.closest("button[data-al]"), r = b && alRows[Number(b.dataset.al)];
+    if (!r) return;
+    sfx("tap");
+    b.classList.add("busy");       // pressed, in the frame of the tap
+    closeOv();
+    if (r.id) select(r.id); else r.go();
+  };
+  openOv();
+}
+$("#halert").addEventListener("click", () => { sfx("tap"); openAlert(); });
 setInterval(alertTick, ALERT_TICK_MS);
 
 const KEYS = [

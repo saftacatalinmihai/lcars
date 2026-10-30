@@ -2,16 +2,16 @@
  "rooms": {
   "arboretum": {
    "size": 1024,
-   "wire": 451057,
+   "wire": 336717,
    "base": {
     "codec": "etc1s",
     "size": 1024,
     "bytes": 119142
    },
    "norm": {
-    "codec": "uastc",
+    "codec": "etc1s",
     "size": 1024,
-    "bytes": 132779
+    "bytes": 18439
    },
    "orm": {
     "codec": "etc1s",
@@ -40,16 +40,16 @@
   },
   "concourse": {
    "size": 1024,
-   "wire": 435841,
+   "wire": 355491,
    "base": {
     "codec": "etc1s",
     "size": 1024,
     "bytes": 68389
    },
    "norm": {
-    "codec": "uastc",
+    "codec": "etc1s",
     "size": 1024,
-    "bytes": 88988
+    "bytes": 8638
    },
    "orm": {
     "codec": "etc1s",
@@ -59,16 +59,16 @@
   },
   "conference": {
    "size": 1024,
-   "wire": 501906,
+   "wire": 277450,
    "base": {
     "codec": "etc1s",
     "size": 1024,
     "bytes": 87922
    },
    "norm": {
-    "codec": "uastc",
+    "codec": "etc1s",
     "size": 1024,
-    "bytes": 240562
+    "bytes": 16106
    },
    "orm": {
     "codec": "etc1s",
@@ -97,16 +97,16 @@
   },
   "engineering": {
    "size": 1024,
-   "wire": 169589,
+   "wire": 153775,
    "base": {
     "codec": "etc1s",
     "size": 1024,
     "bytes": 32640
    },
    "norm": {
-    "codec": "uastc",
+    "codec": "etc1s",
     "size": 1024,
-    "bytes": 18609
+    "bytes": 2795
    },
    "orm": {
     "codec": "etc1s",
@@ -135,16 +135,16 @@
   },
   "lab": {
    "size": 1024,
-   "wire": 320102,
+   "wire": 307078,
    "base": {
     "codec": "etc1s",
     "size": 1024,
     "bytes": 55118
    },
    "norm": {
-    "codec": "uastc",
+    "codec": "etc1s",
     "size": 1024,
-    "bytes": 15243
+    "bytes": 2219
    },
    "orm": {
     "codec": "etc1s",
@@ -154,16 +154,16 @@
   },
   "lounge": {
    "size": 1024,
-   "wire": 558976,
+   "wire": 445805,
    "base": {
     "codec": "etc1s",
     "size": 1024,
     "bytes": 103461
    },
    "norm": {
-    "codec": "uastc",
+    "codec": "etc1s",
     "size": 1024,
-    "bytes": 123003
+    "bytes": 9832
    },
    "orm": {
     "codec": "etc1s",
@@ -173,16 +173,16 @@
   },
   "mess": {
    "size": 1024,
-   "wire": 430890,
+   "wire": 172699,
    "base": {
     "codec": "etc1s",
     "size": 1024,
     "bytes": 25960
    },
    "norm": {
-    "codec": "uastc",
+    "codec": "etc1s",
     "size": 1024,
-    "bytes": 260998
+    "bytes": 2807
    },
    "orm": {
     "codec": "etc1s",
@@ -230,16 +230,16 @@
   },
   "school": {
    "size": 1024,
-   "wire": 430951,
+   "wire": 218424,
    "base": {
     "codec": "etc1s",
     "size": 1024,
     "bytes": 26212
    },
    "norm": {
-    "codec": "uastc",
+    "codec": "etc1s",
     "size": 1024,
-    "bytes": 217516
+    "bytes": 4989
    },
    "orm": {
     "codec": "etc1s",
@@ -249,21 +249,21 @@
   },
   "sickbay": {
    "size": 1024,
-   "wire": 381671,
+   "wire": 376117,
    "base": {
     "codec": "etc1s",
     "size": 1024,
-    "bytes": 66429
+    "bytes": 71970
    },
    "norm": {
-    "codec": "uastc",
+    "codec": "etc1s",
     "size": 1024,
-    "bytes": 25012
+    "bytes": 3417
    },
    "orm": {
     "codec": "etc1s",
     "size": 1024,
-    "bytes": 186462
+    "bytes": 190722
    }
   },
   "tenforward": {

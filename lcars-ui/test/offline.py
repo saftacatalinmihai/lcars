@@ -67,11 +67,12 @@ def build(out):
 
 
 class Server:
-    def __init__(self, binary, tmp):
+    def __init__(self, binary, tmp, extra=None):
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         env = dict(os.environ, LCARS_EMBED="0", LCARS_CHAT="0", LCARS_MEDIA_CACHE="0",
                    LCARS_MEDIA_ROOT=str(tmp), LCARS_AUTH_USER=USER, LCARS_AUTH_PASS=PASS)
+        env.update(extra or {})  # a caller's own (film_console.py: the embedder on)
         self.log = open(tmp / "server.log", "w")
         self.proc = killclean.child(subprocess.Popen([str(binary), "--http-only", "--port", str(self.port)],
                                                      cwd=tmp, env=env, stdout=self.log, stderr=subprocess.STDOUT))
@@ -149,7 +150,8 @@ def page_checks(srv, eid):
             page.wait_for_selector(row, timeout=15000)
             check(True, "the page comes up with no network, the entry on screen")
             page.wait_for_function("!document.querySelector('#hq').hidden", timeout=15000)
-            check("offline" in page.inner_text("#hq"), "the header says offline")
+            # innerText follows the pill's text-transform (Antonio, upper case)
+            check("offline" in page.inner_text("#hq").lower(), "the header says offline")
             check(not page.evaluate("document.querySelector('#ov').classList.contains('on')"),
                   "and no password is asked for")
 

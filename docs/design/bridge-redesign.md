@@ -352,8 +352,24 @@ orders "night watch" and "day watch" with their aliases. Measured (deckshots
 390x844, graphics low, main 0.295.3 beside it): the six looks' calls
 65/81/60/210/77/210 day and night, as main (main's 211 on one look is the
 culling's noise), triangles identical; no texture, render target or
-material added. Following the clock (night in `LCARS_TZ`) is in
-TODO.md as a later order.
+material added.
+
+**By the clock** (the captain's order of 2026-10-30): the watch follows
+the captain's hours by default, night from 23:00 to 07:00 in the zone of
+the server's `$LCARS_TZ`, which the deck asks `GET /zone` for (and keeps
+in `lcars.deck.zone` for the next boot and offline) rather than trusting
+the device's clock, set to wherever the phone is; with none (the demo, an
+older server, no `LCARS_TZ`) the device's own zone. `watchAt(t)` names the
+watch at a time and its key (the zone's date an hour on: 23:00 to 07:00
+is one night); `nightTick` runs at boot (quiet) and once a minute, and at
+a change of watch puts the bridge in it, with a hint ("Night watch by the
+clock...") only when standing on the bridge, where the lights change
+(elsewhere it is seen on walking in). A choice by hand (U, the pill, the orders) is kept as its
+watch's key in `lcars.deck.nighthand` and holds until that watch ends.
+The switch, `lcars.deck.nightclock` per device (on by default), is a row
+in the PADD's settings and the orders "watch by the clock" and "watch by
+hand"; turned on, it lets a hand's choice go. deckboot.js stands the hour
+in (23:30 night, 07:30 day, the hand held, the switch off).
 
 ## 8. Scouting: Blender and image-to-3D
 

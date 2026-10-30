@@ -252,7 +252,11 @@ def handle(route):
     every = EXTRA + rows
     if "/stats" in url:
         return route.fulfill(json={"count": len(every),
-                                   "newest_created_at_utc": every[0]["created_at_utc"]})
+                                   "newest_created_at_utc": every[0]["created_at_utc"],
+                                   # the server's clock (markClamp): the rows
+                                   # are stamped 14:30, ahead of it before then
+                                   "now_utc": datetime.datetime.now(datetime.timezone.utc)
+                                   .strftime("%Y-%m-%d %H:%M:%S")})
     if url.split("?")[0].endswith("/reports"):
         return route.fulfill(json=REPORTS)
     if url.split("?")[0].endswith("/vault"):
@@ -334,9 +338,22 @@ def open_commands(page):
     page.keyboard.type("/")
 
 
+def header(page, sel):
+    """A header button, pressed as a person reaches it: on the bar, or (a
+    desk's ranked header since 0.318.0, a phone's chosen few) behind ⋯ as
+    its tile in the More sheet, which presses the button itself."""
+    if page.is_visible(sel):
+        page.click(sel)
+        return
+    page.click("#bMore")
+    page.wait_for_timeout(300)
+    i = page.evaluate(f"MORE_TILES.findIndex(t => t[0] === {sel!r})")
+    page.click(f'.moregrid .shtile[data-i="{i}"]')
+
+
 def open_daypage(page):
     # Today opens the Day view (slice 3); its Save as a page is the draft
-    page.click("#bDayPage")
+    header(page, "#bDayPage")
 
 
 def open_daypage_read(page):
@@ -344,7 +361,7 @@ def open_daypage_read(page):
     # the reader cannot be reached without saving it, which the stub refuses on
     # purpose. So the same text is rendered through the reader's own path — the
     # picture worth having is the links, not the brackets around them.
-    page.click("#bDayPage")
+    header(page, "#bDayPage")
     page.wait_for_timeout(300)
     page.click("#daypage")
     page.wait_for_timeout(300)
@@ -501,13 +518,20 @@ def open_pull(page):
 def open_config(page):
     # the sound switch and its volume live at the bottom of this panel, and a
     # slider is exactly the kind of control the assertions cannot look at
-    page.click("#bCfg")
+    header(page, "#bCfg")
 
 
 def open_delete_confirm(page):
     open_entry(page)
     page.wait_for_timeout(300)
-    page.click("#bDel")
+    # Delete lives in the editor's ⋯ sheet (openEdMore) wherever the bar has
+    # no room for it, a phone's always: the sheet's tile presses #bDel
+    if page.is_visible("#bDel"):
+        page.click("#bDel")
+    else:
+        page.click("#bEdMore")
+        page.wait_for_timeout(300)
+        page.click(".moregrid .shtile:has-text('Delete')")
 
 
 def open_month(page):

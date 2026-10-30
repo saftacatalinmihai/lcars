@@ -44,6 +44,8 @@ TYPES = {
     # no extension: licence texts
     ".ktx2": "image/ktx2", ".wasm": "application/wasm",
     ".theme": "text/plain; charset=utf-8", "": "text/plain; charset=utf-8",
+    # Ten Forward's baked lightmap's uvs (lm_<room>.bin, the deck remodel)
+    ".bin": "application/octet-stream",
 }
 
 

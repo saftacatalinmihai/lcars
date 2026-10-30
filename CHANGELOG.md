@@ -5,6 +5,14 @@ shows it under the LCARS badge (`APP_VERSION` in `lcars-ui/index.html`), so a
 page showing an older number is running a cached copy. A feature bumps the
 minor, a fix the patch, in the same commit as `APP_VERSION`.
 
+## 0.347.2 — 2026-10-30
+
+- **console:** a new, empty journal finishes loading - the list says the journal is empty, with **+ New entry**, where every release up to 0.339.3 said "scanning… 0/? loaded" for ever; an untitled entry's title field is empty, never "HTTP Entry"; the red alert's line opens a sheet of the overdue tasks; the saved views can be arranged (**⇅ Arrange**); the sync mark never runs ahead of the server's clock; Statistics' Echoes give days in words; hold to talk holds still.
+- **deck:** hydroponics and sickbay remodelled; smaller normal maps (ETC1S KTX2); the bridge keeps night watch by the server's clock, 23:00-07:00 in `LCARS_TZ` (the new `GET /zone`), with a switch and spoken orders; a baked-lightmap pilot in Ten Forward behind `deck.html?lightmap`.
+- **server:** `POST /say` takes an optional `style` (stability, speed, a fallback voice); each engineer can have a voice of their own.
+- **crew:** `scripts/steward.py`, recorded data fixes to the owner's journal (`get`, `title`, `set`, `new`, ...); a context refresh for any engineer.
+- **demo:** republished at this release's console and deck.
+
 ## 0.339.3 — 2026-10-26
 
 - **omarchy plugin 0.1.1:** `lcars-webapp --local` no longer fails with "Invalid cross-device link" where `/tmp` is a tmpfs (omarchy's is): the release is downloaded, checked and unpacked beside the releases in `~/.local/lib/lcars/`, so its one rename into place stays on one filesystem; a failed or killed run leaves no scratch behind.

@@ -1679,6 +1679,40 @@ autosaveMs = 0;
   click($("#toast").querySelector(".tact"));
   ok(st.isNew && /continues/.test(asTa.value), "which reopens it");
   setClean(); closeEditor(); hideToast();
+
+  /* An untitled entry's title field is empty, never the server's placeholder:
+     shown there, it was typed in front of and saved as "<title>HTTP Entry"
+     (entry 17058, 26 Oct 2026). Checked against the row's own fields. */
+  console.log("-- an untitled entry: an empty title field, the placeholder kept for the linker --");
+  newEntry();
+  input(asTa, "the body written first, the title later");
+  runTimers(3100);
+  await settle(6);
+  var utId = st.sel.id, utPh = dbFind(utId).title;
+  eq(utPh, PLACEHOLDER_TITLE, "a draft with no title is created under the server's placeholder");
+  eq($("#e_head").value, "", "the field the writer is in is left empty by the create");
+  closeEditor(); await settle(2);
+  select(utId); setRead(false);
+  eq($("#e_head").value, "", "reopened (a Save, the list): the title field is empty");
+  setForm(st.sel);
+  eq($("#e_head").value, "", "and after a refill from the row (a sync landing it)");
+  ok(!document.body.classList.contains("dirty"), "an empty field over the placeholder is no edit");
+  asBefore = DBLOG.length;
+  input(asTa, asTa.value + ", and more");
+  runTimers(3100);
+  await settle(6);
+  var utPut = asPuts().pop() || "";
+  ok(!!utPut && utPut.indexOf('"title"') < 0, "a save of its text sends no title (" + utPut.slice(0, 80) + ")");
+  eq(dbFind(utId).title, utPh, "the stored placeholder stays, for the linker");
+  var utT = "Show HN: a title typed into the empty field";
+  input($("#e_head"), utT);
+  runTimers(3100);
+  await settle(6);
+  eq(dbFind(utId).title, utT, "the title typed is stored as typed, nothing glued after it");
+  eq(obSameF("title", "", PLACEHOLDER_TITLE) && !obSameF("title", utT, PLACEHOLDER_TITLE) && !obSameF("content", "", PLACEHOLDER_TITLE), true,
+     "the outbox's merge holds an empty title and the placeholder as one, only for the title");
+  setClean(); closeEditor(); hideToast();
+  unplant(st.byId.get(utId));
   autosaveMs = 0;
 
   // iOS Safari reads a field's id, name, placeholder, aria-label, title and
@@ -6193,6 +6227,82 @@ async function answerPrompt(text) {
   clearFilters();
   hideToast();
 
+  console.log("-- views: arranged --");
+  var vnames = function () { return views.map(function (v) { return v.name; }).join(","); };
+  var chipNames = function () {
+    return Array.prototype.map.call($("#views").querySelectorAll(".vcl"), function (b) { return b.textContent; }).join(",");
+  };
+  views = [{ name: "alpha", qs: "q=a" }, { name: "bravo", qs: "q=b" }];
+  saveViews();
+  paintViews();
+  ok(!$("#bArrViews").hidden, "two views, and Arrange is offered");
+  ok(paletteRows().some(function (r) { return /arrange the saved views/.test(r.label); }), "and a palette row");
+  views = [{ name: "alpha", qs: "q=a" }];
+  saveViews();
+  paintViews();
+  ok($("#bArrViews").hidden, "one view has no order, and no Arrange");
+  views = [{ name: "alpha", qs: "q=a" }, { name: "bravo", qs: "q=b" }, { name: "charlie", qs: "q=c" },
+           { name: "delta", qs: "q=d" }];
+  saveViews();
+  paintViews();
+  click($("#bArrViews"));
+  await settle(3);
+  ok($("#ov").classList.contains("on"), "Arrange opens a sheet");
+  var vrows = $("#varows").querySelectorAll(".varow");
+  eq(vrows.length, 4, "a row per view");
+  eq(vrows[0].querySelector(".van").textContent, "alpha", "in the chips' order");
+  ok(vrows[0].querySelector('[data-mv="-1"]').disabled, "the first cannot go up");
+  ok(vrows[3].querySelector('[data-mv="1"]').disabled, "the last cannot go down");
+  click($("#varows").querySelectorAll(".varow")[2].querySelector('[data-mv="-1"]'));
+  eq(vnames(), "alpha,charlie,bravo,delta", "up: charlie a place up");
+  eq(chipNames(), vnames(), "the chips follow in the same frame");
+  eq($("#varows").querySelectorAll(".varow")[1].querySelector(".van").textContent, "charlie", "and the sheet's rows");
+  ok($("#varows").querySelectorAll(".varow")[1].classList.contains("moved"), "the moved row lit");
+  has($("#toast").textContent, "moved “charlie” up · 2 of 4", "the toast says where it went");
+  eq(JSON.parse(localStorage.getItem("lcars.views"))[1].name, "charlie", "kept through saveViews");
+  click($("#varows").querySelectorAll(".varow")[0].querySelector('[data-mv="1"]'));
+  eq(vnames(), "charlie,alpha,bravo,delta", "down: alpha a place down");
+  click($("#toast").querySelector(".tact"));
+  await settle(3);
+  eq(vnames(), "alpha,charlie,bravo,delta", "Undo puts the order back");
+  eq(chipNames(), vnames(), "chips and all");
+  eq($("#varows").querySelectorAll(".varow")[0].querySelector(".van").textContent, "alpha", "and the sheet");
+  click($("#va_done"));
+  await settle(3);
+  ok(!$("#ov").classList.contains("on"), "Done closes it");
+
+  voiceHeard("computer move the view delta first");
+  eq(vnames(), "delta,alpha,charlie,bravo", "\"move the view delta first\"");
+  has($("#toast").textContent, "moved “delta” first · 1 of 4", "with its toast");
+  voiceHeard("computer move the view delta to the bottom");
+  eq(vnames(), "alpha,charlie,bravo,delta", "\"... to the bottom\": last");
+  voiceHeard("computer move view alpha down");
+  eq(vnames(), "charlie,alpha,bravo,delta", "\"move view alpha down\"");
+  voiceHeard("computer move the view bravo up");
+  eq(vnames(), "charlie,bravo,alpha,delta", "\"move the view bravo up\"");
+  eq(chipNames(), vnames(), "the chips repainted for each");
+  voiceHeard("computer move the view charlie up");
+  eq(vnames(), "charlie,bravo,alpha,delta", "first already: nothing moves");
+  has($("#toast").textContent, "already first", "and the toast says so");
+  voiceHeard("computer move the view zulu last");
+  eq(vnames(), "charlie,bravo,alpha,delta", "a view by no name is refused");
+  voiceHeard("computer arrange the views");
+  await settle(3);
+  ok($("#varows") && $("#ov").classList.contains("on"), "\"arrange the views\" opens the sheet");
+  closeOv();
+  clearFilters();
+  $("#q").value = "echo";
+  refresh();
+  p = saveView();
+  ok(await answerPrompt("echo"), "a new view after an arrangement");
+  await p;
+  eq(vnames(), "echo,charlie,bravo,alpha,delta", "still goes first");
+  views = [];
+  saveViews();
+  paintViews();
+  clearFilters();
+  hideToast();
+
   console.log("-- views: a name can be declined --");
   $("#q").value = "declined";
   refresh();
@@ -6222,6 +6332,13 @@ async function answerPrompt(text) {
   eq(DB.filter(function (r) { return r.kind === "settings" && !r.deleted; }).length, vcount,
      "a second save updates it rather than adding another");
   eq(JSON.parse(dbFind(vrow.id).content).views.length, 2, "with both views");
+  moveView(1, 0);
+  await views$.q;
+  eq(JSON.parse(dbFind(vrow.id).content).views.map(function (v) { return v.name; }).join(","), "logs,tasks",
+     "a move is written to the entry in the new order");
+  eq(JSON.stringify(Object.keys(JSON.parse(dbFind(vrow.id).content))), JSON.stringify(["v", "views"]),
+     "the entry's shape unchanged");
+  hideToast();
 
   // another device changed it: the rows bring it, the chips follow
   vrow.content = viewsDoc([{ name: "elsewhere", qs: "q=far" }]);
@@ -6710,13 +6827,45 @@ async function answerPrompt(text) {
   hideToast();
   click($("#halert"));
   has($("#toast").textContent, "1 overdue", "and so does a tap on the line");
+  has($("#toast").textContent, "opened #" + alTask.id, "one overdue and nothing else: the tap opens it");
+  eq(st.sel && st.sel.id, alTask.id, "the task is the open entry");
+  ok(!$("#ov").classList.contains("on"), "with no sheet in the way");
+  // two overdue and one write not sent: the sheet
+  var alTask2 = await plant({ kind: "task", title: "zebra alert older task", start_date: fmtUtc(new Date(alT - 3 * 86400e3)), done_bool: 0 });
+  var alOp2 = { id: 1999999998, stuck: true, held: false };
+  ob.ops.set(alOp2.id, alOp2);
+  alSettle(alT + 75000);
+  eq($("#halert").textContent, "1 not sent · 2 overdue", "the line names both reasons");
+  hideToast();
+  click($("#halert"));
+  ok($("#ov").classList.contains("on"), "a tap opens the alert's sheet");
+  has($("#dlgh").textContent, "red alert · 1 not sent · 2 overdue", "headed by the toast's line");
+  var alR = $("#alrows").querySelectorAll(".alrow");
+  eq(alR.length, 3, "a row per overdue task, and one for the other reason");
+  has(alR[0].textContent, "zebra alert older task", "the most overdue first");
+  has(alR[0].textContent, "3 days overdue", "saying how late in words");
+  has(alR[1].textContent, "zebra alert task", "then the other");
+  has(alR[1].textContent, "1 hour overdue", "an hour late");
+  has(alR[2].textContent, "1 not sent", "then the write not sent");
+  has(alR[2].textContent, "Tap to try again", "saying what it means and where it leads");
+  ok(!$("#alrows").textContent.includes("crew task"), "the crew's task is not in it");
+  click(alR[0]);
+  ok(!$("#ov").classList.contains("on"), "a row tapped closes the sheet");
+  eq(st.sel && st.sel.id, alTask2.id, "and opens its entry");
+  hideToast();
+  voiceHeard("computer show the overdue tasks");
+  ok($("#ov").classList.contains("on") && $("#alrows"), "“show the overdue tasks” opens the sheet");
+  eq($("#alrows").querySelectorAll(".alrow").length, 3, "the same rows");
+  closeOv();
+  ob.ops.delete(alOp2.id);
+  alTask2.done_bool = 1;
   alTask.done_bool = 1; st.bodyGen++;
   alSettle(alT + 80000);
   ok(!document.body.dataset.alert, "done: green");
   hideToast();
   voiceHeard("computer why the alert");
   has($("#toast").textContent, "condition green", "and asked why, it says all clear");
-  unplant(alTask); unplant(alCrew);
+  unplant(alTask); unplant(alTask2); unplant(alCrew);
   alOd.forEach(function (e) { e.done_bool = 0; });
   st.bodyGen++;
   hideToast();
@@ -7036,6 +7185,33 @@ var sayQ = say;
   };
   var dbMaxId = function () { return DB.reduce(function (m, r) { return Math.max(m, r.id); }, 0); };
 
+  console.log("\n-- a new, empty journal finishes loading: its empty state, and a way to the first entry --");
+  var eDB = DB, eDump = DUMP_ON;
+  hideToast();
+  closeEditor();
+  $("#q").value = "";
+  for (var eOn of [false, true]) {
+    DB = []; DUMP_ON = eOn; dumpMissing = false;
+    st.all = []; st.byId = new Map();
+    await loadAll();
+    await settle(20);
+    var eWhy = eOn ? " (one /dump)" : " (paged)";
+    ok(!st.loading, "the load is finished" + eWhy);
+    var eTxt = $("#list").textContent;
+    has(eTxt, "the journal is empty", "the list says the journal is empty" + eWhy);
+    ok(!/scanning|loaded/.test(eTxt), "not scanning, nor counting what has loaded" + eWhy);
+    ok(!/loading/.test($("#count").textContent), "nor the count" + eWhy);
+    ok($("#bNewFirst"), "+ New entry is offered" + eWhy);
+  }
+  $("#bNewFirst").onclick();
+  ok(st.isNew, "and it opens a new entry");
+  closeEditor();
+  DB = eDB; DUMP_ON = eDump;
+  st.all = []; st.byId = new Map();
+  await loadAll();
+  await settle(20);
+  eq(st.all.length, DB.length, "the real journal back in");
+
   console.log("\n-- a server with /dump: the whole journal in one answer --");
   DUMP_ON = true;
   dumpMissing = false;
@@ -7107,6 +7283,40 @@ var sayQ = say;
   eq(TEST.fetches.length - mWas, 3, "three requests");
   eq(mR.added, 0, "nothing new");
   ok(mR.changed <= 2, "only the rows sharing the mark's second are re-read (" + mR.changed + ")");
+
+  console.log("-- a row stamped ahead of the server's clock does not carry the mark with it --");
+  // shots.py's rig: the newest row stamped 14:30 of the same day, and an edit
+  // made elsewhere after it was missed until a full reload
+  TEST.srvNow = "2099-12-01 00:00:02";
+  var mF = clone(DB[0]);
+  mF.id = dbMaxId() + 1; mF.deleted = 0; mF.kind = "mirror_probe";
+  mF.title = "stamped ahead"; mF.content = "posted with a created_at_utc in the future";
+  mF.created_at_utc = mF.last_modified_at_utc = "2099-12-01 14:30:00";
+  DB.push(mF);
+  mR = await deltaSync();
+  await settle(4);
+  eq(mR.added, 1, "the future row came down");
+  eq(mem.meta.mark, "2099-12-01 00:00:02", "but the mark stays at the server's now, not at its 14:30");
+  var mD = live[11], keepD = clone(dbFind(mD.id));
+  dbFind(mD.id).content = "edited on the phone after it";
+  dbFind(mD.id).last_modified_at_utc = TEST.srvNow = "2099-12-01 00:00:03";
+  mR = await deltaSync();
+  await settle(4);
+  ok(!mR.reload && !mR.error, "the next sync is an ordinary one");
+  eq(st.byId.get(mD.id).content, "edited on the phone after it", "and brings down the edit made after it");
+  eq(markClamp("2099-12-01 14:30:00", ""), "2099-12-01 14:30:00", "a server without now_utc leaves the mark alone");
+  var mWasMark = mirror.mark;
+  mirror.mark = "2099-12-01 14:30:00";          // a mark kept from before the fix
+  mR = await deltaSync();
+  ok(mR.reload, "a mark already ahead of the server's clock asks for a full load");
+  mirror.mark = mWasMark;
+  delete TEST.srvNow;
+  // gone again before the next load: the sections after play an older
+  // server, whose full load would take its 14:30 for a mark
+  DB.splice(DB.indexOf(dbFind(mF.id)), 1);
+  st.all.splice(st.all.indexOf(st.byId.get(mF.id)), 1);
+  st.byId.delete(mF.id);
+  mem.rows.delete(mF.id);
 
   console.log("-- an unsaved entry is never overwritten under the writer --");
   hideToast();
@@ -7181,6 +7391,7 @@ var sayQ = say;
   // sweep the rest of the suite was written against, and no mirror
   DB.splice(DB.indexOf(dbFind(mC.id)), 1);
   DB.splice(DB.indexOf(dbFind(mLost.id)), 1);
+  Object.assign(dbFind(mD.id), keepD);
   Object.assign(dbFind(mA.id), keepA);
   Object.assign(dbFind(mB.id), keepB);
   DUMP_ON = false;
@@ -7488,7 +7699,14 @@ var sayQ = say;
     if (n.nodeType !== 1 || n.id === "eddet" || n.hidden || (n.style && n.style.display === "none") ||
         (n.classList && n.classList.contains("md")) ||
         /^(CODE|PRE|INPUT|TEXTAREA|SELECT|OPTION|SCRIPT|STYLE|TITLE|title)$/.test(n.tagName)) return "";
-    return n.childNodes.map(wText).join(" ");
+    var t = n.childNodes.map(wText).join(" ");
+    // a link to an entry (Statistics' topic samples and echoes) carries the
+    // entry's own words, its title or opening, which may well hold an ISO
+    // date or a "#7454": compared with the entry's fields, those taken out,
+    // the rule is for the rest (the day the page writes beside them)
+    var did = n.getAttribute && n.getAttribute("data-id"), de = did && st.byId.get(Number(did));
+    if (de) [statLabel(de), shownTitleText(de)].forEach(function (o) { if (o) t = t.split(o).join(" "); });
+    return t;
   }
   // a "#123" an entry's own title holds is the captain's words, shown wherever
   // the title is (a Tasks row, the side): only the rest is an id the page put there
@@ -7542,6 +7760,13 @@ var sayQ = say;
   var wSt = wFound($("#dlg"));
   ok(!wSt, "Statistics names no slug, #id, byte count or ISO date (" + wSt + ")");
   ok(!/\d+k\s*content/i.test($("#dlg").textContent), "and has no byte readout");
+  // the echoes need the star chart's vectors, which a test journal may lack:
+  // drawn here from two of its rows, each side's day the row's own, in words
+  var wEr = st.all.filter(function (e) { return !e.deleted && e.created_at_utc; });
+  var wEh = statTopicsHtml({ n: 40, topics: [{ words: ["probe"], n: 1, color: "#888", lift: 1, months: new Array(18).fill(0), samples: [] }],
+                             echoes: [{ a: wEr[0].id, b: wEr[1].id, s: 0.5 }] });
+  has(wEh, "<span>" + esc(dayLabelText(dayKey(wEr[1].created_at_utc))) + "</span>", "an echo's day in words");
+  ok(wEh.indexOf("<span>" + dayKey(wEr[1].created_at_utc) + "</span>") < 0, "never its ISO date");
   closeOv();
   openShareSheet(wRow.id);
   eq($("#dlgh").textContent, "Share \u201c" + shownTitleText(wRow) + "\u201d", "Share is titled by the entry's name");
@@ -8274,7 +8499,12 @@ var sayQ = say;
   var tkOne = tkRows[0], tkE = dbFind(Number(tkOne.dataset.id));
   eq(tkOne.querySelector(".tkk").textContent, kindName(tkE.kind || ""), "the kind by its name");
   eq(tkOne.querySelector(".tkage").textContent, agoWords(tkE.created_at_utc), "the age in words");
-  ok(tkRows.every(function (r) { return !/\d{4}-\d\d-\d\d|\d\d:\d\d/.test(r.textContent); }), "no ISO date, no clock time on a row");
+  // the row's own chrome, the task's line taken out: a real line may hold a
+  // date or a time of its own ("call at 10:30"), which is the captain's words
+  ok(tkRows.every(function (r) {
+    var own = r.querySelector(".tkt"), t = r.textContent;
+    if (own && own.textContent) t = t.split(own.textContent).join("");
+    return !/\d{4}-\d\d-\d\d|\d\d:\d\d/.test(t); }), "no ISO date, no clock time on a row");
   ok(tkRows.every(function (r) {
     return r.querySelector(".tkage").classList.contains("old") === (entryAge(st.byId.get(Number(r.dataset.id))) >= 60); }),
      "amber exactly from 60 days");
@@ -9652,6 +9882,31 @@ var sayQ = say;
   back.created_at_utc = "2001-01-01 00:00:00";
   ok(isFresh(back), "an entry backdated to 2001 is still new if its id is");
   back.created_at_utc = wasCreated;
+
+  console.log("-- fresh: the count is what the list would show --");
+  // the toast said 6 over a list of 5: a crew work log counted, never listed
+  seenId = st.all.find(function (e) { return !isLocalId(e.id); }).id;
+  var frOwn = await plant({ title: "fresh: the captain's own" });
+  var frCrew = await plant({ kind: "crew_ops", title: "fresh: a crew run" });
+  var frWork = await plant({ kind: kindOf("work_log"), title: "fresh: a work log" });
+  var frDel = await plant({ title: "fresh: written and deleted" });
+  frDel.deleted = 1;
+  setCrew(false);
+  await settle(2);
+  eq(freshCount(), 1, "with the crew hidden only the captain's own row counts");
+  has($("#bFresh").textContent, "1 new", "the sidebar says 1");
+  toggleFresh();
+  eq(st.view.length, freshCount(), "and the list it opens shows exactly that many");
+  ok(st.view.indexOf(frOwn) >= 0, "the captain's own row among them");
+  toggleFresh();
+  setCrew(true);
+  await settle(2);
+  eq(freshCount(), 3, "shown, the crew's rows count again (the deleted one never)");
+  toggleFresh();
+  eq(st.view.length, freshCount(), "and the list still agrees");
+  toggleFresh();
+  [frOwn, frCrew, frWork, frDel].forEach(unplant);
+  hideToast();
   seenId = realSeen;
   refresh();
 
@@ -9730,7 +9985,7 @@ var sayQ = say;
   refresh();
 
   /* An untitled quick capture is drawn by its first words, dimmer; the stored
-     title and the editor's field keep the placeholder */
+     title keeps the placeholder, the editor's field shows none */
   console.log("\n-- derived titles --");
   var dLong = "Walked the dog along the river this morning and the light on the water was something else entirely";
   var dRow = await plant({ title: "HTTP Entry", content: "id:: 1234-abcd\n- " + dLong + "\nsecond line" });
@@ -9761,7 +10016,7 @@ var sayQ = say;
   ok($("#rd_title").classList.contains("tder"), "dimmed as derived");
   eq(st.byId.get(dRow.id).title, "HTTP Entry", "the stored title is untouched");
   setRead(false);
-  eq($("#e_head").value, "HTTP Entry", "and the editor's title field shows the stored value");
+  eq($("#e_head").value, "", "and the editor's title field is empty, not the server's placeholder (titleOwn)");
   closeEditor();
   select(dNamed.id);
   ok(!$("#rd_title").classList.contains("tder"), "a titled entry's heading is not dimmed");
@@ -11488,6 +11743,39 @@ var sayQ = say;
   var srvRun = gets[0].run;
   eq(srvRun.who, "computer", "in the computer's voice");
   eq(sayVoice(sayQ.prov, srvRun.who, srvRun.female), "Xb7hH8MSUJpSbSDYk0k2", "SAY_VOICES' computer for this provider");
+  eq(JSON.stringify(sayStyle("elevenlabs", "computer")), "{}", "the computer: no style sent");
+  // an engineer's own voice (SAY_PERSONAS, the `voices` settings entry)
+  eq(sayVoice("elevenlabs", "data-lqj", false), SAY_PERSONAS.data.elevenlabs, "Data, any of his names: his own ElevenLabs voice");
+  eq(sayVoice("deepgram", "data", false), "aura-2-orpheus-en", "and his own Aura-2 one");
+  eq(JSON.stringify(sayStyle("elevenlabs", "data-lqj")), JSON.stringify({ style: { fallback: "aura-2-orpheus-en", stability: 0.92, speed: 1.05 } }),
+     "his style: steady, a touch quick, Orpheus when ElevenLabs cannot");
+  eq(JSON.stringify(sayStyle("deepgram", "data-lqj")), "{}", "Deepgram has no style to send");
+  ok(SAY_VOICES.elevenlabs.m.indexOf(sayVoice("elevenlabs", "geordi-abc", false)) >= 0, "an engineer with none: drawn by the hash as before");
+  // every built-in voice is whole: an id the server takes, an Aura-2 backup, a style /say accepts
+  Object.keys(SAY_PERSONAS).forEach(function (k) {
+    var p = SAY_PERSONAS[k], seat = k + "-c99";
+    ok(/^[A-Za-z0-9_-]{1,64}$/.test(p.elevenlabs) && /^aura-2-[a-z]+-en$/.test(p.deepgram) &&
+       p.stability >= 0 && p.stability <= 1 && p.speed >= 0.7 && p.speed <= 1.2,
+       "SAY_PERSONAS." + k + ": a voice id, an Aura-2 backup, a style in range");
+    eq(sayVoice("elevenlabs", chatWho({ eng: { name: seat, title: "" } }).who, false), p.elevenlabs,
+       k + " in a crew seat (" + seat + ") speaks in their own voice");
+    eq(JSON.stringify(sayStyle("elevenlabs", seat)), JSON.stringify({ style: { fallback: p.deepgram, stability: p.stability, speed: p.speed } }),
+       k + "'s style and backup sent");
+  });
+  ok(Object.keys(SAY_PERSONAS).length >= 10, "Data, the eight on duty and Esposito");
+  var voicesRow = { id: 99999901, kind: "settings", title: "voices",
+                    content: JSON.stringify({ geordi: { elevenlabs: "JBFqnCBsd6RMkjVDRZzb", stability: 0.4 },
+                                              data: { elevenlabs: "onwK4e9ZLuTAKqWW03F9" } }) };
+  st.all.push(voicesRow);
+  eq(sayVoice("elevenlabs", "geordi-abc", false), "JBFqnCBsd6RMkjVDRZzb", "the `voices` entry gives an engineer a voice");
+  eq(chatWho({ eng: { name: "geordi-c34", title: "Geordi" } }).who, "geordi-c34", "a crew seat with a voice of its own: found by the name");
+  eq(chatWho({ eng: { name: "torres-c37", title: "" } }).who, "c37", "one without: the seat, as the deck has it");
+  eq(JSON.stringify(sayStyle("elevenlabs", "geordi-abc")), JSON.stringify({ style: { stability: 0.4 } }), "and its style");
+  eq(sayVoice("elevenlabs", "data-lqj", false), "onwK4e9ZLuTAKqWW03F9", "and wins over the built-in one");
+  voicesRow.content = "{ not json";
+  eq(sayVoice("elevenlabs", "data-lqj", false), SAY_PERSONAS.data.elevenlabs, "an entry that is not JSON: the built-in voices");
+  st.all.splice(st.all.indexOf(voicesRow), 1);
+  ok(SAY_VOICES.elevenlabs.m.indexOf(sayVoice("elevenlabs", "geordi-abc", false)) >= 0, "and Geordi back to the hash");
   ok(srvRun.always, "spoken with the chats' Voice off");
   eq(gets[0].it.text, sayTrim(tts.chunks[0]), "the first piece first");
   var nChunks = tts.chunks.length;
@@ -13898,6 +14186,38 @@ var sayQ = say;
   engPoll1 = { session: "s1", next: 300, first: 0, status: "idle", ctx: 250000, events: [] };
   await engPoll(rt); await settle(1);
   ok($(".chth .chgauge").textContent.indexOf("125%") >= 0 && $(".chth .chgauge").classList.contains("over"), "past the mark: amber");
+  // past the mark the gauge is the refresh's door, asked first; and ⋯ has
+  // Refresh context for an engineer too (engRefresh, one for all)
+  eq($(".chth .chgauge").getAttribute("role"), "button", "past the mark the gauge is a control");
+  click($(".chth .chgauge"));
+  ok(!$(".chth .chscrim").hidden && /Refresh .*context\?/.test($(".chth .chsheet").textContent), "a tap asks first");
+  engPosts = [];
+  click($(".chth .chsheet").querySelector('.pill[data-act="refresh"]'));
+  has($(".chth .chlog").innerHTML, "Refreshing the context", "Refresh says so in the thread at once");
+  await settle(3);
+  ok(engPosts.some(function (u) { return u.indexOf("POST /engineer/reyes-c20/refresh") === 0; }), "and posts /engineer/<name>/refresh");
+  chatSheet("more");
+  var rfOpt = $(".chth .chsheet").querySelector('[data-act="refresh"]');
+  ok(rfOpt && !rfOpt.disabled && rfOpt.textContent.indexOf("last message") >= 0, "⋯ offers an engineer Refresh context");
+  chatSheet("");
+  rt.eng.st.status = "blocked";
+  chatSheet("more");
+  ok($(".chth .chsheet").querySelector('[data-act="refresh"]').disabled, "greyed while a question waits on their screen");
+  chatSheet("");
+  rt.eng.st.status = "idle";
+  eq(vMatch(vWords("refresh engineer reyes"), 0).cmd.say, "refresh engineer {*}", "an engineer's refresh by voice, by name");
+  eq(vMatch(vWords("refresh number one"), 0).cmd.say, "refresh number one", "and Number One's keeps its own");
+  engPosts = [];
+  var rfHit = vMatch(vWords("refresh this engineer"), 0);
+  await rfHit.cmd.fn(rfHit.arg); await settle(3);
+  ok(engPosts.some(function (u) { return u.indexOf("POST /engineer/reyes-c20/refresh") === 0; }), "\"refresh this engineer\" refreshes the one on screen");
+  engPoll1 = { session: "s1", next: 300, first: 0, status: "idle", ctx: 167000, events: [] };
+  await engPoll(rt); await settle(1);
+  ok(!$(".chth .chgauge").hasAttribute("role"), "under the mark it is a reading again");
+  // the refresh's lines off again: what follows reads the answer's bubble in place
+  rt.eng.done = rt.eng.done.filter(function (m) { return m.role !== "sys"; }); chatDraw();
+  engPoll1 = { session: "s1", next: 300, first: 0, status: "idle", ctx: 250000, events: [] };
+  await engPoll(rt); await settle(1);
   ok($(".chth .cheta").hidden && !$(".chth .cheta").querySelector(".etab"), "no estimate bar while they are idle");
   ok(JSON.parse(localStorage.getItem("lcars.chats")).list.every(function (t) { return t.id.indexOf("eng-") !== 0; }),
      "and their thread is not saved here: the transcript is the server's");
@@ -16230,7 +16550,9 @@ var sayQ = say;
     Object.defineProperty(TStore.prototype, "length", { get: function () { return Object.keys(this.m).length; } });
     var dropped = [], net = [];
     var IDB = { deleteDatabase: function (n) { dropped.push(n); var q = {}; Promise.resolve().then(function () { if (q.onsuccess) q.onsuccess(); }); return q; } };
-    var day = function (n) { var d = new Date(Date.now() - n * 864e5); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); };
+    // n calendar days back, as static.js counts them: n times 24 hours is a
+    // day further back just after a spring clock change (the day was 23 hours)
+    var day = function (n) { var d = new Date(); d.setDate(d.getDate() - n); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); };
     var row = function (id, kind, title, at, extra) {
       return Object.assign({ id: id, kind: kind, title: title, content: "- " + title + "\n", value_int: 0, value_float: 0,
         done_bool: 0, deleted: 0, created_at_utc: at, last_modified_at_utc: at }, extra || {});
@@ -17492,6 +17814,17 @@ var sayQ = say;
     shx = null;
     navigator.clipboard = navWas;
     localStorage.removeItem(SOC_MASTO); localStorage.removeItem(SOC_ON);
+    // an untitled entry: the server's placeholder is no title to post
+    var su = await plant({ title: PLACEHOLDER_TITLE, content: "A first paragraph to share.\n\nhttps://example.com/untitled" });
+    openShareSheet(su.id); await settle(2);
+    eq($("#soc_text").value, "A first paragraph to share.", "an untitled entry's text: its first paragraph, no placeholder");
+    eq(SOC_ORDER.filter(function (k) { return shx.n[k].title !== "" || shx.n[k].text.indexOf(su.title) >= 0; }).join(), "",
+       "no card's title or text is the placeholder");
+    eq(socBlocked("hn", shx.n.hn), "it needs a title", "Hacker News's card asks for a title instead");
+    closeOv();
+    shx = null;
+    unplant(su);
+    localStorage.removeItem(SOC_ON);
     // nothing of the sheet without an entry
     closeEditor(); await settle(2);
     ok(!shareThis(), "with no entry open, Share says so");

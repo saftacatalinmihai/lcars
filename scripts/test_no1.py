@@ -2,7 +2,9 @@
 """Unit tests for scripts/no1.py's `journal`: which lcars-cli it runs, with
 what login, and that the real lcars-cli has no --db at all; and the refresh
 (engineer.py's refresh-go): a Handover log marks it, the Stop hook's turn then clears, each step
-logged; one relaunched without its hooks (herdr's restore) is restarted first. A stub lcars-cli (a shell script that
+logged; one relaunched without its hooks (herdr's restore) is restarted first;
+and an engineer's: the turn that read the [refresh] ends in the clear, the
+handover typed back with its crew_msg row; one out of the seat queued. A stub lcars-cli (a shell script that
 records its argv and login) stands in, in a temp live checkout laid out like
 the VPS's - lcars-cli/ a directory with the binary inside it, which is what
 the old lookup handed to exec (PermissionError). Nothing outside the temp
@@ -175,6 +177,7 @@ class Refresh(unittest.TestCase):
         self.assertEqual(self.call(E.cmd_refresh_go, E.NO1), {"ok": True, "cleared": True})
         self.assertEqual(self.cleared, ["the sweep"])
         self.assertIn("Read your log", self.sent[-1])
+        self.assertTrue(self.sent[-1].startswith("[refresh] Your conversation was cleared"))
         self.assertNotIn("refresh", E.load(E.NO1))
 
     def test_the_stop_hook_spawns_the_clear_only_once_noted(self):
@@ -188,7 +191,7 @@ class Refresh(unittest.TestCase):
             sp.assert_called_once_with("refresh-go", E.NO1)
         self.call(E.cmd_refresh_go, E.NO1)
         # each step leaves its line, so a stuck refresh shows how far it got
-        steps = ["refresh asked of session s1", "turn-ended: no handover noted yet", "handover written",
+        steps = ["refresh asked of number-one, session s1", "turn-ended: no handover noted yet", "handover written",
                  "turn-ended: handover noted, refresh-go started (unit)", "refresh-go: Number One idle",
                  "refresh-go: cleared"]
         with open(os.path.join(self.state, "logs", "refresh.log")) as f:
@@ -242,6 +245,128 @@ class Refresh(unittest.TestCase):
         self.log("Handover")
         self.assertNotIn("noted", E.load(E.NO1)["refresh"])
         self.assertTrue(self.call(E.cmd_refresh, E.NO1)["pending"])  # a new one may start
+
+
+class EngineerRefresh(unittest.TestCase):
+    """The same refresh for an engineer: their handover is the last message of
+    the turn that read the [refresh] line (its mark in the transcript), that
+    turn's end clears them and the fresh session is typed the handover back,
+    with its crew_msg row; one out of the seat gets it in their inbox; the
+    refusals are clear's."""
+
+    NAME = "reyes"
+
+    def setUp(self):
+        self.state = tempfile.mkdtemp(prefix="eng-refresh-")
+        self.path = os.path.join(self.state, "s2.jsonl")
+        open(self.path, "w").close()
+        self.cleared, self.spawned = [], []
+        self.ps = [mock.patch.object(E, "STATE", self.state),
+                   mock.patch.object(E, "agent_info", return_value={"agent_status": "idle"}),
+                   mock.patch.object(E, "herdr", return_value=({}, "")),
+                   mock.patch.object(E, "submit_if_left"),
+                   mock.patch.object(E, "seated", return_value=False),
+                   mock.patch.object(E, "transcript", return_value=self.path),
+                   mock.patch.object(E, "turn_deliver", return_value=42),
+                   mock.patch.object(E, "spawn", side_effect=lambda *a: self.spawned.append(a) or "unit"),
+                   mock.patch.object(E, "clear_session",
+                                     side_effect=lambda n, label: (self.cleared.append((n, label)) or
+                                                                   (0, {"ok": True, "cleared": True}))),
+                   mock.patch.object(E.time, "sleep")]
+        for p in self.ps:
+            p.start()
+        E.save(self.NAME, {"name": self.NAME, "session": "s2", "task": "the boiler"})
+
+    def tearDown(self):
+        for p in self.ps:
+            p.stop()
+        shutil.rmtree(self.state)
+
+    call = Refresh.call
+
+    def typed(self):
+        return [c.args[3] for c in E.herdr.call_args_list if c.args[:2] == ("agent", "prompt")]
+
+    def said(self, text):
+        # a message of the captain's side in the transcript, as Claude Code writes it
+        with open(self.path, "a") as f:
+            f.write(json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n")
+
+    def end_turn(self, last):
+        with mock.patch("sys.stdin", io.StringIO(json.dumps({"last_assistant_message": last}))):
+            return self.call(E.cmd_hook, "turn-ended", self.NAME)
+
+    def test_the_turn_that_read_it_ends_in_a_clear_and_the_handover_typed_back(self):
+        got = self.call(E.cmd_refresh, self.NAME)
+        self.assertTrue(got["pending"])
+        asked = self.typed()[-1]
+        self.assertTrue(asked.startswith("[refresh] (refresh #"))
+        self.assertIn("WIP", asked)
+        # a turn already under way that never read the line: no clear, the
+        # report goes on as any turn's
+        self.end_turn("Report: done with the valve.")
+        self.assertEqual(self.spawned, [])
+        E.turn_deliver.assert_called_once()
+        self.assertNotIn("noted", E.load(self.NAME)["refresh"])
+        # the next turn reads it, and its last words are the handover
+        self.said(asked)
+        self.end_turn("Handover: the boiler, valve fixed, tests left.")
+        self.assertEqual(len(self.spawned), 1)
+        verb, name, spool, t0 = self.spawned[0]
+        self.assertEqual((verb, name), ("refresh-go", self.NAME))
+        self.assertEqual(E.turn_deliver.call_count, 1)  # refresh-go files it, not the hook
+        E.herdr.reset_mock()
+        got = self.call(E.cmd_refresh_go, self.NAME, spool, t0)
+        self.assertEqual(got, {"ok": True, "cleared": True, "msg": 42})
+        self.assertEqual(self.cleared, [(self.NAME, "the boiler")])
+        fresh = self.typed()[-1]
+        self.assertTrue(fresh.startswith("[refresh] Your conversation was cleared"))
+        self.assertIn("crew_msg #42", fresh)
+        self.assertIn("Handover: the boiler, valve fixed, tests left.", fresh)
+        self.assertNotIn("refresh", E.load(self.NAME))
+        self.assertFalse(os.path.exists(spool))
+
+    def test_a_long_handover_is_cut_with_the_pointer(self):
+        text = E.refresh_handover_text("x" * (E.REFRESH_TYPED_MAX + 500), 7)
+        self.assertIn("the rest is in crew_msg #7", text)
+        self.assertLess(len(text), E.REFRESH_TYPED_MAX + 800)
+        self.assertNotIn("crew_msg", E.refresh_handover_text("short", None))
+
+    def test_one_out_of_the_seat_gets_it_in_the_inbox(self):
+        E.agent_info.return_value = None
+        E.seated.return_value = True
+        with mock.patch.object(E, "seat_want") as want:
+            got = self.call(E.cmd_refresh, self.NAME)
+        self.assertTrue(got["queued"])
+        self.assertIn("inbox", got["note"])
+        self.assertTrue(want.call_args.args[2].startswith("[refresh] (refresh #"))
+        self.assertFalse(self.typed())
+        r = E.load(self.NAME)["refresh"]
+        self.assertTrue(r["queued"])
+        # delivered with the seat hours later: still pending
+        r["at"] -= E.REFRESH_WAIT_SECONDS + 60
+        self.assertTrue(E.refresh_pending({"refresh": r}))
+
+    def test_the_refusals_are_clear_s(self):
+        E.agent_info.return_value = None
+        self.assertIn("not on duty", self.call(E.cmd_refresh, self.NAME)["error"])
+        E.agent_info.return_value = {"agent_status": "blocked"}
+        self.assertIn("question", self.call(E.cmd_refresh, self.NAME)["error"])
+        self.assertNotIn("refresh", E.load(self.NAME))
+
+    def test_a_failed_clear_moves_the_seat_on_and_tells_number_one(self):
+        E.seated.return_value = True
+        self.call(E.cmd_refresh, self.NAME)
+        self.said(self.typed()[-1])
+        self.end_turn("Handover: all of it.")
+        spool = self.spawned[0][2]
+        self.spawned.clear()
+        E.clear_session.side_effect = lambda n, label: (3, {"error": "the engineer is not on duty"})
+        with mock.patch.object(E, "notify_no1") as n1:
+            got = self.call(E.cmd_refresh_go, self.NAME, spool, "5")
+        self.assertFalse(got["cleared"])
+        self.assertIn("did not happen", n1.call_args.args[1])
+        self.assertIn(("seat-turn-ended", self.NAME, "5"), self.spawned)
 
 
 class Research(unittest.TestCase):

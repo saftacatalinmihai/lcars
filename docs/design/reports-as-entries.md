@@ -122,9 +122,10 @@ first line no report entry holds - deleted ones included, so an entry the
 captain deleted stays deleted - would make one, `created_at` the sidecar's
 `published_utc` (the file's mtime without one). A dry run unless
 `--apply`; idempotent, so it runs any number of times. Run on the live
-journal once, when Number One gives the word.
+journal once, on Number One's word: done 2026-10-24.
 
 On 2026-10-24, the NAS's 163 reports against a scratch journal: 163 to
 make, 52 of them the link alone (all HTML with their pictures inlined, 0.8
-to 14 MB). The live import waits for the console's side to be deployed,
-so no entry shows raw; Number One gives the word.
+to 14 MB). The live import waited for the console's side to be
+deployed, so no entry shows raw, and ran on Number One's word on
+2026-10-24.

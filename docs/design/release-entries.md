@@ -56,7 +56,8 @@ entry of kind `release` begins `release:: <version>`, deleted or not.
   ~/.env; the box's own zone when unset). `LCARS_CHANGELOG` points it at
   another file (the tests).
 
-The first live `--apply` is Number One's word (617 versions at 0.323.5).
+The first live `--apply` was Number One's word (617 versions at 0.323.5),
+given and run on 2026-10-24: 619 entries written.
 
 ## Tests
 

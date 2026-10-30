@@ -16,8 +16,9 @@ python3 lcars-ui/test/demo_static.py       # build, serve, drive it (~1 min)
 
 The build remakes the folder whole (it refuses one it did not write: no
 `.lcars-demo` in it), then prints its size and its biggest files. About
-8 MB: the console (1.9 MB), three.js, the deck page, the deck's rooms and
-the crew's models.
+16 MB (0.346.4): the console (2.5 MB), three.js and the KTX2 transcoder,
+the deck page, the deck's rooms, their KTX2 and webp textures and Ten
+Forward's baked lightmap, and the crew's models.
 
 | in the folder | what it is |
 | --- | --- |
@@ -68,7 +69,8 @@ python3 lcars-ui/demo/live_check.py --base https://<the demo's host>/lcars-demo/
    `.json` `application/json`, `.png` `image/png`, `.glb`
    `model/gltf-binary`, `.webp` `image/webp`, `.woff2` `font/woff2`,
    `.webmanifest` `application/manifest+json`, `.ktx2` `image/ktx2`,
-   `.wasm` `application/wasm`, `.theme` and the themes' extensionless
+   `.wasm` `application/wasm`, `.bin` (a baked lightmap's uvs)
+   `application/octet-stream`, `.theme` and the themes' extensionless
    `LICENSE` and `NOTICE` `text/plain; charset=utf-8` (`TYPES`; a file of
    another type stops the run before anything is written).
 3. Deletes each object under the prefix that is not in the build
@@ -161,7 +163,8 @@ builds its models' and textures' names as it runs (`DECK_MODELS + room +
 ".glb"`), so built `deck.html` carries a table, `LCARS_DEMO_V` (path to
 hash, for `deck/` and `crew/`), and hands `LCARS_DEMO_ASSET` to three.js's
 `DefaultLoadingManager.setURLModifier`, which every loader of the deck
-goes through. The journal's pictures carry the hash in their names
+goes through; the one bare `fetch()` of a model's file, a lightmap's
+`lm_<room>.json` and `.bin` (`lmLoad`), calls it by hand. The journal's pictures carry the hash in their names
 (`e2400-1-<hash>.png`), since the console builds their urls from the
 journal's paths. A changed file is a new url the moment the new page is;
 an unchanged one keeps its url and its cached copy. Only the build does

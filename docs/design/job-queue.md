@@ -525,7 +525,10 @@ against 12.2 ms alone).
    - *Get the RAM back first* (slice 0). `reap_test_tmp` learns
      `remotion-webpack-bundle-*`, and `render.sh` removes its bundle on
      exit (a trap). That frees ~1.7 GB of RAM and swap now, and it keeps
-     the margins honest.
+     the margins honest. `stills.mjs` (the contact sheets) bundles too,
+     and did not: 21 of its bundles, all under the reaper's two hours,
+     filled /tmp on 29 Oct; it now has a TMPDIR of its own, as
+     `render.sh` has, removed on any exit.
    - *The gate is the main defence*. The 1.5 GB reserve is kept beside
      everything: llama-server waking (~600 MB), a Claude Code growing
      (~100 MB a turn), git and the server's page cache.

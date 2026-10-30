@@ -336,7 +336,7 @@ body.touch #near{left:calc(10px + env(safe-area-inset-left));right:calc(10px + e
     <b>wheel</b> size · <b>1–9</b> hand slot · <b>Q</b> empty hand<br>
     <b>T</b> or <b>right-click</b> throw the tablet in hand<br>
     <b>R</b> open · <b>G</b> graphics · <b>M</b> sound · <b>Esc</b> release mouse<br>
-    <b>U</b> on the bridge: night watch, the lights low, and back<br>
+    <b>U</b> on the bridge: night watch, the lights low, and back (by the clock 23:00-07:00, PADD settings)<br>
     <b>L</b> turbolift: go to another deck<br>
     <b>P</b> in a holodeck: run a day as a program<br>
     <b>B</b> transporter: straight to a room, or rename this one<br>
@@ -2906,6 +2906,7 @@ function tickLights(dt, snap) {
   camera.getWorldPosition(_eye); camera.getWorldDirection(_look);
   const cand = [];
   for (const s of lightSpots) {
+    if (s.baked) continue;   // in a lightmap (lmApply)
     const d = s.p.distanceTo(_eye);
     if (d > s.dist + 12) continue;
     // one ahead of the view matters more than one behind it
@@ -3296,6 +3297,7 @@ function modelAsset(room) {
       // the atlas: glTF's ORM, ambient occlusion in red, roughness green,
       // metalness blue; three reads each from its channel of the one texture
       const mat = new THREE.MeshStandardMaterial({ map: base, normalMap: norm, aoMap: orm, roughnessMap: orm, metalnessMap: orm, metalness: 1, roughness: 1 });
+      mat.userData.lmKey = "glb:" + room;   // its name in a lightmap's bake (lmKey)
       // the glb carries the tangents the normal map was baked against
       // (scripts/deck-model-assets.mjs), so the map's green is used as baked;
       // kept: a dropped cell must not dispose what every other room uses
@@ -3334,7 +3336,11 @@ function placeModels({ doc, mat }, places, parent, cast) {
     p.g.updateWorldMatrix(true, false);
     const base = new THREE.Matrix4().copy(inv).multiply(p.g.matrixWorld).multiply(R.makeRotationY(p.rot)).multiply(S.makeScale(...p.scale));
     M4.copy(base).multiply(src.matrixWorld);
-    const geo = floatGeo(src.geometry, M4), isDress = DRESSING.has(p.room + "/" + p.prop);
+    let geo = floatGeo(src.geometry, M4);
+    const isDress = DRESSING.has(p.room + "/" + p.prop);
+    // a lightmapped room's props unshared, a UV a corner (lmSelect): every
+    // placement of the room alike, so the merge's ranges stay consistent
+    if (LIGHTMAP && parent === scene && LM_ROOMS[p.room] && geo.index) geo = geo.toNonIndexed();
     if (!isDress) geos.push(geo);
     else { if (!dress.has(p.frame)) { dress.set(p.frame, []); dressShadows.set(p.frame, []); dressAt.set(p.frame, [0]); } dress.get(p.frame).push(geo); }
     const at = isDress ? dressAt.get(p.frame) : mainAt, n = geo.attributes.position.count;
@@ -3356,6 +3362,7 @@ function placeModels({ doc, mat }, places, parent, cast) {
     const m = new THREE.Mesh(mergeGeometries(list), mat);
     m.castShadow = cast; m.receiveShadow = true; m.matrixAutoUpdate = false;
     parent.add(m);
+    if (parent === scene) lmSelect(m);   // deck 8's, in the world's frame
     return m;
   };
   const own = (m, frame) => { for (const p of places) if (p.lift && !p.lift.mesh && p.lift.frame === frame) p.lift.mesh = m; };
@@ -3416,6 +3423,7 @@ async function loadModels() {
       if (!a || !placeModels(a, boot.filter(p => p.room === room), scene, true)) return;
       renderer.shadowMap.needsUpdate = true;
       modelsIn++;
+      if (LM_ROOMS[room]) await lmApply(room);
     } catch (e) { console.warn(`[deck] ${room} models not placed, keeping the stand-ins:`, e); }
   })]);
   modelsDone = true;
@@ -3562,6 +3570,7 @@ hookShader(M.lightStrip, "night", sh => {
     .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n{ float nk = mix(1.0, uNight, vNight); totalEmissiveRadiance *= nk; diffuseColor.rgb *= nk; }");
 });
 NIGHT.set.push(on => { nightU.value = on ? 0.18 : 1; });
+// quiet: the boot's and the clock's call; anything else is a choice by hand
 function nightWatch(on, quiet) {
   NIGHT.on = !!on;
   for (const f of NIGHT.set) f(NIGHT.on);
@@ -3570,7 +3579,59 @@ function nightWatch(on, quiet) {
   if (pill) pill.textContent = NIGHT.on ? "Day" : "Night";
   if (quiet) return;
   lsSet("lcars.deck.night", NIGHT.on);
+  lsSet("lcars.deck.nighthand", watchAt(NIGHT.now()).key);
   flashHint(NIGHT.on ? "The bridge at night watch" : "The bridge at day watch");
+}
+// The watch by the clock (the captain's order of 2026-10-30): night watch
+// from 23:00 to 07:00 in the captain's own zone, the server's $LCARS_TZ
+// (GET /zone, kept here for the next boot and offline), not the device's:
+// a phone's clock reads wherever the phone is. With no zone from the server
+// (the demo, an older server, none set) it is the device's own. Checked at
+// boot and once a minute (nightTick: one Intl format). A choice by hand
+// holds for the watch it was made in - kept as that watch's key - and the
+// clock takes over again at the next change of watch. The switch is kept
+// per device like the deck's other settings, on by default.
+NIGHT.clock = lsGet("lcars.deck.nightclock", true) !== false;
+NIGHT.zone = typeof lsGet("lcars.deck.zone", null) === "string" ? lsGet("lcars.deck.zone", null) : null;
+NIGHT.now = () => Date.now();   // deckboot stands the hour in
+let nightFmt = null;
+// The watch at time t, night or day, and a key naming that one watch: the
+// zone's date an hour later, so 23:00 to 07:00 is one night (the morning's
+// date) and 07:00 to 23:00 one day.
+function watchAt(t) {
+  const d = new Date(t + 3600e3);
+  let y = d.getFullYear(), mo = d.getMonth() + 1, da = d.getDate(), h = d.getHours();
+  try {
+    if (!nightFmt || nightFmt.zone !== NIGHT.zone) {
+      const o = { hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric" };
+      let f;
+      try { f = new Intl.DateTimeFormat("en-US", NIGHT.zone ? { ...o, timeZone: NIGHT.zone } : o); }
+      catch (e) { f = new Intl.DateTimeFormat("en-US", o); }   // a zone this browser does not know
+      nightFmt = { zone: NIGHT.zone, f };
+    }
+    const p = {};
+    for (const x of nightFmt.f.formatToParts(d)) p[x.type] = x.value;
+    y = +p.year; mo = +p.month; da = +p.day; h = +p.hour % 24;
+  } catch (e) {}
+  const night = h < 8;
+  return { night, key: (night ? "night " : "day ") + y + "-" + mo + "-" + da };
+}
+function nightTick(boot) {
+  if (!NIGHT.clock) return;
+  const w = watchAt(NIGHT.now());
+  if (lsGet("lcars.deck.nighthand", "") === w.key || w.night === NIGHT.on) return;
+  nightWatch(w.night, true);
+  lsSet("lcars.deck.night", NIGHT.on);
+  // said only on the bridge, where the lights change; elsewhere it happens
+  // quietly, and is seen on walking in (Number One's word, 2026-10-30)
+  if (!boot && onBridge()) flashHint(w.night ? "Night watch by the clock: the bridge's lights low (U lifts them)" : "Day watch by the clock: the bridge lit (U dims it)");
+}
+function setNightClock(on) {
+  NIGHT.clock = !!on;
+  lsSet("lcars.deck.nightclock", NIGHT.clock);
+  // turned on, the clock has it now: a choice by hand is let go
+  if (NIGHT.clock) { lsSet("lcars.deck.nighthand", ""); nightTick(true); }
+  flashHint(NIGHT.clock ? "The bridge keeps the clock: night watch 23:00 to 07:00" + (NIGHT.zone ? ", " + NIGHT.zone : "") : "The bridge's watch by hand only (U)");
 }
 // Ten Forward: x 2.2..19, z -27.5..-10.5, windows to starboard and forward
 const TF = { X0: CW, X1: 19, Z0: -27.5, Z1: -10.5, H: 4.8 };
@@ -4169,6 +4230,169 @@ function bakeAO(scope, cell) {
   if (!cell) aoStats.atlas = cv;   // deck 8's, to look at (__deck.aoStats)
   if (cell) cell.userData.ao = { tex, clones };
   return clones;
+}
+/* ----- the lightmap pilot (deck-remodel slice 8) ----- */
+// Ten Forward's four pooled lamps baked: the room's lit surfaces (its shell
+// and its glb props, merged as they are drawn) exported from this page,
+// given a second UV set and a Cycles bake of those lights in Blender, direct
+// and indirect, light only (scripts/deck-models/lightmap.py), and brought
+// back as three's `uv1` attribute (the second set: the old `uv2`) and a
+// `lightMap` on the merged materials. Behind `?lightmap`, so the pilot and
+// main are compared in one checkout (deckshots and deckmem pass it with
+// --query). A lightmap is three's indirect light, added to the fill: so
+// the lamps it bakes leave the light pool once it is on (`baked`, in
+// tickLights), and the room's fill steps down to what the bake does not
+// cover; the two key spots stay as they are, real-time, with their shadows.
+// The fill and the gain were picked by eye at low from three (main's fill
+// with the bake as it is; 0.3/0.2; 0.4/0.25 with the bake 1.6x): the last
+// has the most depth, the pools on the ceiling and the bar's foot.
+//
+// The merged meshes are deck-wide, one a material: Ten Forward's metal is
+// the same mesh as the bridge's. So `uv1` goes on the whole merged buffer,
+// the room's triangles mapped into the atlas and every other one at (0, 0),
+// which the bake leaves black: a lightmap adds light, and black adds none
+// (a cell's mesh in the same material has no `uv1` at all, which WebGL
+// reads as 0 too). +0 calls, +0 triangles, one texture.
+//
+// Which triangles are the room's is decided here, at the merge, from the
+// merged buffer as built (centroid in LM_ROOMS' box), before any stand-in
+// is collapsed under its model (hideStandin): the export and every later
+// load pick the same ones in the same order, and the bake's file holds a
+// UV for each. A count that differs (the room's geometry changed since the
+// bake) leaves that material unlit by it, with a warning: rebake.
+const LIGHTMAP = new URLSearchParams(location.search).has("lightmap");
+// ?lightmap=H,E,K to compare looks: the room's fill (the hemisphere's and
+// the environment's intensities) and a gain on the bake; unset, LM_ROOMS'
+const LM_TUNE = (new URLSearchParams(location.search).get("lightmap") || "").split(",").map(parseFloat);
+const LM_ROOMS = { tenforward: { box: [TF.X0 - 0.03, -0.02, TF.Z0 - 0.03, TF.X1 + 0.03, TF.H + 0.03, TF.Z1 + 0.03], zone: "Ten Forward", fill: [0.4, 0.25], gain: 1.6 } };
+const lmMeshes = [];   // { mesh, key, room, tris } for each merged mesh with triangles in a room
+const lmStats = { on: false, applied: 0, stale: [], ms: 0 };
+let lmNames = null;
+// a merged material's name in the bake's file: M's or MX's key, or the
+// glb room's atlas; anything else (a builder's own material) is not baked
+function lmKey(mat) {
+  if (!lmNames) {
+    lmNames = new Map();
+    for (const [k, v] of Object.entries(M)) if (v && v.isMaterial) lmNames.set(v, "M." + k);
+    for (const [k, v] of Object.entries(MX)) if (v && v.isMaterial && !lmNames.has(v)) lmNames.set(v, "MX." + k);
+  }
+  return mat.userData.lmKey || lmNames.get(mat) || null;
+}
+// a mesh alone in its material, in a room: merged by itself (mergeStatic)
+function lmAlone(o) {
+  if (!LIGHTMAP || !o.material.isMeshStandardMaterial || o.material.transparent || !lmKey(o.material)) return false;
+  const c = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3());
+  return Object.values(LM_ROOMS).some(({ box: b }) => c.x >= b[0] && c.x <= b[3] && c.y >= b[1] && c.y <= b[4] && c.z >= b[2] && c.z <= b[5]);
+}
+// record which of a merged mesh's triangles lie in a room (in the world's
+// frame: deck 8's boot merges, at the scene's root)
+function lmSelect(m) {
+  if (!LIGHTMAP || !m.material.isMeshStandardMaterial || m.material.transparent) return;
+  const key = lmKey(m.material);
+  if (!key) return;
+  const p = m.geometry.attributes.position, n = (m.geometry.index ? m.geometry.index.count : p.count) / 3;
+  if (m.geometry.index) return;   // every merge here is of non-indexed copies
+  for (const [room, { box: b }] of Object.entries(LM_ROOMS)) {
+    const tris = [];
+    for (let t = 0; t < n; t++) {
+      const i = t * 9, a = p.array;
+      const x = (a[i] + a[i + 3] + a[i + 6]) / 3, y = (a[i + 1] + a[i + 4] + a[i + 7]) / 3, z = (a[i + 2] + a[i + 5] + a[i + 8]) / 3;
+      if (x >= b[0] && x <= b[3] && y >= b[1] && y <= b[4] && z >= b[2] && z <= b[5]) tris.push(t);
+    }
+    if (!tris.length) continue;
+    // a second mesh of one material (a room's dressing beside its props) by
+    // its place in the order they are merged, which is the same every boot
+    const nth = lmMeshes.filter(r => r.room === room && r.key.split("#")[0] === key).length;
+    lmMeshes.push({ mesh: m, key: nth ? `${key}#${nth + 1}` : key, room, tris: Uint32Array.from(tris) });
+  }
+}
+// The bake's input (lightmap.py): each recorded mesh's room triangles as
+// they are drawn now (a collapsed stand-in's left out), world positions and
+// normals and `_tri`, the triangle's place in its selection, in a glTF by
+// three's GLTFExporter (`Exporter`, the tool serves it: the page ships
+// none), one mesh a material with its colour; and the room's lights.
+async function lmExport(room, Exporter) {
+  const out = new THREE.Scene(), counts = {};
+  for (const r of lmMeshes) {
+    if (r.room !== room) continue;
+    const p = r.mesh.geometry.attributes.position.array, nrm = r.mesh.geometry.attributes.normal.array;
+    const P = [], N = [], T = [];
+    r.tris.forEach((t, k) => {
+      const i = t * 9;
+      const ax = p[i + 3] - p[i], ay = p[i + 4] - p[i + 1], az = p[i + 5] - p[i + 2], bx = p[i + 6] - p[i], by = p[i + 7] - p[i + 1], bz = p[i + 8] - p[i + 2];
+      if (Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx) < 1e-9) return;   // collapsed
+      for (let j = 0; j < 9; j++) { P.push(p[i + j]); N.push(nrm[i + j]); }
+      T.push(k, k, k);
+    });
+    counts[r.key] = r.tris.length;
+    if (!P.length) continue;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+    g.setAttribute("_tri", new THREE.Float32BufferAttribute(T, 1));
+    const c = r.mesh.material.map && r.key.startsWith("glb:") ? new THREE.Color(0.5, 0.45, 0.4) : r.mesh.material.color;
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: c, roughness: 1, metalness: 0, name: r.key }));
+    mesh.name = r.key;
+    out.add(mesh);
+  }
+  const [x0, y0, z0, x1, y1, z1] = LM_ROOMS[room].box;
+  const lamps = lightSpots.filter(s => s.p.x >= x0 && s.p.x <= x1 && s.p.y >= y0 && s.p.y <= y1 && s.p.z >= z0 && s.p.z <= z1)
+    .map(s => ({ p: s.p.toArray(), color: s.color.getHex(), intensity: s.intensity, dist: s.dist, decay: lights[0].decay }));
+  const glb = await new Exporter().parseAsync(out, { binary: true });
+  let s = "";
+  const u8 = new Uint8Array(glb);
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return { glb: btoa(s), counts, lights: lamps };
+}
+// The bake back (lm_<room>.json, .bin, .ktx2): applied to every recorded
+// mesh of the room whose count matches, once the room's glb mesh is in
+// too (loadModels calls it after each room's placement; the boot's call
+// finds only the shell). Each mesh once.
+let lmAsset = null;
+function lmLoad(room) {
+  return lmAsset ??= (async () => {
+    // fetch(), not a three.js loader, so the demo's hashed names
+    // (LCARS_DEMO_ASSET, demo-static.md) are put on by hand: its host keeps
+    // a .bin four hours, and a stale one under a new .json is a torn bake
+    const at = window.LCARS_DEMO_ASSET || (u => u);
+    const [j, bin] = await Promise.all([fetch(at(`${DECK_MODELS}lm_${room}.json`)).then(r => r.json()), fetch(at(`${DECK_MODELS}lm_${room}.bin`)).then(r => r.arrayBuffer())]);
+    const tex = await ktx2Get(`${DECK_MODELS}lm_${room}.ktx2`);
+    tex.channel = 1;   // uv1
+    return { j, uv: new Uint16Array(bin), tex };
+  })();
+}
+async function lmApply(room = "tenforward") {
+  if (!LIGHTMAP) return;
+  let a;
+  try { a = await lmLoad(room); } catch (e) { console.warn(`[deck] ${room}'s lightmap not loaded:`, e); return; }
+  const t0 = performance.now(), { j, uv, tex } = a;
+  for (const r of lmMeshes) {
+    if (r.room !== room || r.done) continue;
+    const e = j.meshes[r.key];
+    if (!e) continue;
+    r.done = true;
+    if (e.tris !== r.tris.length) { lmStats.stale.push(r.key); console.warn(`[deck] ${room}'s lightmap is stale for ${r.key} (${e.tris} triangles baked, ${r.tris.length} now): rebake`); continue; }
+    const geo = r.mesh.geometry, n = geo.attributes.position.count;
+    const u1 = geo.attributes.uv1 ? geo.attributes.uv1.array : new Float32Array(n * 2);
+    r.tris.forEach((t, k) => {
+      for (let c = 0; c < 3; c++) {
+        const s = (e.at + k * 3 + c) * 2;
+        u1[(t * 3 + c) * 2] = uv[s] / 65535; u1[(t * 3 + c) * 2 + 1] = uv[s + 1] / 65535;
+      }
+    });
+    if (!geo.attributes.uv1) geo.setAttribute("uv1", new THREE.BufferAttribute(u1, 2));
+    else geo.attributes.uv1.needsUpdate = true;
+    const mat = r.mesh.material;
+    mat.lightMap = tex; mat.lightMapIntensity = j.scale * (LM_TUNE[2] || LM_ROOMS[room].gain); mat.needsUpdate = true;
+    lmStats.applied++;
+  }
+  if (lmStats.applied && !lmStats.on) {
+    lmStats.on = true;
+    for (const s of lightSpots) if (j.lights.some(l => Math.hypot(l.p[0] - s.p.x, l.p[1] - s.p.y, l.p[2] - s.p.z) < 0.01)) s.baked = true;
+    const f = LM_ROOMS[room].fill;
+    ROOM_FILL[LM_ROOMS[room].zone] = [isNaN(LM_TUNE[0]) ? f[0] : LM_TUNE[0], isNaN(LM_TUNE[1]) ? f[1] : LM_TUNE[1]];
+  }
+  lmStats.ms += performance.now() - t0;
 }
 // a strip of it, 0.3 m wide and `l` long on the floor (+y up), its texture
 // coordinates in the floor's tile as autoUV would write them, lifted, and
@@ -6426,7 +6650,13 @@ const MX = {
   // them to the same near-white either way.
   lightPanel: new THREE.MeshStandardMaterial({ color: 0x2a2826, emissive: 0xfff0dc, emissiveIntensity: 1.05 }),
   coolPanel: new THREE.MeshStandardMaterial({ color: 0x262a2e, emissive: 0xe0f0ff, emissiveIntensity: 1.1 }),
-  growLight: glow(0xff66dd, 2.2),
+  // hydroponics' grow lights (deck-remodel.md, slice 10): a pale rose lens
+  // just under the bloom's threshold, as lightPanel. Until slice 10 they were
+  // a magenta glow at 2.2x, far over it: at high the bloom blew each bar out
+  // to a pink smear brighter than anything else on the ship. The magenta is
+  // now the light's, pooled over each trough (hydroponics()), so it falls on
+  // the leaves and the soil, where a grow light's colour is seen.
+  growLight: new THREE.MeshStandardMaterial({ color: 0x2a2628, emissive: 0xffd2f0, emissiveIntensity: 0.95 }),
   // the gym's mats: white under vertex colours (gymMat), so that a mat and
   // its lighter piping are one material and merge into the cell's one draw
   mat: std(0xffffff, { roughness: 0.9, vertexColors: true }),
@@ -7541,32 +7771,51 @@ const ROOM_T = {
   },
 
   // Hydroponics: long troughs of plants under pink grow lights, pipes.
+  // Each trough (slice 10) a brushed body on a dark kick, a rolled rim
+  // round its top and the soil 4 cm under the rim; its fixture a housing
+  // over a lens, and the magenta a pooled light under it. The calls stay
+  // as they were: the body is stainless, M.metal, which the room's pipe
+  // already drew (M.trim there was its own draw, +1 in every look), and
+  // the kick the soil's dark material, not a new one.
   hydroponics(rm, r) {
     const { W, D, h } = rm;
-    shell(rm, { floor: MX.deckPlate, noPanels: true, lc: 0xffd8f4, lk: 0.7, skin: MX.skinLab });
+    shell(rm, { floor: MX.deckPlate, noPanels: true, lc: 0xfff0f6, lk: 0.6, skin: MX.skinLab });
     const leaves = [];
     for (let x = -W / 2 + 1.4; x < W / 2 - 1; x += 2.2) {
-      const z0 = -D / 2 + 0.9 + (rm.win ? 0.5 : 0), z1 = D / 2 - 3.2;
-      if (z1 - z0 < 1.5 || Math.abs(x - rm.dx) < 1.4) continue;
-      rbox(0.9, 0.8, z1 - z0, M.console, x, 0.4, (z0 + z1) / 2, 0.03);
-      rbox(0.8, 0.04, z1 - z0 - 0.1, soilMat, x, 0.8, (z0 + z1) / 2, 0.01, false);
-      block(x - 0.45, z0, x + 0.45, z1);
-      glowBox(0.5, 0.04, z1 - z0, MX.growLight, x, h - 0.6, (z0 + z1) / 2);
-      rbox(0.04, 0.04, z1 - z0, M.metal, x + 0.5, 0.95, (z0 + z1) / 2, 0.01, false);
+      const z0 = -D / 2 + 0.9 + (rm.win ? 0.5 : 0), z1 = D / 2 - 3.2, L = z1 - z0, zm = (z0 + z1) / 2;
+      if (L < 1.5 || Math.abs(x - rm.dx) < 1.4) continue;
+      sbox(0.84, 0.12, L - 0.06, soilMat, x, 0.06, zm);
+      rbox(0.9, 0.66, L, M.metal, x, 0.45, zm, 0.03);
+      // the rim: four rails standing 2 cm over the body's top; plain boxes
+      // (sbox), as are the kick and the housing: a rounded one is ~300
+      // triangles, and six a trough took a bay 9 k over slice 10's 5 k
+      for (const s of [-1, 1]) {
+        sbox(0.07, 0.06, L + 0.04, M.metal, x + s * 0.43, 0.8, zm);
+        sbox(0.8, 0.06, 0.07, M.metal, x, 0.8, zm + s * (L / 2 - 0.015));
+      }
+      rbox(0.8, 0.04, L - 0.06, soilMat, x, 0.77, zm, 0.01, false);
+      block(x - 0.47, z0, x + 0.47, z1);
+      sbox(0.62, 0.07, L, M.metal, x, h - 0.555, zm);
+      glowBox(0.5, 0.02, L - 0.1, MX.growLight, x, h - 0.6, zm);
+      rbox(0.04, 0.04, L, M.metal, x + 0.5, 0.95, zm, 0.01, false);
       for (let z = z0 + 0.2; z < z1 - 0.1; z += 0.28) for (const dx of [-0.2, 0.2]) leaves.push([x + dx + (r() - 0.5) * 0.08, z, 0.25 + r() * 0.35]);
+      // the wash: a magenta pool a metre over the leaves, one along each
+      // trough's length past 4 m (a pool spot is cheap; the pool lights
+      // only the few nearest the eye)
+      const nl = L > 4 ? 2 : 1;
+      for (let i = 0; i < nl; i++) light(x, h - 1.0, z0 + L * (i + 0.5) / nl, 0xff4ad2, 6, 4.5);
       // tending the bed: on its -x side (the pipe runs along its +x), at a
       // third of its length, in the 1.3 m between two beds
-      if (x - 0.85 > -W / 2 + 0.4) workSpot(x - 0.85, z0 + (z1 - z0) / 3, x, z0 + (z1 - z0) / 3);
+      if (x - 0.85 > -W / 2 + 0.4) workSpot(x - 0.85, z0 + L / 3, x, z0 + L / 3);
     }
     const im = new THREE.InstancedMesh(bushGeo, bushMat(), leaves.length);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
     leaves.forEach(([x, z, s], i) => {
-      im.setMatrixAt(i, m4.compose(v.set(x, 0.8, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, r() * 6), sc.set(0.42, s * 1.1, 0.42)));
+      im.setMatrixAt(i, m4.compose(v.set(x, 0.77, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, r() * 6), sc.set(0.42, s * 1.1, 0.42)));
       im.setColorAt(i, c.setHSL(0.22 + r() * 0.08, 0.35, 0.55 + r() * 0.25));
     });
     im.userData.noAO = true; noAO.push(im);
     root.add(im);
-    light(0, h - 1, 0, 0xff88ee, 2.5, Math.max(W, D));
   },
 
   // Stellar cartography: a walkway out to a platform in the middle of the
@@ -9061,7 +9310,9 @@ function mergeStatic() {
     byMat.get(o.material).push(o);
   });
   for (const [mat, all] of byMat) {
-    if (all.length < 2) { standinRanges(all, [0], null); continue; }
+    // (a room's only mesh of a material, its floor, is merged alone under
+    // ?lightmap: the bake's triangles are a merged buffer's, in the world)
+    if (all.length < 2 && !lmAlone(all[0])) { standinRanges(all, [0], null); continue; }
     const { list, cut } = dressOrder(all, null);
     const geos = list.map(o => {
       const g = copyGeo(o.geometry, mat.userData.attrs, mat.userData.fill);
@@ -9076,11 +9327,15 @@ function mergeStatic() {
     m.castShadow = list[0].castShadow; m.receiveShadow = list[0].receiveShadow;
     m.matrixAutoUpdate = false;
     scene.add(m);
+    lmSelect(m);
     for (const o of list) o.removeFromParent();
   }
 }
 mergeStatic();
+lmApply();
 if (NIGHT.on) nightWatch(true, true);
+nightTick(true);
+setInterval(() => nightTick(), 60000);
 // the windows are painted first and leave the depth clear, so what is outside
 // draws over them (see "space outside")
 scene.traverse(o => { if (o.material === skyMat) o.renderOrder = 1; });
@@ -13415,6 +13670,7 @@ function renderSettings() {
   const add = (label, fn) => { const b = document.createElement("button"); b.className = "pill dim"; b.textContent = label; b.onclick = () => { fn(); renderSettings(); }; el.appendChild(b); };
   add("Sound: " + sound, cycleSound);
   add("Announcements: " + (announceOn ? "on (browser voice)" : "off"), () => setAnnounce(!announceOn));
+  add("Night watch: " + (NIGHT.clock ? "by the clock, 23:00-07:00" : "by hand"), () => setNightClock(!NIGHT.clock));
   // the console's talk reads it (conv.mode in index.html), the frame's at once
   const cm = lsGet("lcars.deck.convmode", "") === "mute" ? "mute" : "barge";
   add("Conversation: " + (cm === "mute" ? "mic off while they speak" : "talk over them"), () => {
@@ -14628,6 +14884,10 @@ const DVCMDS = [
     help: "the bridge's lights low, its displays carrying the room (U)", fn: () => nightWatch(true) },
   { say: "day watch", alias: ["day shift", "bridge day watch", "lights up", "full lights", "lights on", "raise the lights"],
     help: "and the bridge lit as by day", fn: () => nightWatch(false) },
+  { say: "watch by the clock", alias: ["night watch by the clock", "bridge clock on", "keep the clock", "follow the clock"],
+    help: "the bridge's night watch from 23:00 to 07:00, the captain's hours (the default)", fn: () => setNightClock(true) },
+  { say: "watch by hand", alias: ["night watch by hand", "bridge clock off", "ignore the clock"],
+    help: "the bridge's watch only by U and these orders", fn: () => setNightClock(false) },
 ];
 
 // the keyboard list at the top right (H)
@@ -16540,6 +16800,12 @@ function setSync(s) { $("#sync").textContent = s; }
     refreshPanels(); shipPoll();
     setInterval(refreshPanels, 5000);
     setInterval(shipPoll, 300000);
+    // the captain's zone, for the watch by the clock (nightTick)
+    if (!DEMO) api("/zone").then(r => {
+      const z = r && typeof r.zone === "string" ? r.zone : null;
+      if (z === NIGHT.zone) return;
+      NIGHT.zone = z; lsSet("lcars.deck.zone", z); nightTick();
+    }).catch(() => {});
   } catch (e) {
     $("#status").innerHTML = "";
     $("#status").append("Could not load the journal: " + e.message + " ");
@@ -16553,7 +16819,7 @@ function setSync(s) { $("#sync").textContent = s; }
   deckEvStart();
   // a hook for the headless screenshot harness: hand it the handles it needs
   window.__deck = { atlasVia, takeRows, deckCells, doors, batchDeck, socialSeen, patchLive, patchAll, patchObjs, placeByName, archSees, deckApi, DECK_API_DOC, openArchitect, paintArch, patchSkipped,
-                    lightSpots, ROOM_FILL, NIGHT, nightWatch, blocks, zones, pinnable, modelPlaces, NOPATCH, crew: () => crew, mats: { M, MX }, aoStats, blinkHold(on) { crewBlinkHold = !!on; }, READ_CLIP, SHIFT_CLIP, msdTex, padFace, padTexture, engOf, engSlug, sitAim: () => aimSeat && (sitDown(aimSeat), true), sitDown, standUp, jump, crouch, walkPace, tickBody, EYE, CROUCH_EYE, body: () => ({ seated: !!seated, crouched, aimSeat: !!aimSeat, eye: camera.position.y, jumpY }), seats: () => pinnable.filter(m => m.userData.seat), THREE, scene, player, camera, place, rows, carry, pinHere, rebuildPads, updateAim, renderer, composer, gtao, bloom, lights, openConsole, openMenu, holoHere, holoRun, holoGenerate, holoFind, holoJobs, openHolo, get aimHolo() { return aimHolo; }, talk, openTalk, personaOf, talkId, say, sayStop, crewAimed, get aimCrew() { return aimCrew; }, dict, dictFake(w) { dictWin = w; }, dictStart, dictEnd, get seated() { return seated; }, chart, chartLoad, chartAim, get active() { return active; }, get aimStar() { return aimStar; }, mediaLoad, mediaAssets, mediaRows, mediaPlaying, activate, padObjs, get aimPad() { return aimPad; },
+                    lightSpots, ROOM_FILL, NIGHT, onBridge, lmExport, lmStats, lmMeshes, LIGHTMAP, nightWatch, nightTick, watchAt, setNightClock, blocks, zones, pinnable, modelPlaces, NOPATCH, crew: () => crew, mats: { M, MX }, aoStats, blinkHold(on) { crewBlinkHold = !!on; }, READ_CLIP, SHIFT_CLIP, msdTex, padFace, padTexture, engOf, engSlug, sitAim: () => aimSeat && (sitDown(aimSeat), true), sitDown, standUp, jump, crouch, walkPace, tickBody, EYE, CROUCH_EYE, body: () => ({ seated: !!seated, crouched, aimSeat: !!aimSeat, eye: camera.position.y, jumpY }), seats: () => pinnable.filter(m => m.userData.seat), THREE, scene, player, camera, place, rows, carry, pinHere, rebuildPads, updateAim, renderer, composer, gtao, bloom, lights, openConsole, openMenu, holoHere, holoRun, holoGenerate, holoFind, holoJobs, openHolo, get aimHolo() { return aimHolo; }, talk, openTalk, personaOf, talkId, say, sayStop, crewAimed, get aimCrew() { return aimCrew; }, dict, dictFake(w) { dictWin = w; }, dictStart, dictEnd, get seated() { return seated; }, chart, chartLoad, chartAim, get active() { return active; }, get aimStar() { return aimStar; }, mediaLoad, mediaAssets, mediaRows, mediaPlaying, activate, padObjs, get aimPad() { return aimPad; },
                     setTone, M, setView(x, z, a, p) { player.position.set(x, 0, z); yaw = a; pitch = p || 0; },
                     aimInfo: () => ({ aim: !!aim, pad: aimPad && aimPad.userData.entryId, stack: aimStack && aimStack.userData.entryId }), aimHit: () => aim, deskAt: () => deskAt, pileOf, takePad, PILE_STEP, primary, throwPad, thrown, held, crew, walkable,
                     walkCrew, crewStep, roomSeats, workSpots, ROOM_CREW, DECK_ROOM_CREW, ROOM_CREW_NEAR, roomPid, planDeck, buildRoom, unbuildRoom, homeCrew, crewReady: () => crewReal, modelsIn: () => modelsIn, modelsReady: () => modelsDone && !modelsBusy, placeModels, dressing, tickDressing, DRESSING, DRESS_R, dressGroup, dressOrder, dressCut, hideStandin,

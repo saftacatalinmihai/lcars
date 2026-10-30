@@ -14,6 +14,7 @@
                                                 turn's room)
     no1.py crew key <name> <1-9|enter|esc|up|down|tab>
     no1.py crew clear <name>                    a fresh conversation, before a new unrelated task
+    no1.py crew refresh <name>                  their handover, a clear, the handover typed back to them
     no1.py crew start <name> "<Rank Name>" ["<who they are>"]
     no1.py crew diff <name>                     their commits, stat and diff against the live branch
     no1.py crew deploy <name> [--room <id>]     its [deploy finished]/[deploy failed] to that room
@@ -58,6 +59,11 @@
     no1.py room show <msg id>                   one message whole
     no1.py thread ...                           the old name of room list|new|rename|close, for
                                                 this release: does the same, and says the room verb
+    no1.py steward <op> ID ...                  a data fix on the captain's word (scripts/steward.py,
+                                                its --help): get ID --json first, one change, get
+                                                again; recorded as a crew_fix entry in your name
+    no1.py steward new kind=K [title=T] [start=..] [end=..] [TEXT... | --file F | -]
+                                                a new entry of the captain's, its id printed, recorded the same
     no1.py sync                                 your worktree (eng/number-one) fast-forwarded to the
                                                 live branch, so the files you read are what is live;
                                                 refused if it has changes or commits of its own.
@@ -97,7 +103,7 @@ import crew_tool as T  # noqa: E402 - the journal's HTTP, with Number One's logi
 
 LOG_KIND = "no1_log"
 ASK_KIND = "task_no1"
-CREW_VERBS = {"list", "poll", "say", "key", "clear", "start", "diff", "deploy", "deploy-status", "rollback",
+CREW_VERBS = {"list", "poll", "say", "key", "clear", "refresh", "start", "diff", "deploy", "deploy-status", "rollback",
               "stop", "dismiss", "recall", "queue", "etas"}
 QUEUE_OPS = {"move", "remove", "restore"}
 THREAD_OPS = {"list", "new", "rename", "close"}
@@ -168,6 +174,10 @@ def crew(a):
         code, j = engineer("list")
         task = next((r.get("task") for r in j.get("engineers", []) if r.get("name") == name), "") if code == 0 else ""
         return engineer("clear", name, inp=task or "before a new task")
+    if verb == "refresh":
+        # their handover as the turn's last message, the clear, the handover
+        # typed back into the fresh conversation (engineer.py's refresh)
+        return engineer("refresh", name)
     if verb == "poll":
         code, j = engineer("poll", name, "-1")
         # the tail is enough to judge by; the whole page is long
@@ -442,6 +452,10 @@ def main(a):
         code, j = room(rest)
     elif cmd == "thread":
         code, j = thread(rest)
+    elif cmd == "steward":
+        # its own process reads the logins; its answer is printed by it
+        env = dict(os.environ, LCARS_STEWARD_WHO=E.NO1)
+        code, j = subprocess.run([sys.executable, os.path.join(HERE, "steward.py"), *rest], env=env).returncode, None
     elif cmd == "sync":
         try:
             code, j = 0, E.sync_no1()

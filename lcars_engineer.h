@@ -70,9 +70,12 @@
 //                                   {id?}: their job taken back, out of the
 //                                   job line or a running one stopped
 //                                   (docs/design/job-queue.md); none is a 409
-//   POST /engineer/number-one/refresh
-//                                   Number One writes a handover note, is
-//                                   cleared, and reads it back (detached)
+//   POST /engineer/<name>/refresh
+//                                   a handover (Number One's in its log, an
+//                                   engineer's as the turn's last message),
+//                                   the clear, and the handover carried into
+//                                   the fresh conversation (detached); one
+//                                   out of the seat gets it in their inbox
 //   POST /engineer/rollback         undo the last deploy (detached)
 //
 // The script's exit status picks the HTTP one: 0 is 200, 2 a 400, 3 a 409
@@ -830,7 +833,7 @@ static int HandleEngineer(int client_fd, Arena *arena, const char *method,
     return EngineerRun(client_fd, arena, args, NULL, 0);
   }
   // dismiss/recall: out of the console's list and back; nothing is removed
-  // refresh: the script refuses any engineer but Number One
+  // refresh: any engineer and Number One (engineer.py's refresh)
   if (strcmp(verb, "stop") == 0 || strcmp(verb, "deploy") == 0 ||
       strcmp(verb, "dismiss") == 0 || strcmp(verb, "recall") == 0 ||
       strcmp(verb, "refresh") == 0) {

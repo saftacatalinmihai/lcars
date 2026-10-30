@@ -10,6 +10,9 @@ journal entry (every device), GET/PUT /theme taking either file format,
 `lcars-cli theme`, an omarchy hook, the kinds' colours and the reports'
 page under a theme. The 3D deck is out of scope.
 
+The deck is not wanted themed (the captain, 2026-10-28): it keeps its own
+palette under every theme.
+
 ## 1. What a theme is
 
 A theme is a palette - a handful of colours given by a file - mapped by
@@ -163,7 +166,7 @@ to 4.5:1 by construction.
   SVG's fill or stroke attribute in the statistics and the charts - takes
   `kindHex`, the token's value as computed under the theme worn. Slice 1
   had them as LCARS literals, faint on a light theme.)
-- **The deck** (deck.html): its own palette, out of scope.
+- **The deck** (deck.html): its own palette, not to be themed (2026-10-28).
 
 ## 5. The engine
 

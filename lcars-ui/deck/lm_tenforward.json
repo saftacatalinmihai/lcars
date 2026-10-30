@@ -1,0 +1,137 @@
+{
+ "note": "Ten Forward's lightmap pilot (deck-remodel slice 8): scripts/deck-models/lightmap.py; the page applies it under ?lightmap.",
+ "room": "tenforward",
+ "size": 1024,
+ "samples": 256,
+ "scale": 2.671788215637207,
+ "lights": [
+  {
+   "p": [
+    7,
+    3.6999999999999997,
+    -23
+   ],
+   "color": 16767152,
+   "intensity": 2.8,
+   "dist": 10,
+   "decay": 1.6
+  },
+  {
+   "p": [
+    14,
+    3.6999999999999997,
+    -23
+   ],
+   "color": 16767152,
+   "intensity": 2.8,
+   "dist": 10,
+   "decay": 1.6
+  },
+  {
+   "p": [
+    8,
+    3.6999999999999997,
+    -16
+   ],
+   "color": 16767152,
+   "intensity": 2.8,
+   "dist": 10,
+   "decay": 1.6
+  },
+  {
+   "p": [
+    15,
+    3.6999999999999997,
+    -15
+   ],
+   "color": 16767152,
+   "intensity": 2.8,
+   "dist": 10,
+   "decay": 1.6
+  }
+ ],
+ "meshes": {
+  "M.ashlar": {
+   "tris": 204,
+   "at": 0
+  },
+  "M.barTF": {
+   "tris": 300,
+   "at": 612
+  },
+  "M.brass": {
+   "tris": 2356,
+   "at": 1512
+  },
+  "M.carpetTF": {
+   "tris": 2,
+   "at": 8580
+  },
+  "M.ceil": {
+   "tris": 2,
+   "at": 8586
+  },
+  "M.console": {
+   "tris": 4165,
+   "at": 8592
+  },
+  "M.fabric": {
+   "tris": 18768,
+   "at": 21087
+  },
+  "M.grey": {
+   "tris": 4800,
+   "at": 77391
+  },
+  "M.leaf": {
+   "tris": 6186,
+   "at": 91791
+  },
+  "M.leather": {
+   "tris": 300,
+   "at": 110349
+  },
+  "M.metal": {
+   "tris": 21816,
+   "at": 111249
+  },
+  "M.rail": {
+   "tris": 1457,
+   "at": 176697
+  },
+  "M.sillTF": {
+   "tris": 600,
+   "at": 181068
+  },
+  "M.topTF": {
+   "tris": 4780,
+   "at": 182868
+  },
+  "M.trim": {
+   "tris": 5310,
+   "at": 197208
+  },
+  "M.wallCorr": {
+   "tris": 351,
+   "at": 213138
+  },
+  "M.wallLow": {
+   "tris": 2577,
+   "at": 214191
+  },
+  "M.wallTF": {
+   "tris": 2610,
+   "at": 221922
+  },
+  "M.wood": {
+   "tris": 3600,
+   "at": 229752
+  },
+  "glb:tenforward": {
+   "tris": 41708,
+   "at": 240552
+  }
+ },
+ "baked": "2026-10-29",
+ "welded_away": 0
+}

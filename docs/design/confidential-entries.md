@@ -1,7 +1,8 @@
 # Confidential entries: classification levels, and Secret entries no agent can read
 
 Status: phase 1 built (0.280.0, 2026-10-20): Secret entries in the
-console, as section 9's first paragraph; phases 2-5 to come. The captain's
+console, as section 9's first paragraph; phase 5 built (0.287.0); the
+rest dropped, the design closed at phases 1 and 5 (2026-10-28, section 9). The captain's
 answers to section 10 are recorded there; what phase 1 decided that this
 design left open, and the handover, is section 11.
 
@@ -425,6 +426,11 @@ vault token is HKDF-SHA-256(MK, empty salt, info `"lcars vault token v1"`),
 ## 9. Phased plan
 
 Each phase is one engineer's order, shippable alone.
+
+**Closed at phases 1 and 5 (the captain, 2026-10-28):** phases 3 and 4
+(the vault's key pair and `lcars-cli add --secret`, a Secret entry's
+encrypted files), Rotate the key (5e) and the smaller leftovers are not
+to be built; phase 2 was dropped before.
 
 **Phase 1 - Secret entries in the console (the smallest slice).**
 Server: the two columns, the `vault` table, `GET/PUT /vault` with the

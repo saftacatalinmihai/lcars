@@ -296,7 +296,7 @@ check(not api, f"the API never reached the host: it is answered in the page ({ap
 outside = [s for s in served if not s[0].startswith("/lcars-demo/")]
 check(not outside, f"every file asked for is in the folder ({outside[:3]})")
 missing = sorted({s[0] for s in served if s[1] >= 400})
-CACHED = (".js", ".mjs", ".css", ".png", ".webp", ".woff2", ".glb", ".webmanifest")
+CACHED = (".js", ".mjs", ".css", ".png", ".webp", ".woff2", ".glb", ".webmanifest", ".bin", ".ktx2")
 bare = sorted({a for a in asked if a.split("?")[0].endswith(CACHED) and "?v=" not in a and "/api/media/" not in a})
 check(not bare, f"every script, style, font, model and picture was asked for by its hash ({bare[:4]})")
 check(any("deck/bridge_base.webp?v=" in a or "_base.webp?v=" in a for a in asked) and any("crew/male.glb?v=" in a for a in asked),

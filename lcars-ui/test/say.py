@@ -133,11 +133,13 @@ class Server:
                 time.sleep(0.1)
         sys.exit("say: the scratch server did not come up; see " + str(self.logpath))
 
-    def say(self, voice, fmt=None, text="Aye, Captain."):
+    def say(self, voice, fmt=None, text="Aye, Captain.", style=None):
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=40)
         b = {"text": text, "voice": voice}
         if fmt:
             b["format"] = fmt
+        if style is not None:
+            b["style"] = style
         h = {"Content-Type": "application/json", "Authorization": "Basic " +
              base64.b64encode(f"{MAIN[0]}:{MAIN[1]}".encode()).decode()}
         Upstream.seen.clear()
@@ -189,6 +191,27 @@ def main():
         st, ct, eng, data, _ = s.say("Xb7hH8MSUJpSbSDYk0k2", "pcm")
         check(st == 200 and ct.startswith("audio/L16") and Upstream.seen[0]["q"].get("output_format") == "pcm_24000",
               f"pcm asked as pcm_24000, answered as audio/L16 ({ct})")
+        check("voice_settings" not in Upstream.seen[0]["body"], "no style: no voice_settings, ElevenLabs' own")
+
+        print("an engineer's own voice (style)")
+        data_style = {"stability": 0.92, "speed": 1.05, "fallback": "aura-2-orpheus-en"}
+        st, ct, eng, data, _ = s.say("cjVigY5qzO86Huf0OWal", "pcm", style=data_style)
+        vs = Upstream.seen[0]["body"].get("voice_settings") or {}
+        check(st == 200 and eng == "elevenlabs" and vs.get("stability") == 0.92 and vs.get("speed") == 1.05
+              and vs.get("similarity_boost") == 0.75 and vs.get("style") == 0 and vs.get("use_speaker_boost") is True,
+              f"stability and speed sent as voice_settings, the rest at ElevenLabs' defaults ({vs})")
+        st, ct, eng, data, _ = s.say("cjVigY5qzO86Huf0OWal", style={"speed": 0.8})
+        vs = Upstream.seen[0]["body"].get("voice_settings") or {}
+        check(st == 200 and vs.get("speed") == 0.8 and vs.get("stability") == 0.5, f"a speed alone: stability at 0.5 ({vs})")
+        for bad, why in (({"stability": 1.5}, "stability"), ({"stability": "0.9"}, "stability"),
+                         ({"speed": 2}, "speed"), ({"speed": 0.5}, "speed"),
+                         ({"fallback": "EXAVITQu4vr4xnSDxMaL"}, "fallback"), ({"fallback": "aura-2/../x"}, "fallback")):
+            st, ct, eng, data, _ = s.say("cjVigY5qzO86Huf0OWal", style=bad)
+            if not (st == 400 and why.encode() in data and not Upstream.seen):
+                check(False, f"style {bad}: {st} {data[:80]!r}")
+                break
+        else:
+            check(True, "a style out of range, quoted, or a fallback not an Aura-2 name: 400, nothing asked")
 
         print("falling through to Deepgram")
         Upstream.el = "500"
@@ -208,6 +231,10 @@ def main():
         check(st == 200 and eng == "deepgram" and Upstream.seen[-1]["voice"] == "aura-2-thalia-en" and ct == "audio/mpeg"
               and Upstream.seen[-1]["q"].get("encoding") == "mp3", "a voice the table does not know: Deepgram's default, mp3 kept")
         check("Say: elevenlabs refused (HTTP 500), deepgram spoke 13 chars" in s.logged(), "the log line")
+        st, ct, eng, data, _ = s.say("cjVigY5qzO86Huf0OWal", "pcm", style=data_style)
+        check(st == 200 and eng == "deepgram" and Upstream.seen[-1]["voice"] == "aura-2-orpheus-en"
+              and "voice_settings" not in Upstream.seen[-1]["body"],
+              "a style's fallback: Deepgram speaks in the page's Aura-2 voice, over the table's, no voice_settings")
         Upstream.el = "ok"
         st, ct, eng, data, _ = s.say("EXAVITQu4vr4xnSDxMaL")
         check(eng == "elevenlabs" and len(Upstream.seen) == 1, "a 5xx is not remembered: ElevenLabs speaks the next line")

@@ -190,6 +190,11 @@ class Browser:
         # headless WebKit has no audio device: sfx's AudioContext fails, not the page
         self.page.on("pageerror", lambda e: "audio device" in str(e) or self.errs.append(str(e)))
         self.page.route("**/engineer**", self.fake.engineer)
+        # the scratch server has no engineer routes and no claude, and says
+        # so in GET /features; they are faked here (/engineer*, /chat), so
+        # the page is told they are on (else a door to them toasts "off on
+        # this server" over the sheets, and a thread shows the note over its log)
+        self.page.route(re.compile(r"^https?://[^/]+/features$"), self.features)
         self.page.route("**/chat", self.fake.chat)
         # the server's /say and /say/token, not an engineer's /engineer/<name>/say
         self.page.route(re.compile(r"^https?://[^/]+/say(/token)?$"), self.fake.say)
@@ -197,6 +202,15 @@ class Browser:
 
     def close(self):
         self.browser.close()
+
+    @staticmethod
+    def features(route):
+        r = route.fetch()
+        j = r.json()
+        for f in j.get("features", []):
+            if f.get("name") in ("engineers", "number_one", "computer"):
+                f.update(on=True, needs=[], note="")
+        route.fulfill(response=r, json=j)
 
     def boot(self, path="chats"):
         self.page.goto(self.srv.base + "/ui/" + path, wait_until="domcontentloaded")
@@ -298,7 +312,12 @@ def swipe_pass(b):
           f"swipe: a tap on Archive archives, the list stays (url {b.url()})")
     left_open = b.ev("() => [chatSw.open, [...document.querySelectorAll('#chrows .chrowl.swiped')].length]")
     check(not left_open[0] and not left_open[1], f"swipe: nothing left open after the action ran (chatSw.open={left_open[0]!r}, swiped rows {left_open[1]})")
-    # the next tap after an archive does what it says (opening Archived)
+    # the next tap after an archive does what it says (opening Archived).
+    # The archive's toast (its Undo) sits at the foot, over the rows, and a
+    # tap on it dismisses it: it is sent away first, as a person would see
+    # it there and wait or tap it, so the tap below is the summary's
+    b.ev("() => dismissToast()")
+    b.wait(250)
     b.tap("#chrows details.chold:not([data-eng-off]) > summary")
     check(b.ev("() => document.querySelector('#chrows details.chold:not([data-eng-off])').open"),
           "swipe: after an Archive, the next tap (Archived's summary) opens Archived")

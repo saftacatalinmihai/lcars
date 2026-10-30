@@ -59,7 +59,11 @@ function route(method, path, qs, body) {
     var rows = scope(qs.get("deleted"));
     var newest = "";
     for (var i = 0; i < rows.length; i++) if (rows[i].created_at_utc > newest) newest = rows[i].created_at_utc;
-    return { code: 200, data: { count: rows.length, newest_created_at_utc: newest } };
+    var sd = { count: rows.length, newest_created_at_utc: newest };
+    // the server's clock (now_utc), only when a check sets it: this fake
+    // stamps its own writes in 2099, so without it it is an older server
+    if (TEST.srvNow) sd.now_utc = TEST.srvNow;
+    return { code: 200, data: sd };
   }
   var cdm = /^\/entries\/(\d+)\/caldav$/.exec(path);
   if (cdm) {

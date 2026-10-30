@@ -14,7 +14,7 @@
     scripts/engineer.py retitle <name> <task>   # name the session after the task, once their turn ends
     scripts/engineer.py eta     <name> <minutes> # their estimate: whole minutes until the report (again when it changes)
     scripts/engineer.py etas                    # every engineer's estimates against the clock, the median ratios
-    scripts/engineer.py refresh number-one      # Number One writes a handover note, is cleared, reads it
+    scripts/engineer.py refresh <name>          # a handover, a clear, the handover carried over (number-one too)
     scripts/engineer.py thread number-one list|new <id> [<name>]|rename <id> <name>|close <id>
                                                 # Number One's room labels (docs/design/rooms.md; v2's threads)
     scripts/engineer.py rooms-migrate [--apply] [--sample N] [--until <utc time>]
@@ -497,6 +497,13 @@ Reports: a file made for the captain to read (an HTML page, a PDF, a chart, a CS
 `{LIVE}/scripts/report.py publish FILE --title "<title>"`, which copies it into the media store and prints the link \
 to give the captain; the console's Reports page lists them. Never commit a report or leave it anywhere else.
 
+Data fixes: a change to an entry of the captain's journal (a title trimmed, a field set, a text replaced) only on \
+the captain's word, given through Number One, and only with `{LIVE}/scripts/steward.py` (`--help` says how): \
+`get ID --json` first, then one change to one entry per call, then `get` again to read it back; `new kind=K \
+title=T TEXT` makes an entry of the captain's and prints its id. It writes with \
+the steward login, the captain's kinds only, refuses a row that moved since its read (412: read again, decide \
+again), and records each fix as a crew_fix entry in your name. Never any other way to the captain's data.
+
 Number One: a message that begins [No.1] is from Number One, the captain's first officer, who acts for the \
 captain. Take its orders as the captain's own, and do not deploy for it: Number One reviews and deploys. If the \
 captain says otherwise, the captain's word stands.
@@ -719,8 +726,10 @@ engineer before giving them a new, unrelated task: their old context costs token
 Do it once they are idle (`crew key <name> esc` stops a turn first), then `crew say` the whole order, since they \
 remember nothing of it. `crew list` and `crew poll` give each one's context size in tokens (`ctx`); a turn's \
 report ending "[crew] <name> context <n>k, over the handover mark" (over {ENG_CTX_HANDOVER // 1000}k, said once \
-per crossing) means ask them for a handover, then clear them and `crew say` it back with the rest of the order - \
-nothing clears them by itself.
+per crossing) means `{n1} crew refresh <name>`: the handover, the clear and the carry-over in one (they commit \
+their work in progress and end the turn with a handover, they are cleared, and the fresh one is typed it back; one \
+out of the seat gets it in their inbox). Asking for a handover, `crew clear` and `crew say` it back by hand still \
+works. Nothing clears them by itself.
 - `{n1} crew stop|dismiss|recall <name>`.
 - `{n1} log "<title>" "<text>"` - an entry in your log (kind no1_log). Log every order you give, every review verdict \
 and why, every deploy and its outcome, and every decision you took for the captain: it is how the captain (and you, \
@@ -802,7 +811,7 @@ def no1_settings():
             "permissions": {
         "allow": ["Read", "Grep", "Glob", f"Bash({n1}:*)", f"Bash(python3 {n1}:*)",
                   f"Bash({eng} retitle {NO1}:*)", "Bash(git log:*)", "Bash(git diff:*)",
-                  "Bash(git show:*)", "Bash(git status:*)", *FFF_TOOLS, *research_allow(NO1)],
+                  "Bash(git show:*)", "Bash(git status:*)", *steward_allow(), *FFF_TOOLS, *research_allow(NO1)],
         # Edit and Write are allowed only in its research folder (dontAsk
         # refuses the rest); a deny wins over any allow, so the checkouts
         # are named besides, and a bare "Edit" deny would end research
@@ -831,7 +840,16 @@ def crew_settings(name):
         hooks["PreToolUse"] = [dict(hook("heavy-check")[0], matcher="Bash")]
     # research without a prompt (RESEARCH_TOOLS); the secrets never read
     return {"hooks": hooks, "autoMemoryEnabled": False,
-            "permissions": {"allow": research_allow(name), "deny": secret_reads()}}
+            "permissions": {"allow": [*research_allow(name), *steward_allow()], "deny": secret_reads()}}
+
+
+def steward_allow():
+    """The live checkout's steward.py with any arguments: an engineer's or
+    Number One's data fix on the captain's word (the captain's order,
+    2026-10-27). It reads the logins in its own process, so the secrets'
+    deny rules stand, and the server's steward gate is the one that counts."""
+    st = os.path.join(LIVE, "scripts", "steward.py")
+    return [f"Bash({st}:*)", f"Bash(python3 {st}:*)", f"Bash(/usr/bin/python3 {st}:*)"]
 
 
 def workspace():
@@ -2626,7 +2644,7 @@ TEST_TMP_ROOTS = [tempfile.gettempdir(), os.path.join(HOME, ".cache")]
 TEST_TMP_KEEP_H = float(os.environ.get("LCARS_TEST_TMP_KEEP_H") or 24)
 TEST_TMP_RE = re.compile(
     r"(lcars-(perf-base|seat-test|model-test|logins|metrics|caldav|framing|uigzip|transcribe|say|api|config|onebin|measure|back|btn|editor|dbswap"
-    r"|qachat|off|upd|rec|media|media-chat|reports|prune|dedupe|demo|features|architect|kinds|conncap|classified|quick|theme|publish)-|lcars-run\.|(brief|crew|crew-notes|ctx|no1-inbox|no1|queue|reap|deploy-suite|prune|merge|export|jobs|guard|housekeeping|version-stamp|release|webapp)-test-|no1-refresh-|no1-threads-"
+    r"|qachat|off|upd|rec|media|media-chat|reports|prune|dedupe|demo|features|architect|kinds|conncap|classified|quick|theme|publish|film)-|lcars-run\.|(brief|crew|crew-notes|ctx|no1-inbox|no1|queue|reap|deploy-suite|prune|merge|export|jobs|guard|housekeeping|version-stamp|release|webapp)-test-|no1-refresh-|no1-threads-"
     r"|playwright-artifacts-|playwright_(chromium|webkit)dev_profile-)[A-Za-z0-9_]+")
 RUN_SH_OUTPUTS = {"deck", "behaviour", "keyboard", "qjs.out", "kb.out"}
 # Remotion's scratch (video/explainer: render.sh, stills.mjs, the studio):
@@ -3074,7 +3092,8 @@ def notify_no1(about, text, room=None, msg=None):
     if not about or about == NO1:
         return
     if load(NO1) is not None:
-        no1_send(text, room=room or eng_room(load(about)), msg=msg)
+        return no1_send(text, room=room or eng_room(load(about)), msg=msg)
+    return None
 
 
 # Number One's inbox. A report typed to it while it is off duty (its tab
@@ -3184,10 +3203,11 @@ def no1_send(text, room=None, sender=None, msg=None):
                 extra += ["--full", msg_spool(msg["text"])]
         spawn("no1-send", *(["--thread", room] if room else []), *extra, text)
         return True
+    mid = None
     if msg:
-        msg_post(msg["frm"], "no1", room or R.MAIN, msg.get("text") or text, False, slip, msg.get("extra") or ())
+        mid = msg_post(msg["frm"], "no1", room or R.MAIN, msg.get("text") or text, False, slip, msg.get("extra") or ())
     no1_flush_later()
-    return True
+    return mid or True  # the row's id, for refresh-go's pointer
 
 
 def msg_spool(text):
@@ -3451,11 +3471,17 @@ def cmd_hook(verb, name):
         if st2 is not None:
             t0 = st2.pop("turn_at", 0) or st.get("task_started_at") or 0
             save(name, st2)
-    if verb == "turn-ended" and not h.get("stop_hook_active") and restart_pending(st):
+    ended = verb == "turn-ended" and not h.get("stop_hook_active")
+    last = str(h.get("last_assistant_message") or last_words(name)).strip() if ended else ""
+    if ended and restart_pending(st):
         # the model (or effort) asked for mid-turn, before the seat hears of the turn's
         # end (model-apply moves the seat on after it)
         spawn("model-apply", name)
-    elif verb == "turn-ended" and not h.get("stop_hook_active") and seated(name):
+    elif ended and refresh_turn_ended(name, st, h, last, t0):
+        # the turn that wrote a refresh's handover: refresh-go files it, clears
+        # and types it back, and the fresh turn holds the seat on
+        return out({"ok": True})
+    elif ended and seated(name):
         spawn("seat-turn-ended", name, str(int(t0)))
     if verb == "attention":
         if not questions_to_no1(st):
@@ -3472,28 +3498,36 @@ def cmd_hook(verb, name):
         return out({"ok": True})
     if verb != "turn-ended" or h.get("stop_hook_active"):
         return out({"ok": True})
-    # the turn's last words, whole, are a message (rooms.md 4.2): routed by
-    # their header, else the room of the turn's cause (turn_route)
-    last = str(h.get("last_assistant_message") or last_words(name)).strip()
-    if not last:
-        return out({"ok": True})
+    if last:
+        turn_deliver(name, st, last, h.get("transcript_path"))
+    out({"ok": True})
+
+
+def turn_deliver(name, st, last, tpath=None, sync=False):
+    """An engineer's turn's last words, whole, as a message (rooms.md 4.2):
+    routed by their header, else the room of the turn's cause (turn_route).
+    Its crew_msg row's id when known (`sync`, refresh-go's: the captain's
+    room's row written here, not detached), else None."""
     room, to, extra, how = turn_route(name, st, last)
     if how == "no1":
         # typed to Number One through its inbox (the flusher is a unit of its
         # own), clipped; its row has the words whole
         who = st.get("title") or name
         text = f"[crew] {name} ({who}) finished a turn. Last words: {clip(last, 1200)}"
-        over = ctx_crossing(name, h.get("transcript_path") or transcript(st.get("session") or ""))
+        over = ctx_crossing(name, tpath or transcript(st.get("session") or ""))
         if over:
             text += "\n" + over
-        notify_no1(name, text, room=room, msg={"frm": name, "text": last, "extra": extra})
-    elif how == "dm":
-        dm_send(name, st, to, room, last, extra)
-    else:
-        # the captain's turn with them alone: a message in their main room,
-        # which the captain reads, typed to nobody; written detached
-        spawn("msg-turn", name, room, msg_spool(last))
-    out({"ok": True})
+        mid = notify_no1(name, text, room=room, msg={"frm": name, "text": last, "extra": extra})
+        return mid if type(mid) is int else None  # True: no row written
+    if how == "dm":
+        return dm_send(name, st, to, room, last, extra)
+    # the captain's turn with them alone: a message in their main room,
+    # which the captain reads, typed to nobody; written detached
+    if sync:
+        room, to, extra = msg_route(last, room)
+        return msg_post(name, to, room, last, True, 0, extra)
+    spawn("msg-turn", name, room, msg_spool(last))
+    return None
 
 
 # Notes to people (crew_notes.py, 0.256.0): "@no1 ..." or "@torres ..." in
@@ -3640,27 +3674,54 @@ def cmd_note_names():
     out({"names": note_names()})
 
 
-# refresh: a fresh context for Number One without losing the thread. Its
-# conversation grows with every report and costs tokens on every turn; a
-# plain clear would forget what it was doing. So it is asked ([refresh]) to
-# write a handover entry in its log and end its turn. `no1.py log
-# "Handover" ...` marks the refresh noted (refresh_noted), and the Stop hook
-# of the turn that wrote it clears the conversation (refresh-go:
-# clear_session, the old one named after its task) and tells the fresh one
-# to read the log back. Only a log titled Handover counts, so a turn already
-# under way when [refresh] was typed, logging something else, ends without a
-# clear. A refresh never noted lapses after REFRESH_WAIT_SECONDS.
+# refresh: a fresh context without losing the thread, for Number One and any
+# engineer, one flow with Number One's differences as branches. A
+# conversation grows with every turn and costs tokens on each; a plain clear
+# would forget what it was doing. So the one refreshed is asked ([refresh],
+# refresh_text) for a handover and to end the turn; the Stop hook of the
+# turn that wrote it starts refresh-go, which waits for them to be idle,
+# clears the conversation (clear_session, the old one named after its task)
+# and types the carry-over into the fresh one.
+# Number One's handover is an entry in its log titled Handover: `no1.py log
+# "Handover" ...` marks the refresh noted (refresh_noted), and the fresh one
+# is told to read its log back. An engineer has no log: their handover is
+# the last message of the turn that took the refresh (their brief: a WIP
+# commit, then the handover, for someone who remembers nothing), so the
+# noting is that turn's end, if the turn saw the [refresh] line - its mark,
+# "(refresh #<at>)", in a message of the transcript (refresh_seen) - and
+# the fresh one is typed the message back, with its crew_msg row's id.
+# Either way a turn already under way that never read the [refresh] ends
+# without a clear. An engineer out of the seat gets the [refresh] in their
+# inbox, as `say` queues an order, and it reaches them with the seat. A
+# refresh never noted lapses after REFRESH_WAIT_SECONDS (a queued one after
+# REFRESH_QUEUED_SECONDS: the seat's line can be long).
 REFRESH_WAIT_SECONDS = 15 * 60
+REFRESH_QUEUED_SECONDS = 12 * 3600
+# What of an engineer's handover is typed into the fresh session; the
+# crew_msg row has it whole (DM_TYPED_MAX's reasoning)
+REFRESH_TYPED_MAX = 6000
 
 
-def refresh_text():
-    n1 = os.path.join(HERE, "no1.py")
-    return (f"[refresh] The captain is refreshing your context: this conversation is cleared when this turn ends, "
-            f"and the new one starts from your log. Write a full handover entry now, with `{n1} log \"Handover\" "
-            f"\"<text>\"`: the open work and where each piece stands; which engineer is on what (branch, state, "
-            f"what you are waiting on from them); what waits on the captain (your open questions); what is live "
-            f"(the latest deploys and the version); and anything else you would need to carry on. Then end your "
-            f"turn with a one-line reply, starting nothing new.")
+def refresh_mark(at):
+    return f"(refresh #{int(at)})"
+
+
+def refresh_text(name, at):
+    mark = refresh_mark(at)
+    if name == NO1:
+        n1 = os.path.join(HERE, "no1.py")
+        return (f"[refresh] {mark} The captain is refreshing your context: this conversation is cleared when this "
+                f"turn ends, and the new one starts from your log. Write a full handover entry now, with `{n1} log "
+                f"\"Handover\" \"<text>\"`: the open work and where each piece stands; which engineer is on what "
+                f"(branch, state, what you are waiting on from them); what waits on the captain (your open "
+                f"questions); what is live (the latest deploys and the version); and anything else you would need "
+                f"to carry on. Then end your turn with a one-line reply, starting nothing new.")
+    return (f"[refresh] {mark} The captain is refreshing your context: this conversation is cleared when this turn "
+            f"ends, and the new one starts from what you write now. Commit your work in progress first (a WIP "
+            f"commit on your branch), then end your turn with the handover as your last message, written for "
+            f"someone who remembers nothing: the task, what is done, what is left, the state of the build and "
+            f"tests, your branch, and any open questions. It is typed back to you in the fresh conversation. "
+            f"Start nothing new.")
 
 
 @contextlib.contextmanager
@@ -3672,18 +3733,41 @@ def refresh_lock(name):
 
 def refresh_pending(st):
     r = st.get("refresh") or {}
-    return r if r and time.time() - r.get("at", 0) < REFRESH_WAIT_SECONDS else None
+    wait = REFRESH_QUEUED_SECONDS if r.get("queued") else REFRESH_WAIT_SECONDS
+    return r if r and time.time() - r.get("at", 0) < wait else None
+
+
+def refresh_seen(st, path=None):
+    """An engineer's pending refresh whose [refresh] line is in a message of
+    their transcript (read as room_marks reads it: the captain's side, a
+    pasted block unwrapped), or None. The mark is the request's own, and the
+    conversation is cleared once it is acted on, so the whole transcript is
+    the turn's: a turn that ends before reading the line finds no mark."""
+    r = refresh_pending(st)
+    path = path or (transcript(st.get("session", "")) if st.get("session") else None)
+    if not r or not path:
+        return None
+    mark = refresh_mark(r.get("at", 0))
+    try:
+        with open(path, "rb") as f:
+            for raw in f:
+                if mark.encode() in raw and any(e["r"] == "me" and mark in e["t"]
+                                                for e in events_of(raw.decode("utf-8", "replace"))):
+                    return r
+    except OSError:
+        return None
+    return None
 
 
 def cmd_refresh(name):
-    if name != NO1:
-        fail("refresh is for Number One", 2)
+    who = "Number One" if name == NO1 else name
     info = agent_info(name)
-    if not info:
-        fail("Number One is not on duty", 3)
-    if info.get("agent_status") == "blocked":
-        fail("Number One is waiting on a question on their screen", 3)
-    if launched_bare(info):
+    queue = name != NO1 and not info and seated(name)
+    if not info and not queue:
+        fail(f"{who} is not on duty", 3)
+    if info and info.get("agent_status") == "blocked":
+        fail(f"{who} is waiting on a question on their screen", 3)
+    if name == NO1 and launched_bare(info):
         # its Stop hook, which does the clear, is not there: started again
         # with it first (the conversation resumes), or the refresh would
         # wait for a clear that never comes
@@ -3700,21 +3784,42 @@ def cmd_refresh(name):
     with refresh_lock(name) as st:
         if refresh_pending(st):
             return out({"ok": True, "pending": True, "note": "a refresh is already under way"})
-        # the room asked: its clear and its notes are that room's (`thread`
-        # until 0.310, read beside it for a release)
-        st["refresh"] = {"at": int(time.time()), "room": room_now(st)}
+        at = int(time.time())
+        # Number One's: the room asked, whose its clear and notes are
+        # (`thread` until 0.310, read beside it for a release)
+        st["refresh"] = dict({"at": at}, **({"room": room_now(st)} if name == NO1 else {}),
+                             **({"queued": True} if queue else {}))
         save(name, st)
-    text = refresh_text()
+    text = refresh_text(name, at)
+    if queue:
+        # out of the seat: in their inbox, as `say` queues an order
+        S = seat_mod()
+        try:
+            seat_want(name, "captain", text, "captain")
+        except (S.Down, S.Broken) as e:
+            refresh_drop(name)
+            refresh_log(f"refresh of {name} not queued: {e}")
+            fail(f"not delivered: the seat does not answer ({e})", 3)
+        refresh_log(f"refresh of {name} queued in their inbox")
+        return out({"ok": True, "pending": True, "queued": True,
+                    "note": f"{name} is not in the seat: the refresh waits in their inbox, and the handover and "
+                            f"the clear follow the turn it starts"})
     _, err = herdr("agent", "prompt", agent(name), text, timeout=30)
     if err:
-        with refresh_lock(name) as st:
-            st.pop("refresh", None)
-            save(name, st)
-        refresh_log("refresh not delivered: " + err)
+        refresh_drop(name)
+        refresh_log(f"refresh of {name} not delivered: " + err)
         fail("not delivered: " + err)
     submit_if_left(name, text)
-    refresh_log(f"refresh asked of session {(load(name) or {}).get('session')}")
-    out({"ok": True, "pending": True, "note": "Number One is writing a handover note; the clear follows its turn"})
+    refresh_log(f"refresh asked of {name}, session {(load(name) or {}).get('session')}")
+    out({"ok": True, "pending": True,
+         "note": f"{who} is writing a handover " + ("note; the clear follows its turn" if name == NO1 else
+                                                     "as their turn's last message; the clear follows it")})
+
+
+def refresh_drop(name):
+    with refresh_lock(name) as st:
+        st.pop("refresh", None)
+        save(name, st)
 
 
 def refresh_noted(name=NO1):
@@ -3727,10 +3832,60 @@ def refresh_noted(name=NO1):
             refresh_log("handover written: noted, the clear follows the turn's end")
 
 
-def cmd_refresh_go(name):
+def refresh_turn_ended(name, st, h, last, t0):
+    """The Stop hook's half for an engineer: when the turn that ends read a
+    pending [refresh], its last words are the handover - noted, and
+    refresh-go started with them (it files them as the turn's message
+    itself, to point the fresh session at the row, and moves the seat on
+    if the clear fails). True when it took the turn's end."""
+    if not last or not refresh_seen(st, h.get("transcript_path")):
+        if refresh_pending(st):
+            refresh_log(f"turn-ended: {name}'s turn did not read the refresh, no clear")
+        return False
+    with refresh_lock(name) as st2:
+        r = refresh_pending(st2)
+        if not r:
+            return False
+        r["noted"] = int(time.time())
+        save(name, st2)
+    refresh_log(f"turn-ended: {name}'s handover noted, refresh-go started "
+                f"({spawn('refresh-go', name, msg_spool(last), str(int(t0)))})")
+    return True
+
+
+def refresh_handover_text(last, mid):
+    """What a fresh engineer is typed: their handover, the row it is kept in."""
+    whole = (f" It is kept whole in crew_msg #{mid} (`{os.path.join(HERE, 'engineer.py')} room number-one show "
+             f"{mid}`).") if mid else ""
+    body = R.strip(last).strip()
+    if len(body) > REFRESH_TYPED_MAX:
+        body = clip(body, REFRESH_TYPED_MAX) + (f"\n(cut here: the rest is in crew_msg #{mid})" if mid else "")
+    return (f"[refresh] Your conversation was cleared for a fresh context. Below is the handover you wrote at "
+            f"the end of the last one.{whole} Carry on from it; if it says the work is done, answer in one line "
+            f"and start nothing new.\n\n{body}")
+
+
+def cmd_refresh_go(name, spool="", t0="0"):
     """The Stop hook's, after the turn that wrote the handover: waits (up to
     two minutes) for the session to be idle, then clears it and points the
-    fresh one at the log."""
+    fresh one at the handover. An engineer's `spool` is their turn's last
+    words (msg_spool's file): filed first as the turn's message (turn_deliver),
+    then typed back; `t0` their turn's start, for the seat if no clear."""
+    last = ""
+    if name != NO1:
+        if os.path.dirname(os.path.abspath(spool)) != os.path.join(STATE, "msgs"):
+            fail("refresh-go <name> <spooled handover> [t0]", 2)
+        try:
+            with open(spool) as f:
+                last = f.read().strip()
+            os.unlink(spool)
+        except OSError as e:
+            fail(f"the handover is gone: {e}", 4)
+    st = load(name) or {}
+    # the turn's message, as the Stop hook files any (to Number One, a DM's
+    # sender, the captain's room), and its row's id for the pointer
+    mid = turn_deliver(name, st, last, None, sync=True) if last else None
+    who = "Number One" if name == NO1 else name
     deadline = time.time() + 120
     while True:
         info = agent_info(name)
@@ -3738,26 +3893,50 @@ def cmd_refresh_go(name):
         if status in ("idle", "done", "off") or time.time() > deadline:
             break
         time.sleep(2)
-    refresh_log(f"refresh-go: Number One {status}")
+    refresh_log(f"refresh-go: {who} {status}")
     with refresh_lock(name) as st:
         r = refresh_pending(st)
         if not r or not r.get("noted"):
             refresh_log("refresh-go: " + ("no handover noted" if r else "no refresh pending (lapsed or done)"))
+            refresh_seat_on(name, t0)
             return out({"ok": True, "cleared": False})
         st.pop("refresh", None)
         save(name, st)
         code, res = clear_session(name, st.get("task") or "handover")
+    room = r.get("room") or r.get("thread")
     if code != 0 or not res.get("cleared"):
-        refresh_log(f"refresh-go: clear failed: {res.get('error') or 'no new session seen'}")
-        no1_send(f"[refresh] Your handover note is written, but the clear did not happen "
-                 f"({res.get('error') or 'no new session seen'}). Carry on.", room=r.get("room") or r.get("thread"))
+        why = res.get("error") or "no new session seen"
+        refresh_log(f"refresh-go: clear failed: {why}")
+        if name == NO1:
+            no1_send(f"[refresh] Your handover note is written, but the clear did not happen ({why}). Carry on.",
+                     room=room)
+        else:
+            notify_no1(name, f"[refresh] {name}'s handover is written, but the clear did not happen ({why}).")
+            refresh_seat_on(name, t0)
         return out({"ok": False, "cleared": False})
     time.sleep(2)  # the fresh session's input box
-    n1 = os.path.join(HERE, "no1.py")
-    no1_send(f"[refresh] Your conversation was cleared for a fresh context. Read your log (`{n1} logs 5`) "
-             f"and carry on from the latest handover.", room=r.get("room") or r.get("thread"))
+    if name == NO1:
+        n1 = os.path.join(HERE, "no1.py")
+        no1_send(f"[refresh] Your conversation was cleared for a fresh context. Read your log (`{n1} logs 5`) "
+                 f"and carry on from the latest handover.", room=room)
+    else:
+        # the fresh turn holds the seat on, and its own end moves it
+        text = refresh_handover_text(last, mid)
+        _, err = herdr("agent", "prompt", agent(name), text, timeout=30)
+        if err:
+            refresh_log(f"refresh-go: the handover not typed: {err}")
+            refresh_seat_on(name, t0)
+        else:
+            submit_if_left(name, text)
     refresh_log(f"refresh-go: cleared, new session {(load(name) or {}).get('session')}")
-    out({"ok": True, "cleared": True})
+    out({"ok": True, "cleared": True, **({"msg": mid} if mid else {})})
+
+
+def refresh_seat_on(name, t0):
+    """The seat's turn-ended, which the Stop hook left to refresh-go: for
+    an engineer whose refresh ends without a fresh turn typed in."""
+    if name != NO1 and seated(name):
+        spawn("seat-turn-ended", name, str(t0 or 0))
 
 
 # ---- Number One's rooms (docs/design/rooms.md; no1-threads.md section 13) ------
@@ -5607,6 +5786,8 @@ def heavy_command(cmd):
             continue
         if is_engineer_py(words):
             return ""  # `engineer.py job ...` (or any verb of it) is never itself heavy
+        if os.path.basename(cmd_script(words)) == "steward.py":
+            continue  # a data fix (steward_allow), never heavy: the parts after it still are
         if os.path.basename(words[0]) == "make":
             hit = [a for a in words[1:] if a in HEAVY_MAKE]
             if hit:
@@ -7925,7 +8106,7 @@ VERBS = {
     "job-next": (lambda: out({"jobs": job_dispatch()["jobs"]}), False, 0),
     "jobs": (cmd_jobs, False, 0),
     "watch": (cmd_watch, False, None),
-    "refresh-go": (cmd_refresh_go, True, 0),
+    "refresh-go": (cmd_refresh_go, True, 2),
     "thread": (cmd_thread, True, None),
     "room": (cmd_room, True, None),
     "thread-req": (cmd_thread_req, True, 0),

@@ -37,7 +37,7 @@ This manual is in the console too: **The manual**{ui} at the foot of the help op
 
 ### What is not here
 
-- **The deck** is the 3D ship, walked in the browser. **Deck**{ui} in the header (or **D**) opens it. It has its own controls, and this manual does not cover it.
+- **The deck** is the 3D ship, walked in the browser. **Deck**{ui} in the header (or **D**) opens it. It has its own controls, and this manual does not cover them, but for one: its bridge keeps the clock, at night watch (the lights low) from 23:00 to 07:00 in the server's zone (`LCARS_TZ`), and **U** there, or "night watch" and "day watch", change it until the next watch; "watch by hand" stops the clock, "watch by the clock" starts it again.
 - **Setting up the server** is in the project's README on GitHub: [github.com/saftacatalinmihai/lcars](https://github.com/saftacatalinmihai/lcars).
 - **A feature that is off.** Some features need something on the server, such as a key or a program. When one is off, its door says so. Press **W** for the list (see [When something goes wrong](#trouble)).
 

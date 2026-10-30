@@ -201,7 +201,10 @@ let nightd = "";
 function nightWatching() {
   const D = ctx.window.__deck, fail = m => problems.push("night watch: " + m);
   try {
-    if (D.NIGHT.on) return fail("on by default (the demo boot has no saved watch)");
+    // the demo boot has no saved watch: the clock's, the device's zone
+    if (!D.NIGHT.clock) return fail("the clock off by default");
+    if (D.NIGHT.on !== D.watchAt(Date.now()).night) return fail("the boot at " + new Date().toString() + " left the watch " + (D.NIGHT.on ? "night" : "day") + ", not the clock's");
+    D.nightWatch(false, true);
     const pools = D.NIGHT.pools || [], day = pools.map(s => s.intensity);
     if (pools.length !== 2 || day[0] !== 9 || day[1] !== 5) return fail("the bridge's two pooled lights are " + day + ", not 9 and 5");
     const order = said => D.DVCMDS.filter(c => c.fn && [c.say, ...(c.alias || [])].includes(said));
@@ -215,7 +218,55 @@ function nightWatching() {
       if (on && !pools.every((s, i) => s.intensity < day[i] * 0.3)) return fail("at night the pools are " + pools.map(s => s.intensity));
       if (!on && !pools.every((s, i) => s.intensity === day[i])) return fail("by day the pools are " + pools.map(s => s.intensity) + ", not " + day);
     }
-    nightd = "night watch: the pools " + day + " cut and back, kept, 4 orders";
+    // By the clock, the hour stood in, in the captain's zone (EET, UTC+2,
+    // from 25 Oct 2026): 23:30 is night, 07:30 day, a choice by hand holds
+    // until the next change of watch, the switch off leaves it alone.
+    const at = (d, h, m) => Date.UTC(2026, 9, d, h - 2, m), real = D.NIGHT.now;
+    D.NIGHT.zone = "Europe/Athens"; ctx.localStorage.removeItem("lcars.deck.nighthand");
+    const tick = (t, want, what) => { D.NIGHT.now = () => t; D.nightTick(); if (D.NIGHT.on !== want) throw new Error(what + " left the watch " + (D.NIGHT.on ? "night" : "day")); };
+    try {
+      tick(at(30, 22, 59), false, "22:59");
+      tick(at(30, 23, 30), true, "23:30");
+      if (!pools.every((s, i) => s.intensity < day[i] * 0.3)) return fail("night by the clock, the pools are " + pools.map(s => s.intensity));
+      tick(at(31, 6, 59), true, "06:59");
+      tick(at(31, 7, 30), false, "07:30");
+      // by hand at 23:30: day, held through the night, the clock's again at 23:00 next
+      D.NIGHT.now = () => at(31, 23, 30); order("day watch")[0].fn({});
+      tick(at(31, 23, 50), false, "a day watch by hand at 23:30, at 23:50,");
+      tick(at(32, 2, 0), false, "a day watch by hand at 23:30, at 02:00,");
+      tick(at(32, 7, 30), false, "07:30 after the hand's day");
+      tick(at(32, 23, 30), true, "the next night's 23:30");
+      // by hand at noon: night, held until 23:00 (night still), gone at 07:00
+      D.NIGHT.now = () => at(33, 12, 0); order("night watch")[0].fn({});
+      tick(at(33, 18, 0), true, "a night watch by hand at noon, at 18:00,");
+      tick(at(34, 7, 30), false, "07:30 after the hand's night");
+      // the switch: off leaves it alone, kept; on takes the clock at once
+      const off = order("watch by hand"), on = order("watch by the clock");
+      if (off.length !== 1 || on.length !== 1) return fail("the clock's orders are " + off.length + " and " + on.length + ", not one each");
+      off[0].fn({});
+      if (D.NIGHT.clock || ctx.localStorage.getItem("lcars.deck.nightclock") !== "false") return fail("\"watch by hand\" left the clock " + D.NIGHT.clock + ", kept " + ctx.localStorage.getItem("lcars.deck.nightclock"));
+      tick(at(34, 23, 30), false, "the clock off, 23:30");
+      tick(at(35, 7, 30), false, "the clock off, 07:30");
+      D.NIGHT.now = () => at(35, 23, 30); order("day watch")[0].fn({});
+      on[0].fn({});
+      if (!D.NIGHT.clock || !D.NIGHT.on) return fail("\"watch by the clock\" at 23:30 left the clock " + D.NIGHT.clock + ", the watch " + (D.NIGHT.on ? "night" : "day"));
+      // the hint of a change by itself: on the bridge, none in Ten Forward
+      if (D.deck() !== 8) D.switchDeck(8);
+      const P = D.player.position, was = [P.x, P.z], clockHint = () => /by the clock/.test(D.lastHint);
+      try {
+        P.x = 10; P.z = -20;
+        if (D.onBridge()) return fail("Ten Forward (10, -20) is the bridge");
+        D.NIGHT.now = () => at(36, 12, 0); order("day watch")[0].fn({});
+        tick(at(36, 23, 30), true, "in Ten Forward, 23:30");
+        if (clockHint()) return fail("in Ten Forward the change of watch said \"" + D.lastHint + "\"");
+        P.x = 0; P.z = -38;
+        if (!D.onBridge()) return fail("(0, -38) is not the bridge");
+        tick(at(37, 7, 30), false, "on the bridge, 07:30");
+        if (!clockHint()) return fail("on the bridge the change of watch said \"" + D.lastHint + "\", not the clock's hint");
+      } finally { [P.x, P.z] = was; }
+    } catch (e) { return fail(e.message); }
+    finally { D.NIGHT.now = real; D.NIGHT.zone = null; D.nightWatch(false, true); ctx.localStorage.removeItem("lcars.deck.nighthand"); }
+    nightd = "night watch: the pools " + day + " cut and back, kept, 4 orders; by the clock 23:30 night, 07:30 day, the hand held a watch, the switch, the hint on the bridge only";
   } catch (e) { fail(e.message + "\n      " + String(e.stack || "").split("\n").slice(1, 3).join("\n      ")); }
 }
 

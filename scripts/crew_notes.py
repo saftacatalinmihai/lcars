@@ -1048,7 +1048,10 @@ def quote_block(who, at, text):
 
 
 def created_line(who, at, tid, entry_id):
-    return f"> {who} created this, {at} (crew note #{tid}, from #{entry_id})"
+    """The quote a created entry starts with; with no thread (steward.py's
+    `new`, a data fix) it names who and when alone."""
+    where = f" (crew note #{tid}, from #{entry_id})" if tid else " (steward.py, on the captain's word)"
+    return f"> {who} created this, {at}{where}"
 
 
 def steward(method, path, body=None):

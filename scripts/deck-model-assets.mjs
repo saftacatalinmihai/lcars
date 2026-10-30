@@ -33,9 +33,10 @@
 // ($KTX, or on the PATH; build.sh keeps one in its cache): the base colour
 // ETC1S (sRGB), the normal map UASTC with RDO and zstd (linear), the ORM
 // ETC1S (linear: its baked AO is noise UASTC cannot pack, 2.4 MB at 2048²
-// against ETC1S's 0.5). A room whose glb and three maps come to more than
-// WIRE_MAX steps down until it fits: the normal map ETC1S, then the ORM at
-// half size, then the normal map. lcars-ui/deck/atlases.json says what each
+// against ETC1S's 0.5); a nearly flat normal map ETC1S too (`NORM_ETC1S`).
+// A room whose glb and three maps come to more than WIRE_MAX steps down
+// until it fits: the normal map ETC1S, then the ORM at half size, then the
+// normal map. lcars-ui/deck/atlases.json says what each
 // room has (its baked size, the KTX2's, each map's codec); the page loads
 // the KTX2 only for a room listed there, and the webp when it is not, or
 // when either fails. `--ktx2` makes them from the webps already in OUT
@@ -77,11 +78,21 @@ async function ktx2(src, out, n, codec, srgb, flip = false) {
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   return fs.statSync(out).size;
 }
+// The rooms whose normal map is ETC1S from the start, wire or no: nearly
+// flat maps (scripted props, their relief under ~2 degrees at its 99th
+// percentile against a flat map), where UASTC paid for what ETC1S drops -
+// slice 7's three, built from Blender's PNGs, carried their bake noise into
+// 218-261 kB of UASTC against a 5-13 kB webp; the others, 15-133 kB against
+// 3-17. ETC1S came to 2-18 kB each and looked the same at high in a close
+// look (docs/design/deck-remodel.md, section 6 item 7). Not the bridge's
+// tiles (`MAPS`) nor Ten Forward's: their relief is real, and ETC1S
+// flattens it.
+const NORM_ETC1S = new Set(['arboretum', 'concourse', 'conference', 'engineering', 'lab', 'lounge', 'mess', 'school', 'sickbay']);
 // a room's three into OUTd, stepping down until its wire fits WIRE_MAX; `src(k)` its
 // map k's source, `n` the size it was baked at
 async function roomKtx2(OUTd, room, src, n) {
   const k2 = Math.min(n, KTX2_MAX), glb = fs.statSync(`${OUTd}${room}.glb`).size;
-  const plan = { base: ['etc1s', k2], norm: ['uastc', k2], orm: ['etc1s', k2] };
+  const plan = { base: ['etc1s', k2], norm: [NORM_ETC1S.has(room) ? 'etc1s' : 'uastc', k2], orm: ['etc1s', k2] };
   const steps = [() => { plan.norm[0] = 'etc1s'; }, () => { plan.orm[1] = k2 / 2; }, () => { plan.norm[1] = k2 / 2; }];
   const bytes = {};
   for (let i = 0; ; i++) {

@@ -3576,7 +3576,8 @@ static int HandleGetStats(int client_fd, Arena *arena, const char *query) {
            "SELECT COUNT(*), COUNT(DISTINCT kind), "
            "SUM(CASE WHEN COALESCE(done_bool,0) = 1 THEN 1 ELSE 0 END), "
            "SUM(COALESCE(length(content), 0)), MIN(created_at_utc), "
-           "MAX(created_at_utc), MAX(last_modified_at_utc) FROM entries %s;",
+           "MAX(created_at_utc), MAX(last_modified_at_utc), "
+           "strftime('%%Y-%%m-%%d %%H:%%M:%%S', 'now', 'utc') FROM entries %s;",
            filter.where);
 
   sqlite3_stmt *stmt;
@@ -3605,6 +3606,12 @@ static int HandleGetStats(int client_fd, Arena *arena, const char *query) {
     jsonbuf_append(&out, ",\"last_modified_at_utc\":");
     jsonbuf_append_json_string(&out,
                                (const char *)sqlite3_column_text(stmt, 6));
+    // The server's clock, by the expression every write stamps
+    // last_modified_at_utc with: the page keeps its sync mark at or below
+    // it, since a client may POST a row stamped in the future (markClamp).
+    jsonbuf_append(&out, ",\"now_utc\":");
+    jsonbuf_append_json_string(&out,
+                               (const char *)sqlite3_column_text(stmt, 7));
     jsonbuf_append(&out, "}");
   } else {
     jsonbuf_append(&out, "{\"count\":0,\"kinds\":0,\"done\":0,"
@@ -3720,6 +3727,9 @@ static int HandleIndex(int client_fd) {
       "{\"method\":\"GET\",\"path\":\"/maps\","
       "\"description\":\"the web UI's map settings for plotting a "
       "course: {mapy_key} from $LCARS_MAPY_KEY, or null\"},"
+      "{\"method\":\"GET\",\"path\":\"/zone\","
+      "\"description\":\"the captain's zone: {zone} from $LCARS_TZ, or "
+      "null\"},"
       "{\"method\":\"GET\",\"path\":\"/features\","
       "\"description\":\"what this server can do: {features:[{name,on,"
       "needs,note}]}; needs, the settings an off one lacks (names, never "
@@ -3773,6 +3783,26 @@ static int HandleMaps(int client_fd) {
   char body[256];
   int len = ok ? snprintf(body, sizeof(body), "{\"mapy_key\":\"%s\"}", key)
                : snprintf(body, sizeof(body), "{\"mapy_key\":null}");
+  assert(len > 0 && (size_t)len < sizeof(body));
+  return SendJSON(client_fd, 200, body, (size_t)len);
+}
+
+// GET /zone: the captain's own zone, $LCARS_TZ (an IANA name), or null. The
+// pages run on whatever device is to hand, whose clock may be set to where
+// it was bought or where the captain flew to; the deck's night watch keeps
+// the hours of the captain's home, which is the box's setting, not the
+// phone's. Passed on only when it is made of the characters IANA names use,
+// so it is written into the JSON unescaped.
+static int HandleZone(int client_fd) {
+  const char *tz = getenv("LCARS_TZ");
+  bool ok = tz && tz[0] && strlen(tz) <= 64;
+  for (const char *c = tz; ok && *c; c++) {
+    ok = isalnum((unsigned char)*c) || *c == '/' || *c == '_' || *c == '-' ||
+         *c == '+';
+  }
+  char body[128];
+  int len = ok ? snprintf(body, sizeof(body), "{\"zone\":\"%s\"}", tz)
+               : snprintf(body, sizeof(body), "{\"zone\":null}");
   assert(len > 0 && (size_t)len < sizeof(body));
   return SendJSON(client_fd, 200, body, (size_t)len);
 }
@@ -4583,6 +4613,11 @@ static bool ServeHTTPRequest(int client_fd, Arena *arena, char *req_buf,
                       ? HandleMaps(client_fd)
                       : SendJSONError(client_fd, 405,
                                       "Method %s not allowed on /maps", method);
+  } else if (PathIs(path, "/zone")) {
+    status_code = strcmp(method, "GET") == 0
+                      ? HandleZone(client_fd)
+                      : SendJSONError(client_fd, 405,
+                                      "Method %s not allowed on /zone", method);
   } else if (PathIs(path, "/dump")) {
     status_code = strcmp(method, "GET") == 0
                       ? HandleDump(client_fd, arena, query)

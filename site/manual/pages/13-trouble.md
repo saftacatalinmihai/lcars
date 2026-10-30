@@ -23,7 +23,9 @@ Some features need something on the server: a key, a program or a setting. Press
 
 ### The header shows a red or yellow alert
 
-Tap it, or say "computer, why the alert". It says what the alert is about. Red: offline, changes not sent, a failed save, or overdue tasks. Yellow: a save under way, or changes waiting to be sent.
+Say "computer, why the alert" and a toast says what the alert is about. Red: offline, changes not sent, a failed save, or overdue tasks. Yellow: a save under way, or changes waiting to be sent.
+
+Tap the alert, or say "computer, show the overdue tasks", to see each reason. Every overdue task has its own row, the most overdue first, with how late it is. Tap a row to open that task. The other reasons have rows too, and the outbox or the unsaved entry opens from them. If the only reason is one overdue task, the tap opens it directly.
 
 ### The page looks old, or a new feature is missing
 
