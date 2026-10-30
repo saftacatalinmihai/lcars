@@ -42,6 +42,10 @@ Built in Blender by scripts/deck-models/lounge.py, part of this repository.
 Built in Blender by scripts/deck-models/mess.py, part of this repository.
 
 == quarters.glb, quarters_{base,norm,orm}.webp
+quarters_bed: generated with Higgsfield (Tripo H3.1 multiview, from views made with Seedream 5.0 Flash) on the captain's plan, 2026-10-30, the output the captain's under Higgsfield's terms.
+
+quarters_sofa: generated with Higgsfield (Tripo H3.1 multiview, from views made with Seedream 5.0 Flash) on the captain's plan, 2026-10-30, the output the captain's under Higgsfield's terms.
+These converted by common.import_pack; the rest:
 Built in Blender by scripts/deck-models/quarters.py, part of this repository.
 
 == readyroom.glb, readyroom_{base,norm,orm}.webp

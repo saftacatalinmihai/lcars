@@ -5,6 +5,12 @@ shows it under the LCARS badge (`APP_VERSION` in `lcars-ui/index.html`), so a
 page showing an older number is running a cached copy. A feature bumps the
 minor, a fix the patch, in the same commit as `APP_VERSION`.
 
+## 0.350.3 — 2026-10-30
+
+- **console:** the first open with no login stored goes straight to the Connection dialog and asks the server nothing - no more five 401s and a "cannot reach … Unauthorized" toast before it; a refused login says "… refused the login for <user>", and a load that then works takes that toast down at once.
+- **deck:** the architect's phase 2 - the deck's code-built furniture has names (`8/Ten Forward/chair#3`) and a patch can move, turn, hide or remake it; patches to the generated rooms apply as each room is built; new verbs in the deck API v2 (`.material()`, `deck.dress`, `deck.tick`, `deck.sky`, `deck.fog`, `deck.materials`); the cabins' sofa and double bed are new models.
+- **crew:** Number One's `no1.py api` (any route as the owner's login, every write logged) and `no1.py rm`, with a wider shell and the danger zones denied.
+
 ## 0.347.2 — 2026-10-30
 
 - **console:** a new, empty journal finishes loading - the list says the journal is empty, with **+ New entry**, where every release up to 0.339.3 said "scanning… 0/? loaded" for ever; an untitled entry's title field is empty, never "HTTP Entry"; the red alert's line opens a sheet of the overdue tasks; the saved views can be arranged (**⇅ Arrange**); the sync mark never runs ahead of the server's clock; Statistics' Echoes give days in words; hold to talk holds still.

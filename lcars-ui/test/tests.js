@@ -7212,6 +7212,48 @@ var sayQ = say;
   await settle(20);
   eq(st.all.length, DB.length, "the real journal back in");
 
+  console.log("\n-- a first open with no login: the Connection dialog, and nothing asked of the server --");
+  var aUser = cfg.user, aPass = cfg.pass, aCfg = localStorage.getItem("lcars.cfg");
+  var toastUp = function () { return /\bon\b/.test($("#toast").className); };
+  var apiSent = function (from) {
+    return TEST.fetches.slice(from).filter(function (x) { return !/^GET (\.\/)?themes\//.test(x); });
+  };
+  hideToast();
+  cfg.user = ""; cfg.pass = ""; AUTH_ON = true;
+  st.all = []; st.byId = new Map();
+  var aFrom = TEST.fetches.length;
+  bootGo();
+  await settle(20);
+  eq($("#dlgh") && $("#dlgh").textContent, "Connection", "the Connection dialog is open");
+  ok(!toastUp(), "with no toast over it (" + $("#toast").textContent + ")");
+  eq(apiSent(aFrom).join(" | "), "", "and no request sent without a login");
+  $("#c_user").value = aUser || "admin"; $("#c_pass").value = aPass || "admin";
+  $("#c_ok").onclick();
+  await settle(20);
+  ok(!st.loading, "Connect loads the journal");
+  eq(st.all.length, DB.length, "all of it");
+  ok(!toastUp(), "and no toast is left");
+
+  console.log("-- a refused login says so, and the load after Connect takes the toast down --");
+  cfg.user = "wrong"; AUTH_ON = "deny";
+  st.all = []; st.byId = new Map();
+  await loadAll();                    // no timers run: the toast's own 5 s is one
+  has($("#toast").textContent, "refused the login for wrong", "the toast says the login was refused");
+  ok(toastUp(), "a red one");
+  ok(!/cannot reach/.test($("#toast").textContent), "not that the server cannot be reached");
+  eq($("#dlgh") && $("#dlgh").textContent, "Connection", "and the dialog is open to put it right");
+  AUTH_ON = true;
+  $("#c_user").value = aUser || "admin"; $("#c_pass").value = aPass || "admin";
+  ok(toastUp(), "the toast is still up as Connect is pressed");
+  $("#c_ok").onclick();
+  for (var aI = 0; aI < 200 && !st.all.length; aI++) await pump(5);    // the first page, no timers
+  ok(st.all.length && !toastUp(), "and down as soon as the server answers");
+  await settle(20);
+  eq(st.all.length, DB.length, "the journal in");
+  AUTH_ON = false;
+  cfg.user = aUser; cfg.pass = aPass;
+  if (aCfg === null) localStorage.removeItem("lcars.cfg"); else localStorage.setItem("lcars.cfg", aCfg);
+
   console.log("\n-- a server with /dump: the whole journal in one answer --");
   DUMP_ON = true;
   dumpMissing = false;

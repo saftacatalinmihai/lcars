@@ -298,7 +298,9 @@ def look(room, i, x, z, yaw, pitch=-0.08):
     # when its load lands (a page before 0.220.0 has no cells' models)
     pg.wait_for_function("!window.__deck.modelsReady || window.__deck.modelsReady()", timeout=MODELS_WAIT)
     m = pg.evaluate(MEASURE, args.secs)
-    v = {"room": room, "yaw": yaw, "at": [x, z],
+    # (i: the look's index, or a --view's name; with the pitch, a look can
+    # be taken again from the same spot on another page: a prop main lacks)
+    v = {"room": room, "yaw": yaw, "at": [x, z], "look": i, "pitch": pitch,
          "p50": round(statistics.median(m["ms"]), 1) if m["ms"] else None, "p99": round(pct(m["ms"], 0.99), 1),
          "calls": max(m["calls"]) if m["calls"] else 0, "tris": max(m["tris"]) if m["tris"] else 0,
          "frames": len(m["ms"]), "shadow_frames": m["shadowFrames"]}

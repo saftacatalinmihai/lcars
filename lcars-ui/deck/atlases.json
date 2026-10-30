@@ -192,21 +192,21 @@
   },
   "quarters": {
    "size": 1024,
-   "wire": 513623,
+   "wire": 597676,
    "base": {
     "codec": "etc1s",
     "size": 1024,
-    "bytes": 86304
+    "bytes": 155849
    },
    "norm": {
     "codec": "etc1s",
     "size": 1024,
-    "bytes": 15053
+    "bytes": 102496
    },
    "orm": {
     "codec": "etc1s",
-    "size": 1024,
-    "bytes": 198694
+    "size": 512,
+    "bytes": 85899
    }
   },
   "readyroom": {

@@ -477,12 +477,12 @@ whole short, card included.
 - **Setup:** LCARS is my journal, on my own server. This is the install.
 - **Hook:** Download it, init it, run it.
 - **Journal:** a new one, made in the short.
-- **Filmed with:** release v0.339.3 (26 Oct, Latest on GitHub), its x86_64 tarball fetched off camera from the release page and checked against SHA256SUMS; `film.terminal` and `film.desk`: the commands typed and run for real in a scratch HOME under the run's temp, the server on a free scratch port (never 8080), stopped and the scratch removed when the film ends.
+- **Filmed with:** release v0.347.2 (30 Oct, Latest on GitHub), its x86_64 tarball fetched off camera from the release page and checked against SHA256SUMS; `film.terminal` and `film.desk`: the commands typed and run for real in a scratch HOME under the run's temp, the server on a free scratch port (never 8080), stopped and the scratch removed when the film ends.
 - **Show:**
-  1. A terminal: `tar xzf lcars-0.339.3-linux-x86_64.tar.gz && cd lcars-0.339.3-linux-x86_64/` (Tab completing the names).
+  1. A terminal: `tar xzf lcars-0.347.2-linux-x86_64.tar.gz && cd lcars-0.347.2-linux-x86_64/` (Tab completing the names).
   2. `./lcars init ~/journal`. It prints the login.
   3. `./lcars --data ~/journal --port <the scratch port>`. The start log.
-  4. The console at that address: its Connection dialog, the login typed in, **Connect**: the empty journal, v0.339.3 beside **LCARS**.
+  4. The console at that address: its Connection dialog, the login typed in, **Connect**: the empty journal, v0.347.2 beside **LCARS**.
 - **Punch:** A C server, SQLite, and the app inside. Nothing else to install.
 - **Length:** 27.7 s.
 

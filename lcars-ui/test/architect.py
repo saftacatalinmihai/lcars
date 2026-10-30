@@ -11,7 +11,14 @@ store) and applied again after a reload; revised in place; switched off
 (the model back in its merged mesh); a patch that froze the last load
 skipped; ?nopatch applying none; I opening the architect's sheet with the
 patch listed; what the deck tells the architect (lcarsDeckSees) and its
-picture (lcarsDeckShot, a JPEG at most 1024 px wide).
+picture (lcarsDeckShot, a JPEG at most 1024 px wide). Phase 2: a
+generated room, the first wing lab, walked into (tickRooms builds it):
+its code-built chair named, the room's inventory, a patch to the chair
+written while the room is down, applied when it is built (the chair lifted
+and hidden, its footprint gone, a round stool in its material, two draw
+calls), undone when walked away from, replayed after a reload, the
+footprint back as built when switched off; Ten Forward's table's footprint
+moving with it.
 
 Then the round trip, against a scratch server (built from the lcars-release
 line, an empty journal, /ui/ served from --page) with claude stood in for
@@ -144,6 +151,103 @@ def shoot(name):
     b64 = ev("""async () => { const b = await window.lcarsDeckShot(1024); const r = new FileReader();
       return await new Promise(ok => { r.onload = () => ok(String(r.result).split(",")[1]); r.readAsDataURL(b); }); }""")
     (pathlib.Path(args.out) / name).write_bytes(base64.b64decode(b64))
+
+# ---- a generated room (phase 2): the first wing lab on deck 8 ----
+# Its patches apply when it is built (buildRoom, once its models are placed)
+# and are undone before it is dropped (unbuildRoom), so the room is walked
+# into and out of as the captain would: tickRooms builds what is near.
+GEN_REC = "window.__deck.genRooms.find(r => r.rm.deck === 8 && r.rm.type === 'lab')"
+GO_IN = f"""(() => {{ const D = window.__deck, r = {GEN_REC}, [a, b, c, d] = r.rect; D.setView((a + c) / 2, (b + d) / 2, 0, -0.2); return r.rm.deck + '/' + r.rm.name; }})()"""
+GO_OUT = "name => { const D = window.__deck, p = D.placeByName.get(name), w = new D.THREE.Vector3(); p.g.getWorldPosition(w); D.setView(w.x - 2.2, w.z + 2.2, 0, 0); }"
+# 1.8 m from the prop toward the room's middle, looking at it
+LOOKP = f"""name => {{ const D = window.__deck, p = D.propByName.get(name), r = {GEN_REC}, [a, b, c, d] = r.rect, w = new D.THREE.Vector3();
+  p.g.getWorldPosition(w); let ux = (a + c) / 2 - w.x, uz = (b + d) / 2 - w.z; const l = Math.hypot(ux, uz) || 1; ux /= l; uz /= l;
+  const x = w.x + ux * 1.8, z = w.z + uz * 1.8; D.setView(x, z, Math.atan2(ux, uz), Math.atan2(0.5 - 1.6, 1.8)); }}"""
+BUILT = f"(() => {{ const r = {GEN_REC}; return !!(r.g && r.patchReady); }})()"
+GONE = f"!{GEN_REC}.g"
+GPATCH = "key => (window.__deck.patchScopes.get('room:' + key) || []).map(l => l.id + (l.ps ? '' : '!')).join()"
+# the room's code-built chair (a lab's desk chairs are code only): its name,
+# its footprint, whether it is lifted and shown, and the patch's stool
+GPROP = """key => { const D = window.__deck, all = [...D.propByName.values()].filter(p => p.roomKey === key && p.blocks.length && p.ranges.some(x => x.length === 4));
+  const p = all.find(x => x.kind === 'chair') || all[0]; if (!p) return null;
+  return { name: p.name, n: all.length, block: p.blocks[0].slice(), lifted: !!p.lifted, shown: p.lifted ? p.lifted.m.visible : true,
+           stool: !!D.patchObjs.get('t-gen/stool'), inScene: !!D.scene.getObjectByName('t-gen/stool') }; }"""
+GEN_CODE = """// new: A round stool where the chair was
+const o = deck.obj(%s), [x, , z] = o.at();
+const top = new deck.three.Mesh(new deck.three.CylinderGeometry(0.28, 0.28, 0.06, 28), o.mat());
+const leg = new deck.three.Mesh(new deck.three.CylinderGeometry(0.05, 0.16, 0.44, 12), o.mat());
+top.position.y = 0.47; leg.position.y = 0.22;
+const g = new deck.three.Group(); g.add(top, leg); g.position.set(x, 0, z);
+o.hide();
+await deck.add("stool", g);"""
+COST = """() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => { const i = window.__deck.renderer.info.render; r([i.calls, i.triangles]); })))"""
+
+
+def gen_room():
+    """Build the wing lab by walking in, name its chair, leave; patch it while
+    it is down; walk in: applied, and the cost from one view; walk out:
+    undone. Answers the room's key and the chair's name for gen_again."""
+    key = ev(GO_IN)
+    if not check("a wing lab is built when walked into", wait(BUILT, 60000)):
+        return None
+    pr = ev(GPROP, key)
+    if not check("its code-built props have names (<deck>/<room>/<name>#n)", bool(pr) and pr["name"].startswith(key + "/"), json.dumps(pr)):
+        return None
+    print(f"   the generated room: {key}, its {pr['n']} code-built props; the prop: {pr['name']}")
+    ev(LOOKP, pr["name"])
+    c_before = ev(COST)
+    if args.out:
+        shoot("genroom-before.jpg")
+    sees = ev("window.lcarsDeckSees({ library: true })")
+    check("the first message in a room carries its inventory", "[Everything named in " + key in sees["text"] and pr["name"][len(key) + 1:] in sees["text"],
+          sees["text"][-400:])
+    ev(GO_OUT, NAME)
+    check("and dropped when walked away from", wait(GONE, 60000))
+    r = ev(PATCH, [{"id": "t-gen", "code": GEN_CODE % json.dumps(pr["name"]), "title": "a round stool", "room": key}])
+    check("a patch to a room not built is kept, to wait for it", r.get("ok") and not ev(GPATCH, key), json.dumps(r))
+    ev(GO_IN)
+    wait(BUILT, 60000)
+    on = wait(f"({GPATCH})({json.dumps(key)}) === 't-gen'", 30000)
+    p1 = ev(GPROP, key)
+    check("walked into, the room applies its patch", on and p1["stool"] and p1["inScene"], json.dumps(p1))
+    check("the chair lifted and hidden, its footprint gone", p1["lifted"] and not p1["shown"] and p1["block"][0] > 1e8, json.dumps(p1))
+    # the cost, from inside the room looking at the stool: with it and without
+    ev(LOOKP, pr["name"])
+    c_after = ev(COST)
+    print(f"   the room from one view: calls {c_before[0]} -> {c_after[0]}, triangles {c_before[1]} -> {c_after[1]} (crew moving in and out of view)")
+    if args.out:
+        shoot("genroom-after.jpg")
+    SV = "v => { window.__deck.patchObjs.get('t-gen/stool').visible = v; }"
+    ev(SV, False)
+    c_off = ev(COST)
+    ev(SV, True)
+    c_on = ev(COST)
+    # (two meshes, its top and its leg: a call each, nothing else moved)
+    check("the stool is two draw calls, its two meshes", c_on[0] == c_off[0] + 2, f"without {c_off}, with {c_on}")
+    print(f"   the stool's cost: calls {c_off[0]} -> {c_on[0]}, triangles {c_off[1]} -> {c_on[1]}")
+    ev(GO_OUT, NAME)
+    wait(GONE, 60000)
+    check("walked away from, the patch is undone with the room", not ev(GPATCH, key) and not ev("!!window.__deck.patchObjs.get('t-gen/stool')")
+          and not ev("!!window.__deck.scene.getObjectByName('t-gen/stool')"))
+    return key, pr
+
+
+def gen_again(gen):
+    """After a reload: the room's patch is replayed when it is built again,
+    the chair's footprint back as built once it is switched off."""
+    key, pr = gen
+    ev(GO_IN)
+    wait(BUILT, 60000)
+    on = wait(f"({GPATCH})({json.dumps(key)}) === 't-gen'", 30000)
+    p2 = ev(GPROP, key)
+    check("replayed after a reload when the room is built", on and p2["name"] == pr["name"] and p2["stool"] and not p2["shown"], json.dumps(p2))
+    ev(PATCH, [{"id": "t-gen"}, "off"])
+    p3 = ev(GPROP, key)
+    check("switched off: the chair back, its footprint as built", not p3["lifted"] and not p3["stool"] and p3["block"] == pr["block"], json.dumps([pr, p3]))
+    ev(PATCH, [{"id": "t-gen"}, "delete"])
+    ev(GO_OUT, NAME)
+    wait(GONE, 60000)
+
 
 # ---- the round trip: the console's architect thread, a scratch server ----
 USER, PASS = "t", "t-architect"
@@ -281,6 +385,9 @@ def roundtrip(b, NAME):
         errs = []
         pg.on("pageerror", lambda e: (errs.append(str(e)), print("   page error: " + str(e)[:300])))
         DECK = base + "/ui/deck.html"
+        # one entry: boot() waits for the journal's rows, and an empty one
+        # has none to wait for (the deck boots on it all the same)
+        s.req("POST", "/entries", {"kind": "note", "title": "architect test", "content": "a row to boot on"}, page=True)
         boot(DECK)
         if not NAME:
             NAME = ev(PICK)
@@ -441,6 +548,14 @@ with sync_playwright() as p:
         shoot("tenforward-after.jpg")
     kept = ev("JSON.parse(localStorage.getItem('lcars.deck.patches') || '[]')")
     check("kept in ?demo's localStorage", [c["id"] for c in kept] == ["t-move"], json.dumps(kept)[:200])
+    # a placement over a code-built prop (prop() in the builders): its
+    # footprint went with it (phase 2)
+    foot = ev(f"""(() => {{ const p = window.__deck.placeByName.get({json.dumps(NAME)}); if (!p.propRec || !p.propRec.blocks.length) return null;
+      const r = p.lifted.regs.blocks[0]; return [r[1][1], r[0][1]]; }})()""")
+    if foot is not None:
+        check("its footprint moved with it", abs(foot[1] - foot[0] - 0.6) < 0.01, json.dumps(foot))
+
+    GEN = gen_room()
 
     # ---- the sheet
     ev("dispatchEvent(new KeyboardEvent('keydown', { key: 'i', code: 'KeyI' }))")
@@ -457,6 +572,8 @@ with sync_playwright() as p:
     w2 = ev(WHERE, NAME)
     check("replayed after a reload: lifted and where the patch put it", w2[3] and abs(w2[2] - w1[2]) < 0.01, json.dumps([w1, w2]))
     check("applied once (patchLive)", ev("window.__deck.patchLive.map(l => l.id + (l.ps ? '' : '!')).join()") == "t-move")
+    if GEN:
+        gen_again(GEN)
 
     # ---- revised
     r = ev(PATCH, [{"id": "t-move", "code": code.replace("0.6", "1.2")}])

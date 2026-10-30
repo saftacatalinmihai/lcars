@@ -850,6 +850,46 @@ async function architect() {
     await P({ id: "t-2" }, "off"); await P({ id: "t-1" }, "off");
     if (snap() !== s0) return fail("every patch off does not leave the deck as it booted");
     if (JSON.parse(mem.get("lcars.deck.patches") || "[]").length !== 2) return fail("?demo did not keep its two patches (off) in localStorage");
+    // phase 2's verbs, each undone with its patch: a tick in the frame's
+    // list, the sky, a fog, the room's dressing cleared, a material of its own
+    const nTick = D.tickers.length, sky0 = D.skyNow(), offs = () => [...D.dressing].map(d => d.userData.off === true ? 1 : 0).join("");
+    const off0 = offs();
+    r = await P({ id: "t-4", room, code: `deck.tick((t, dt) => { globalThis.__ticks = (globalThis.__ticks || 0) + 1; });\ndeck.sky("nebula");\ndeck.fog("#405060", 0.05);\ndeck.dress(${R}).clear();\n` +
+      `const m = new deck.three.Mesh(new deck.three.BoxGeometry(1, 1, 1), new deck.three.MeshStandardMaterial());\nawait deck.add("box", m);\ndeck.obj(deck.id + "/box").material({ color: "#ff0000", roughness: 0.2 });` });
+    if (!r.ok) return fail("phase 2's verbs did not apply: " + r.err + " (line " + r.line + ")");
+    if (D.tickers.length !== nTick + 1 || D.skyNow() !== "nebula" || D.patchFogs.length !== 1) return fail("deck.tick, deck.sky or deck.fog did nothing (" + [D.tickers.length - nTick, D.skyNow(), D.patchFogs.length] + ")");
+    D.tickers[D.tickers.length - 1](1);
+    if (ctx.__ticks !== 1) return fail("a patch's tick was not called by the frame's list");
+    r = await P({ id: "t-4" }, "off");
+    if (!r.ok || D.tickers.length !== nTick || D.skyNow() !== sky0 || D.patchFogs.length || offs() !== off0 || snap() !== s0)
+      return fail("phase 2's verbs switched off left the deck changed (ticks " + (D.tickers.length - nTick) + ", sky " + D.skyNow() + ", fogs " + D.patchFogs.length + ")");
+    r = await P({ id: "t-5", code: `deck.tick(() => { throw new Error("tock"); });` });
+    D.tickers[D.tickers.length - 1](1);
+    if (D.tickers.length !== nTick) return fail("a tick that throws was not stopped");
+    await P({ id: "t-5" }, "off");
+    // (a code-built prop by name, lifted with its footprint: test/architect.py,
+    // in Chromium - the stand-ins here hold no geometry to lift)
+    // a generated room's patch: applied once the room is built, undone as it
+    // is dropped, applied again when it is built again (the deck 8 wings')
+    const rec = D.genRooms.find(x => x.rm.deck === 8 && !x.g);
+    if (!rec) return fail("no deck 8 wing room is left unbuilt to build");
+    const key = rec.rm.deck + "/" + rec.rm.name, wl = () => D.lightSpots.filter(s => s.own === rec.own).map(s => s.intensity).join(",");
+    r = await P({ id: "t-7", room: key, code: `deck.light(${JSON.stringify(key)}).intensity(3);` });
+    if (!r.ok) return fail("a patch for an unbuilt room was refused: " + r.err);
+    if (D.patchScope({ room: key }) !== "room:" + key) return fail("a wing room's patch is not in its room's scope (" + D.patchScope({ room: key }) + ")");
+    D.buildRoom(rec);
+    await rec.g.userData.placed; await new Promise(res => setTimeout(res, 0)); await D.patchIdle();
+    const lit = (D.patchScopes.get("room:" + key) || []).map(x => x.id + (x.ps ? "" : "!")).join(",");
+    if (lit !== "t-7") return fail("the room built did not apply its patch (" + lit + ")");
+    const w1 = wl();
+    D.unbuildRoom(rec);
+    if (D.patchScopes.has("room:" + key)) return fail("the room dropped kept its patch live");
+    D.buildRoom(rec);
+    await rec.g.userData.placed; await new Promise(res => setTimeout(res, 0)); await D.patchIdle();
+    if (wl() !== w1) return fail("the room built again is not as its patch left it the first time (" + wl() + " / " + w1 + ")");
+    await P({ id: "t-7" }, "off");
+    if (D.patchScopes.get("room:" + key).length) return fail("a room's patch switched off is still applied");
+    D.unbuildRoom(rec);
     // the reference
     const md = fs.readFileSync(path.join(path.dirname(file), "..", "docs", "design", "architect.md"), "utf8");
     const sec = /## 9\.[^\n]*\n[\s\S]*?```\n([\s\S]*?)\n```/.exec(md);
@@ -862,7 +902,7 @@ async function architect() {
     // and the architect's brief (crew/architect.md) carries the same, verbatim:
     // the fence under "The deck API, v1"
     const brief = fs.readFileSync(path.join(path.dirname(file), "..", "crew", "architect.md"), "utf8");
-    const bsec = /^The deck API, v1[^\n]*\n+```\n([\s\S]*?)\n```$/m.exec(brief);
+    const bsec = /^The deck API, v\d+[^\n]*\n+```\n([\s\S]*?)\n```$/m.exec(brief);
     if (!bsec) return fail("crew/architect.md has no plain fence holding the API reference");
     const bdoc = bsec[1].split("\n").map(l => l.trimEnd());
     if (bdoc.join("\n") !== mine.join("\n")) {
@@ -873,6 +913,6 @@ async function architect() {
       const v = m[1] || m[2];
       if (!(v in api)) fail("DECK_API_DOC names deck." + v + ", which a patch is not handed");
     }
-    patched = "architect: applied, off, on, revised in order, a throw refused at its line; " + mine.length + " reference lines, the design's and the brief's";
+    patched = "architect: applied, off, on, revised in order, a throw refused at its line; tick, sky, fog, dress, material undone; a wing room's patch with its room; " + mine.length + " reference lines, the design's and the brief's";
   } catch (e) { fail(e.message + "\n      " + String(e.stack || "").split("\n").slice(1, 4).join("\n      ")); }
 }

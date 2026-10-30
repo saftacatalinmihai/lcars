@@ -785,7 +785,9 @@ URLSearchParams.prototype.toString = function () {
 };
 
 var localStorage = (function () {
-  var m = {};
+  // a login stored, as on any device past its first open: with none the page
+  // boots to the Connection dialog and asks the server nothing (bootGo)
+  var m = { "lcars.cfg": JSON.stringify({ user: "test", pass: "test" }) };
   return {
     getItem: function (k) { return m[k] === undefined ? null : m[k]; },
     setItem: function (k, v) { m[k] = String(v); },

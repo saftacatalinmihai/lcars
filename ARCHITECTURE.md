@@ -884,7 +884,26 @@ which does everything; its comments hold the detail.
   captain only what needs the captain (`brief_no1` says when he may deploy
   on his own authority and when he must escalate).
   - He runs `--permission-mode dontAsk` with `no1_settings()`: `no1.py`,
-    reading files (fff's three searches too) and read-only git. He makes no edits.
+    reading files (fff's three searches too), read-only git, and since
+    the captain's order of 2026-10-30 the ordinary shell tools
+    (`NO1_SHELL`) and writes anywhere under the home folder. No
+    interpreter is allowed bare: one would run anything past the denies.
+    `no1_denies()` names CLAUDE.local.md's danger zones (the db and
+    rebuild scripts, `db-prune.py --apply`, ssh, any write to a SQLite
+    file, rm in the media root, every git verb that writes, every shell
+    write and cd into `~/lcars*` in each form a path takes, the secrets
+    by name through the shell, recursive grep and rg; sed and awk, and
+    tar's and find's options that run, delete or write); a deny wins over
+    an allow. No bare rm: a rule's `*` spans spaces, so `no1.py rm`
+    resolves each path and removes only under /tmp and its research
+    folder, the rest moved to `~/.local/share/no1-trash`. The home
+    folder and /tmp are its `additionalDirectories`: outside the
+    working directories dontAsk refuses a command whatever the allows.
+    A guardrail, not a sandbox.
+  - `no1.py api METHOD PATH` is his door to any route as the captain's own
+    login (`journal_api.py`'s): GET free, every write a `no1_log` line
+    (method, path, status) in his own login; `/vault` and `/engineer/`
+    refused. The server's deletes are soft.
   - His worktree moves only by `no1.py sync` (`sync_no1` in
     `engineer.py`): a fast-forward of `eng/number-one` to the live branch,
     refused if it has tracked changes, commits of its own or another

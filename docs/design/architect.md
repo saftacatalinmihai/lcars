@@ -8,6 +8,8 @@ index.html, "the architect" block; `crew/architect.md`, served through
 `engineer.py brief architect` and kept out of `crew.py`'s runs by `kind:
 chat`; the server's guard, `PatchKindAllowed` in lcars_http.h). Not built:
 the frozen aim's outline (4.4), the HUD mark and the shimmer (5).
+Phase 2's deck half (code-built props by name, generated rooms, the new
+verbs, the room's inventory) is built: "Phase 2, as built" in section 7.
 Number One's order of 2026-10-19, written by Zimmerman at 0dadeb8
 (0.266.0). Line numbers are of that commit.
 
@@ -703,6 +705,68 @@ context and the screenshot; the live apply; the entries; replay at load;
   off in perf.py).
 - Size: **2-3 hours** of engineer time over several orders.
 
+### Phase 2, as built: the deck's half (Number One's order of 2026-10-30)
+
+- **Code-built props** (`prop(name, fn)`, beside `model()` in deck.html).
+  The builders that make one piece of furniture (`chair`, `table`, `sofa`,
+  `lamp`, `bench`, `ringBench`, `bookcase`, `plant`, `padShelf`,
+  `deskChair`, `officeDesk`, `bed`, `biobed`, `surgicalBed`,
+  `instrumentTray`, `cabinet`, `microscopeStation`, `wallConsole`) are
+  wrapped once where they are declared (`chair = propped("chair", chair)`,
+  before any is called), so no builder's body changed. A record keeps the
+  group, its meshes (each stamped `userData.prop`), and what was
+  registered while it ran: its `block()`s, light spots and work spots
+  (seats are on the parts already). A builder inside another is the
+  outer's. `standinRanges` records each part's range in the merge, as for
+  a stand-in. Names `<deck>/<room>/<name>#<n>` (`nameProps`: deck 8's after
+  `mergeStatic`, a cell's at the end of `finishCell`, counted per frame in
+  build order; `dropProps` in `dropCell`). A prop a placement stands over
+  is not named: the placement is (`propRec` on it, its footprint and
+  lights moving with the model's lift). 49 of deck 8's 112 props are named
+  that way; a wing lab has 8.
+- **Lifting one** (`propLift`): its merged ranges zeroed and kept, its
+  unmerged meshes `attach`ed to a group of its own, its merged parts copied
+  into that group merged again by material (a chair of leather and metal:
+  two calls until baked). `regsFollow` lays its footprints (from the
+  rectangles as built, through the move, so nothing drifts), light spots
+  and work spots again on every change; hidden, the footprints are empty
+  rectangles, the lights dark, the parts out of `pinnable` (no seat in a
+  hidden sofa). `propUnlift` and `regsBack` put all of it back.
+- **Scopes** (`patchScope`, `patchScopes`): `"8"` (deck 8's rooms and the
+  ship's, at boot: `patchLive` as before), `"room:<deck>/<name>"` for a
+  generated room (the wings' and every other deck's: `patchRoomUp` from
+  `buildRoom` once the cell's `placed` promise settles, `patchRoomDown`
+  from `unbuildRoom` before `dropCell`; the patch's `own` is the room's,
+  so its ticks go with `disown` too), `"deck:<n>"` for another deck's
+  streets (`buildDeck`, `unloadDeck`). Each scope is its own list, so a
+  room built applies only its own and nothing else is undone; a room
+  dropped while its patch runs has what applied undone at once.
+- **The verbs** (API v2; a v1 patch runs as it did): `.material(name |
+  fields)` and `.mat()` on an object, `deck.dress(room).clear() / .add() /
+  .count()` (the dressing hidden by a flag `tickDressing` honours),
+  `deck.tick(fn)` (in `tickers`, stopped if it throws), `deck.sky(id)`
+  (`applySky` and back), `deck.fog(hex, k)` (one `FogExp2`, its density
+  eased per room in the frame loop, `tickFog`), `deck.materials()`.
+- **The inventory**: `lcarsDeckSees({library: true})`, which the console
+  asks on the first message in a room, adds "Everything named in <room>":
+  each placement, prop and patch object, at x z from the room's middle,
+  its size; the room's dressing count; the ship's materials.
+- **Tests**: deckboot.js (the verbs applied and undone to the deck's
+  arrays, a tick that throws stopped, a wing room's patch applied with
+  its room, gone with it, the same when built again); test/architect.py
+  (a wing lab walked into: its chair named, the inventory, a patch to it
+  kept while the room is down, applied when walked into - the chair
+  lifted and hidden, its footprint gone, a round stool in its material,
+  two calls - undone when walked away, replayed after a reload, the
+  footprint back as built when switched off). Ten Forward's table: its
+  footprint moves with it.
+- **Measured** (deckshots, the wing lab on graphics low, one patch
+  turning its chair into a round stool): the view facing it 68 -> 69
+  calls, 290,876 -> 290,948 triangles; the other three views the same
+  within the crew's movement. perf.py untouched (the console; the deck
+  applies no patch there).
+- Left: see TODO.md, "The architect, the rest".
+
 ### Phase 3: baking and management
 
 - The list in the sheet and the console (switch, delete, restore, the
@@ -756,7 +820,7 @@ Each with a recommendation.
     crew conversation fill it. *Recommend* leave it; raise to 3 only if the
     captain meets the 429.
 
-## 9. The deck API, v1 (the reference the brief will carry)
+## 9. The deck API, v2 (the reference the brief will carry)
 
 This block is `DECK_API_DOC` in deck.html, line for line; deckboot.js
 fails when the two differ, so change both together.
@@ -764,14 +828,21 @@ fails when the two differ, so change both together.
 ```
 deck.room(name?)          the room (default: where the captain is); .name, .label, .box, .point(u, v, y?) in 0..1 of its floor,
                           .at(x, z, y?) in metres from its middle (x to starboard, z aft), .objects(), .lights()
-deck.obj(name)            a named object (a placement, a patch's own); throws if it is not in the ship as built
+deck.obj(name)            a named object (a model placement, a code-built prop, a patch's own); throws if it is not built
   .move([dx,dy,dz]) .moveTo([x,y,z]) .turn(deg) .scale(k|[x,y,z]) .tint("#rrggbb", k?) .hide() .show() .at() .size()
-  (each lifts a merged placement into a mesh of its own, and records its undo)
+  .material("brass" | {color, emissive, emissiveIntensity, roughness, metalness, opacity})   its own copy, nothing else changes
+  .mat()                  the material it is drawn in, for a new part of it in the same
+  (each lifts a merged object into a mesh of its own, its footprint, seats and lights moving with it, and records its undo)
 deck.model(glb, prop, {at, rot, scale})   a library model (a promise of it), added by deck.add
 deck.add(name, object3d) owned by the patch, named "<patch>/<name>", dynamic; a promise of one is awaited
 deck.light(name)          a light, or a room's every light: .color("#rrggbb") .intensity(k) .range(m) .warm(k) .cool(k)
 deck.fill(room)           the room's fill light: .level(k) .warm(k)
+deck.dress(room?)         the room's dressing (small things): .clear() hides it all, .add(name, object3d) adds to it, .count()
+deck.tick(fn)             fn(t, dt) every frame while the patch is on (seconds): animation; one that throws is stopped
+deck.sky(id?)             what the windows show: "home" | "nebula" | "ocean" | "galaxy" | "binary"; no id: the list
+deck.fog("#rrggbb", k?)   a haze in the patch's room (k 0..0.5, 0.04 light), eased in as the captain walks in
 deck.library()            the loaded glbs and their props: {glb: [{prop, size: [w, h, d]}]}
+deck.materials()          the ship's materials by name, for .material(name)
 deck.onUndo(fn)           for anything raw the API cannot see
 deck.three, deck.scene    three.js and the scene, when no verb does it
 deck.gfx                  "high" | "medium" | "low"

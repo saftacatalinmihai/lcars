@@ -38,6 +38,16 @@ its footprint) it keeps:
   lounge.py had them for the cabins.
 Every cabin's furniture in this one atlas: one draw call for all of it,
 where the code-built pieces were a call per material.
+
+The sofa and the double bed are generated (deck-remodel.md slice 9, on the
+captain's word 2026-10-30): Tripo H3.1 multiview through gen.py, fitted by
+fit.py to the boxes above (the sofa 2.3 x 0.86 x 0.84, the bed 1.6 x 2.16
+x 0.95 with its headboard), kept in the media store and passed by build.sh
+(`generated()`); the narrow bed is the double's copy at 1.2 across. With
+no folder (the public repo, a box without the NAS) the scripted ones below
+are built, as before.
+
+    blender -b --factory-startup -P scripts/deck-models/quarters.py -- OUT_DIR [GENERATED_DIR]
 """
 import math
 import os
@@ -225,12 +235,50 @@ def lamp(name, h, shade_r, floor):
     return C.smooth(C.join(name, parts), 35)
 
 
+# The generated sofa and double bed (gen.py, fit.py: deck-remodel.md slice
+# 9, on the captain's word 2026-10-30), each already fitted to its
+# stand-in's box; Tripo's face_limit 2400 keeps them under the 3 k budget.
+GEN_BUDGETS = {"quarters_sofa": 3000, "quarters_bed": 3000}
+
+
+def generated(src):
+    """{prop: low}, {low: original} and the licence files of the props in
+    build.sh's folder, as bridge.py's chairs; the narrow bed, when the double
+    is generated, is its copy at 1.2 of 1.6 across (both copies, so the bake's
+    rays still meet)."""
+    lic = C.pack_licences(src)
+    lows, sources = C.import_pack(src, "quarters", budgets=GEN_BUDGETS)
+    got = {lo.name: lo for lo in lows}
+    if "quarters_bed" in got:
+        lo, hi = got["quarters_bed"], sources[got["quarters_bed"]]
+        nlo, nhi = lo.copy(), hi.copy()
+        nlo.data, nhi.data = lo.data.copy(), hi.data.copy()
+        C.link(nlo)
+        C.link(nhi)
+        nlo.name = nlo.data.name = "quarters_bed_narrow"
+        nhi.name = "quarters_bed_narrow__src"
+        for o in (nlo, nhi):
+            for v in o.data.vertices:
+                v.co.x *= 1.2 / 1.6
+        got["quarters_bed_narrow"] = nlo
+        sources[nlo] = nhi
+    return got, sources, lic
+
+
+out, args = C.out_dir()
 C.clean_scene()
-props = C.finish_props([
-    bed("quarters_bed", 1.6), bed("quarters_bed_narrow", 1.2),
-    sofa("quarters_sofa", 2.3, 0.17), sofa("quarters_armchair", 0.95, 0.15),
+# build.sh passes the generated props' folder when it has them; one not in it
+# (the public repo, a box without the NAS) is the scripted one, as before
+gen, sources, lic = generated(args[0]) if args else ({}, None, None)
+made = C.finish_props([p for p in [
+    None if "quarters_bed" in gen else bed("quarters_bed", 1.6),
+    None if "quarters_bed_narrow" in gen else bed("quarters_bed_narrow", 1.2),
+    None if "quarters_sofa" in gen else sofa("quarters_sofa", 2.3, 0.17), sofa("quarters_armchair", 0.95, 0.15),
     nightstand(), coffee_table(), side_table(), credenza(), desk(), desk_chair(),
     lamp("quarters_table_lamp", 0.34, 0.11, False), lamp("quarters_floor_lamp", 1.45, 0.2, True),
     C.wardrobe("quarters_wardrobe"),
-    C.padd_shelf("quarters_padd_shelf_a", C.shelf_books("a")), C.padd_shelf("quarters_padd_shelf_b", C.shelf_books("b"))])
-C.finish_room("quarters", props, size=1024)
+    C.padd_shelf("quarters_padd_shelf_a", C.shelf_books("a")), C.padd_shelf("quarters_padd_shelf_b", C.shelf_books("b"))] if p])
+props = list(gen.values()) + made
+C.finish_room("quarters", props, size=1024, sources=sources)
+if lic:
+    C.write_licences(lic, os.path.join(out, "quarters.LICENSE.txt"))

@@ -47,19 +47,26 @@ The rules:
 - A room with more than about ten lifted objects is getting heavy (one draw call each): say that its patches could be
   baked into the ship by an engineer.
 
-The deck API, v1 (the reference; `deck` is bound to your patch, so everything it adds or changes is undone with it):
+The deck API, v2 (the reference; `deck` is bound to your patch, so everything it adds or changes is undone with it):
 
 ```
 deck.room(name?)          the room (default: where the captain is); .name, .label, .box, .point(u, v, y?) in 0..1 of its floor,
                           .at(x, z, y?) in metres from its middle (x to starboard, z aft), .objects(), .lights()
-deck.obj(name)            a named object (a placement, a patch's own); throws if it is not in the ship as built
+deck.obj(name)            a named object (a model placement, a code-built prop, a patch's own); throws if it is not built
   .move([dx,dy,dz]) .moveTo([x,y,z]) .turn(deg) .scale(k|[x,y,z]) .tint("#rrggbb", k?) .hide() .show() .at() .size()
-  (each lifts a merged placement into a mesh of its own, and records its undo)
+  .material("brass" | {color, emissive, emissiveIntensity, roughness, metalness, opacity})   its own copy, nothing else changes
+  .mat()                  the material it is drawn in, for a new part of it in the same
+  (each lifts a merged object into a mesh of its own, its footprint, seats and lights moving with it, and records its undo)
 deck.model(glb, prop, {at, rot, scale})   a library model (a promise of it), added by deck.add
 deck.add(name, object3d) owned by the patch, named "<patch>/<name>", dynamic; a promise of one is awaited
 deck.light(name)          a light, or a room's every light: .color("#rrggbb") .intensity(k) .range(m) .warm(k) .cool(k)
 deck.fill(room)           the room's fill light: .level(k) .warm(k)
+deck.dress(room?)         the room's dressing (small things): .clear() hides it all, .add(name, object3d) adds to it, .count()
+deck.tick(fn)             fn(t, dt) every frame while the patch is on (seconds): animation; one that throws is stopped
+deck.sky(id?)             what the windows show: "home" | "nebula" | "ocean" | "galaxy" | "binary"; no id: the list
+deck.fog("#rrggbb", k?)   a haze in the patch's room (k 0..0.5, 0.04 light), eased in as the captain walks in
 deck.library()            the loaded glbs and their props: {glb: [{prop, size: [w, h, d]}]}
+deck.materials()          the ship's materials by name, for .material(name)
 deck.onUndo(fn)           for anything raw the API cannot see
 deck.three, deck.scene    three.js and the scene, when no verb does it
 deck.gfx                  "high" | "medium" | "low"

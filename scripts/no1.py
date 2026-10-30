@@ -64,6 +64,17 @@
                                                 again; recorded as a crew_fix entry in your name
     no1.py steward new kind=K [title=T] [start=..] [end=..] [TEXT... | --file F | -]
                                                 a new entry of the captain's, its id printed, recorded the same
+    no1.py api METHOD PATH [--file F | -]       any route of the server as the captain's own login
+                                                (GET /theme, PUT /kinds/roles, POST /say, ...): the
+                                                answer printed with its status; the body from F or
+                                                stdin, JSON if it parses, else text/plain. GET and
+                                                HEAD free; every other method logged as a no1_log
+                                                line (method, path, status). Refused: /vault (the
+                                                Secret entries' keys) and /engineer/ (crew verbs)
+    no1.py rm [-r] PATH...                      removed for good, only under /tmp and your research
+                                                folder (each path resolved first; one outside it and
+                                                nothing is removed). Anything else: mv it to
+                                                ~/.local/share/no1-trash
     no1.py sync                                 your worktree (eng/number-one) fast-forwarded to the
                                                 live branch, so the files you read are what is live;
                                                 refused if it has changes or commits of its own.
@@ -71,7 +82,9 @@
 
 Number One is an engineer session (engineer.py's NO1, started with
 brief_no1 and no1_settings), whose permissions allow this script and
-nothing that edits. So this file is the whole of what it can do:
+the ordinary shell tools, and writes under the home folder, with the
+danger zones denied (no1_settings in engineer.py: the lists, and why).
+This file is still the whole of what it does to the crew and the journal:
 
 - The crew verbs are engineer.py's. One rule is held here, not left to the
   brief: no more than NO1_MAX_CREW are on duty when one is started (they
@@ -84,14 +97,23 @@ nothing that edits. So this file is the whole of what it can do:
   crew's), which the server lets write only kinds no1_* and task_no1
   (lcars_logins.h). The
   captain's own credentials are never handed to lcars-cli from here.
+- `api` is the one door with the captain's own login (journal_api.py, the
+  login report.py writes with), for the routes lcars-cli has no verb for.
+  Each write is recorded as a no1_log line, written with Number One's own
+  login, so the captain reads in one place what was done with that login.
+  Deletes on the server are soft (HandleDeleteEntry, HandleMediaDelete):
+  nothing this verb can send removes a row for good.
 """
 
+import base64
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -99,6 +121,7 @@ sys.path.insert(0, HERE)
 sys.dont_write_bytecode = True
 import engineer as E  # noqa: E402 - the same state and names
 import report as R  # noqa: E402 - hosted reports, in the media store
+import journal_api as J  # noqa: E402 - the captain's own login, for `api`
 import crew_tool as T  # noqa: E402 - the journal's HTTP, with Number One's login
 
 LOG_KIND = "no1_log"
@@ -239,6 +262,150 @@ def thread(a):
     if isinstance(j, dict):
         j["use"] = f"no1.py room {op} ...: thread is the old name, going in the next release"
     return code, j
+
+
+# ---- any route, as the captain (`api`) ---------------------------------------
+
+API_METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+API_READS = {"GET", "HEAD"}
+# Not through this door, whatever the method: the vault holds the wraps of
+# the Secret entries' key (docs/design/confidential-entries.md), and a write
+# there could lock the captain out of them for good; the engineer routes
+# are the crew's, through `crew` (deploys reviewed, logged by engineer.py).
+API_REFUSED = ("/vault", "/engineer/")
+API_BODY_MAX = 512 * 1024  # lcars_http.h's cap on a request body
+
+
+def api_refusal(method, path):
+    """Why METHOD PATH is not sent, or None."""
+    if method not in API_METHODS:
+        return f"api METHOD PATH: METHOD one of {', '.join(sorted(API_METHODS))}"
+    # a path on this server, never a URL: the login must not go elsewhere
+    if not path.startswith("/") or path.startswith("//") or "://" in path or any(c in path for c in " \r\n"):
+        return f"api: PATH starts with / and is on this server ({path!r})"
+    bare = path.split("?", 1)[0].rstrip("/")
+    for r in API_REFUSED:
+        if bare == r.rstrip("/") or bare.startswith(r.rstrip("/") + "/"):
+            return f"api: {r} is not reached from here" + (" (no1.py crew ...)" if r == "/engineer/" else
+                                                          " (the Secret entries' keys: the captain's, in the console)")
+    return None
+
+
+def api_send(method, path, data, ctype, timeout=120):
+    """(status, text) of METHOD PATH as the captain's login; status 0 when
+    the server did not answer."""
+    url, user, pw = J.journal_login()
+    headers = {"Authorization": "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()} if user else {}
+    if data is not None:
+        headers["Content-Type"] = ctype
+    req = urllib.request.Request(url + path, method=method, data=data, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError) as e:
+        return 0, json.dumps({"error": f"{url}: {e}"})
+
+
+def api(a):
+    """no1.py api METHOD PATH [--file F | -]: the answer, and for a write
+    its no1_log line (Number One's login) - written after the call, since
+    the status is what it records; a failed log is said in the answer."""
+    body_from = None
+    if "--file" in a:
+        i = a.index("--file")
+        if i + 1 >= len(a):
+            die("api METHOD PATH --file F|-")
+        body_from, a = a[i + 1], a[:i] + a[i + 2:]
+    elif len(a) == 3 and a[2] == "-":
+        body_from, a = "-", a[:2]
+    if len(a) != 2:
+        die("api METHOD PATH [--file F | -]")
+    method, path = a[0].upper(), a[1]
+    why = api_refusal(method, path)
+    if why:
+        die(why, 4)
+    data = ctype = None
+    if body_from is not None:
+        if method in API_READS:
+            die(f"api: {method} takes no body")
+        try:
+            if body_from == "-":
+                data = sys.stdin.buffer.read(API_BODY_MAX + 1)
+            else:
+                with open(body_from, "rb") as f:
+                    data = f.read(API_BODY_MAX + 1)
+        except OSError as e:
+            die(f"api --file: {e}")
+        if len(data) > API_BODY_MAX:
+            die(f"api: the body is over {API_BODY_MAX} bytes (the server's cap)")
+        try:
+            json.loads(data)
+            ctype = "application/json"
+        except ValueError:
+            ctype = "text/plain; charset=utf-8"
+    status, text = api_send(method, path, data, ctype)
+    code, j = answer(status, text)
+    out = {"status": status, "answer": j}
+    if method not in API_READS:
+        line = f"api {method} {path} -> {status or 'no answer'}"
+        ls, lt = http("POST", "/entries", {"kind": LOG_KIND, "title": line[:200],
+                                           "content": f"{line}\n\nAs the captain's login, by Number One"
+                                                      + (f"; a {len(data)}-byte {ctype} body" if data is not None else "")})
+        if 200 <= ls < 300:
+            try:
+                out["logged"] = json.loads(lt).get("id")
+            except (ValueError, AttributeError):
+                out["logged"] = True
+        else:
+            out["log_error"] = f"the call was made, but its no1_log line failed: {ls} {lt[:200]}"
+            code = 1
+    return code, out
+
+
+# ---- rm, where it cannot hurt (`rm`) ------------------------------------------
+
+def rm_roots():
+    """Where `no1.py rm` removes: /tmp, and Number One's research folder."""
+    return ["/tmp", os.path.realpath(E.research_dir(E.NO1))]
+
+
+def rm_refusal(path, recursive):
+    """Why path is not removed, or None. The path is resolved as rm would
+    reach it - ~ expanded, relative to here, every directory above it
+    through its symlinks, the last part not followed (rm removes a link,
+    not what it points at) - and must be strictly inside a root."""
+    full = os.path.abspath(os.path.expanduser(path))
+    real = os.path.join(os.path.realpath(os.path.dirname(full)), os.path.basename(full))
+    if not os.path.lexists(real):
+        return f"{path}: no such file"
+    if not any(real.startswith(r.rstrip("/") + "/") for r in rm_roots()):
+        return (f"{path}: rm only under {' and '.join(rm_roots())} ({real}); "
+                f"anything else is moved, never removed: mv it to {E.NO1_TRASH}")
+    if os.path.isdir(real) and not os.path.islink(real) and not recursive:
+        return f"{path}: a directory (rm -r)"
+    return None
+
+
+def rm(a):
+    recursive = bool(a) and a[0] in ("-r", "-rf", "-R")
+    paths = a[1:] if recursive else a
+    if not paths or any(p.startswith("-") for p in paths):
+        die("rm [-r] PATH...")
+    why = [w for w in (rm_refusal(p, recursive) for p in paths) if w]
+    if why:
+        die("; ".join(why), 4)  # all or nothing: none removed
+    gone = []
+    for p in paths:
+        full = os.path.abspath(os.path.expanduser(p))
+        real = os.path.join(os.path.realpath(os.path.dirname(full)), os.path.basename(full))
+        if os.path.isdir(real) and not os.path.islink(real):
+            shutil.rmtree(real)
+        else:
+            os.unlink(real)
+        gone.append(real)
+    return 0, {"removed": gone}
 
 
 # ---- the journal, as Number One ---------------------------------------------
@@ -456,6 +623,10 @@ def main(a):
         # its own process reads the logins; its answer is printed by it
         env = dict(os.environ, LCARS_STEWARD_WHO=E.NO1)
         code, j = subprocess.run([sys.executable, os.path.join(HERE, "steward.py"), *rest], env=env).returncode, None
+    elif cmd == "rm":
+        code, j = rm(rest)
+    elif cmd == "api":
+        code, j = api(rest)
     elif cmd == "sync":
         try:
             code, j = 0, E.sync_no1()

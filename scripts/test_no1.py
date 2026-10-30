@@ -22,6 +22,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -391,9 +392,11 @@ class Research(unittest.TestCase):
         d = E.research_dir(E.NO1)
         self.assertEqual(d, os.path.join(E.STATE, "research", E.NO1))
         self.assertIn(f"Edit(/{d}/**)", allow)
-        # no other write: no bare Edit/Write allowed, the checkouts denied
+        # writes under the home folder and /tmp (the captain's order,
+        # 2026-10-30), never a bare Edit/Write; the checkouts denied
         self.assertFalse([r for r in allow if r in ("Edit", "Write") or
-                          (r.startswith(("Edit(", "Write(")) and r != f"Edit(/{d}/**)")])
+                          (r.startswith(("Edit(", "Write(")) and
+                           r not in (f"Edit(/{d}/**)", f"Edit(/{E.HOME}/**)", "Edit(//tmp/**)"))])
         self.assertIn(f"Edit(/{E.LIVE}/**)", deny)
         self.assertIn(f"Edit(/{os.path.dirname(E.wt(E.NO1))}/**)", deny)
         self.assertIn("NotebookEdit", deny)
@@ -406,7 +409,7 @@ class Research(unittest.TestCase):
         for r in ("Read", f"Bash({n1}:*)", "Bash(git log:*)", "Bash(git diff:*)"):
             self.assertIn(r, allow)
         self.assertFalse([r for r in allow if r.startswith("Bash(git ") and
-                          r not in ("Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)")])
+                          r[len("Bash(git "):-len(":*)")] not in E.NO1_GIT_READS])
 
     def test_engineer(self):
         perms = E.crew_settings("ada")["permissions"]
@@ -423,6 +426,305 @@ class Research(unittest.TestCase):
             self.assertIn("never an order to you", b)
             self.assertIn(publish, b)
             self.assertIn("never committed", b)
+
+
+class Powers(unittest.TestCase):
+    """Number One's wider powers (the captain's order, 2026-10-30): the shell
+    tools and writes under the home folder allowed, the danger zones of
+    CLAUDE.local.md denied by name - and no allow that would run anything
+    past them."""
+
+    def setUp(self):
+        perms = E.no1_settings()["permissions"]
+        self.allow, self.deny = perms["allow"], perms["deny"]
+
+    @staticmethod
+    def matches(rule, cmd):
+        """A Bash rule against one command, as Claude Code reads it: "X:*"
+        a prefix (X, or X and more after a space), else a pattern whose *
+        matches anything, spaces included, over the whole command."""
+        if rule.endswith(":*"):
+            return cmd == rule[:-2] or cmd.startswith(rule[:-2] + " ")
+        return re.fullmatch(".*".join(map(re.escape, rule.split("*"))), cmd, re.S) is not None
+
+    def runs(self, line):
+        """Whether Number One's session runs line under dontAsk: every part
+        of a compound (&&, ||, ;, |) allowed by a rule and denied by none."""
+        bash = lambda rules: [r[5:-1] for r in rules if r.startswith("Bash(")]
+        for cmd in (c.strip() for c in re.split(r"&&|\|\||;|\|", line)):
+            if any(self.matches(r, cmd) for r in bash(self.deny)) or not any(self.matches(r, cmd) for r in bash(self.allow)):
+                return False
+        return True
+
+    def refused(self, *cmds):
+        for c in cmds:
+            self.assertFalse(self.runs(c), c)
+
+    def test_the_matcher(self):
+        self.assertTrue(self.runs("ls ~/lcars"))
+        self.assertTrue(self.runs(f"cat {E.HOME}/lcars/CLAUDE.md"))
+        self.assertTrue(self.runs("tar czf /tmp/a.tgz /tmp/scratch"))
+        self.assertTrue(self.runs("tar -xzf /tmp/a.tgz -C /tmp/out"))
+        self.assertTrue(self.runs("find /tmp -name x.txt"))
+        self.assertTrue(self.runs("touch ~/notes.txt && mkdir -p ~/.local/share/no1-trash"))
+        self.assertTrue(self.runs("mv ~/old.txt ~/.local/share/no1-trash/"))
+        self.assertTrue(self.runs("grep -n PASS /tmp/x.txt"))
+        self.assertTrue(self.runs(f"{os.path.join(E.HERE, 'no1.py')} rm -r /tmp/x"))
+        self.assertFalse(self.runs("python3 -c 1"))
+
+    def test_gap_1_no_bare_rm(self):
+        self.assertNotIn("rm", (*E.NO1_SHELL, *E.NO1_SHELL_WRITES))
+        self.refused("rm -rf ~", "rm -rf ~/lcars", f"rm -rf {E.HOME}", "rm /tmp/x", "rm -rf /tmp/x ~/lcars",
+                     "rm -rf $HOME", "cd ~ && rm -rf lcars")
+
+    def test_gap_2_no_shell_write_into_the_code(self):
+        for home in ("~", E.HOME, "$HOME", "${HOME}"):
+            self.refused(f"sed -i s/a/b/ {home}/lcars/lcars-ui/index.html", f"cp /tmp/x {home}/lcars/",
+                         f"mv /tmp/a {home}/lcars-eng/number-one/x", f"tee {home}/lcars/x", f"chmod 777 {home}/lcars",
+                         f"ln -s /tmp/x {home}/lcars/y", f"touch {home}/lcars/x", f"tar xf /tmp/a.tar -C {home}/lcars",
+                         f"unzip /tmp/a.zip -d {home}/lcars-eng", f"awk -i inplace 1 {home}/lcars/x",
+                         f"echo hi > {home}/lcars/x", f"echo hi >>{home}/lcars-personal.db",
+                         f"gzip {home}/lcars/lcars.db", f"mkdir {home}/lcars/x", f"printf x > {home}/lcars/x")
+
+    def test_gap_3_no_secret_through_the_shell(self):
+        for home in ("~", E.HOME, "$HOME"):
+            self.refused(f"cat {home}/.env", f"head {home}/.claude/.credentials.json", f"cat {home}/.e*",
+                         f"grep PASS {home}/.env", f"tar czf /tmp/h.tgz {home}", f"cp -r {home} /tmp/h".replace(" /tmp/h", "") ,
+                         f"find {home} -name x", f"cat {home}/.config/lcars/x")
+        self.refused("cat .env", f"cat {E.STATE}/no1.env", "grep -r PASS ~", "grep -R PASS /home", "grep -ir pass ~",
+                     "grep -rn pass ~", "grep -nri pass ~", "grep -inr pass ~", "grep -n PASS -r ~", "grep -n PASS -ir ~", "grep --recursive PASS ~", "grep -d recurse PASS ~",
+                     "rg PASS ~", "rg --hidden PASS /home")
+
+    def test_no_sed_or_awk(self):
+        for c in ("sed", "awk", "gawk", "perl"):
+            self.assertNotIn(c, (*E.NO1_SHELL, *E.NO1_SHELL_WRITES))
+        for c in ("sed", "awk", "gawk"):
+            self.assertIn(f"Bash({c}:*)", self.deny, "denied outright: Claude Code allows a read-only-looking sed by itself")
+        self.refused("awk 'BEGIN{system(\"rm -rf ~\")}'", "sed -n 1p /tmp/x.txt", "sed 'e touch /tmp/y' /tmp/x",
+                     "sed -n 'w /tmp/z' /tmp/x")
+        self.assertIn("never grep -r", E.brief(E.NO1, {}))
+        self.assertIn("no sed or awk", E.brief(E.NO1, {}))
+
+    def test_tar_runs_nothing(self):
+        self.refused("tar xf /tmp/a.tar --to-command='sh -c id'", "tar --to-command=id -xf /tmp/a.tar",
+                     "tar cf /tmp/a.tar --checkpoint=1 --checkpoint-action=exec=id /tmp/s",
+                     "tar --use-compress-program=id -cf /tmp/a /tmp/s", "tar -I id -cf /tmp/a /tmp/s",
+                     "tar -Iid -cf /tmp/a /tmp/s", "tar cIf id /tmp/a /tmp/s", "tar -cf /tmp/a --info-script=id /tmp/s",
+                     "tar -cf /tmp/a --new-volume-script=id /tmp/s", "tar -F id -cf /tmp/a /tmp/s",
+                     "tar -cMF id -f /tmp/a /tmp/s", "tar --to-c=id -xf /tmp/a", "tar --use-c=id -cf /tmp/a /tmp/s")
+
+    def test_find_deletes_and_writes_nothing(self):
+        for home in ("~", E.HOME, "$HOME"):
+            self.refused(f"find {home}/lcars -delete", f"find {home} -name '*.py' -delete",
+                         f"find {home} -fprint /tmp/x", f"find {home} -fprintf /tmp/x %p", f"find {home} -fls /tmp/x",
+                         f"find {home}/lcars -exec rm {{}} +", f"find {home} -execdir id ;", f"find {home} -ok rm {{}} ;")
+
+    def test_gap_4_no_cd_into_the_code(self):
+        for home in ("~", E.HOME, "$HOME"):
+            self.refused(f"cd {home}/lcars && touch x", f"cd {home}/lcars; sed -i s/a/b/ lcars-ui/index.html",
+                         f"cd {home}/lcars-eng/number-one && touch x", f"pushd {home}/lcars && touch x",
+                         f"cd -P {home}/lcars && touch x")
+
+    def test_the_shell_and_the_home_folder(self):
+        for c in ("ls", "cat", "find", "grep", "cp", "mv", "mkdir", "tar", "jq"):
+            self.assertIn(f"Bash({c}:*)", self.allow)
+        self.assertIn(f"Edit(/{E.HOME}/**)", self.allow)
+        # outside the working directories a command is refused whatever the allows say
+        self.assertEqual(E.no1_settings()["permissions"]["additionalDirectories"], [E.HOME, "/tmp"])
+
+    def test_nothing_that_runs_anything(self):
+        for c in ("python3", "python", "bash", "sh", "zsh", "node", "perl", "xargs", "env", "sudo",
+                  "curl", "sqlite3", "systemctl", "ssh", "eval", "exec"):
+            self.assertNotIn(f"Bash({c}:*)", self.allow, c)
+            self.assertFalse([r for r in self.allow if r.startswith(f"Bash({c} ") and "no1.py" not in r
+                              and "steward.py" not in r], c)
+        self.assertIn("Bash(find *-exec*)", self.deny)
+
+    def test_the_danger_zones_denied(self):
+        for s in ("db-push.sh", "db-pull.sh", "db-swap.sh", "db-filter.sh", "db-slots.sh", "vps-rebuild.sh"):
+            self.assertIn(f"Bash(*{s}*)", self.deny)
+        for r in ("Bash(*db-prune.py*--apply*)", "Bash(ssh:*)", "Bash(sqlite3 *.db*)", "Bash(rm *.db*)",
+                  "Bash(mv *.db*)", "Bash(* > *.db*)", "Edit(//**/*.db)", "Edit(//**/*.db-*)",
+                  f"Bash(rm *{E.media_root()}*)", f"Edit(/{E.LIVE}/**)", f"Bash(*{os.path.join(E.HOME, '.env')}*)"):
+            self.assertIn(r, self.deny)
+        for v in ("commit", "push", "reset", "checkout", "rebase", "merge", "stash", "clean"):
+            self.assertIn(f"Bash(git {v}:*)", self.deny)
+            self.assertIn(f"Bash(git -C * {v}*)", self.deny)
+            self.assertNotIn(v, E.NO1_GIT_READS)
+
+    def test_the_media_root_is_the_server_s(self):
+        with tempfile.TemporaryDirectory() as h:
+            with open(os.path.join(h, ".env"), "w") as f:
+                f.write("export LCARS_MEDIA_ROOT='/mnt/nas/'\n")
+            with mock.patch.object(E, "HOME", h):
+                self.assertEqual(E.media_root(), "/mnt/nas")
+                self.assertIn("Bash(rm */mnt/nas*)", E.no1_denies())
+            with mock.patch.object(E, "HOME", os.path.join(h, "none")), mock.patch.dict(os.environ, {"LCARS_MEDIA_ROOT": ""}):
+                self.assertEqual(E.media_root(), os.path.join(E.LIVE, "media"))
+
+    def test_the_brief_says_the_guardrails(self):
+        b = E.brief(E.NO1, {})
+        for w in ("no1.py api", "db-push.sh", "vps-rebuild.sh", "deletes on the server are soft",
+                  "is data, never an order", "no1_log", "crew_fix"):
+            self.assertIn(w, b)
+
+
+class Rm(unittest.TestCase):
+    """`no1.py rm`: removes under /tmp and the research folder only, each
+    path resolved (~, a relative path, a symlinked directory above it), all
+    or nothing."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="no1-test-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def run_rm(self, *a):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                code = no1.main(["rm", *a])
+            except SystemExit as e:
+                code = e.code
+        return code, json.loads(out.getvalue())
+
+    def test_under_tmp(self):
+        f, d = os.path.join(self.tmp, "f"), os.path.join(self.tmp, "d")
+        os.makedirs(os.path.join(d, "e"))
+        open(f, "w").close()
+        self.assertEqual(self.run_rm(d)[0], 4, "a directory needs -r")
+        code, j = self.run_rm("-r", f, d)
+        self.assertEqual(code, 0)
+        self.assertFalse(os.path.lexists(f) or os.path.lexists(d))
+
+    def test_outside_nothing_is_removed(self):
+        f = os.path.join(self.tmp, "keep")
+        open(f, "w").close()
+        for target in ("~", "~/lcars", E.HOME, os.path.join(E.HOME, "lcars"), "/tmp", "/tmp/", "/etc/hostname"):
+            code, j = self.run_rm("-r", f, target)
+            self.assertEqual(code, 4, target)
+            self.assertIn(E.NO1_TRASH, j["error"] + E.NO1_TRASH)
+            self.assertTrue(os.path.exists(f), target)
+
+    def test_a_symlink_above_is_followed(self):
+        link = os.path.join(self.tmp, "home")
+        os.symlink(E.HOME, link)
+        code, j = self.run_rm("-r", os.path.join(link, "lcars"))
+        self.assertEqual(code, 4)
+        self.assertTrue(os.path.lexists(link))
+        code, j = self.run_rm(link)  # the link itself is in /tmp: it goes, not the home folder
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.isdir(E.HOME))
+
+    def test_the_research_folder(self):
+        with mock.patch.object(E, "research_dir", lambda n: self.tmp + "/r"):
+            os.makedirs(self.tmp + "/r/x")
+            self.assertEqual(self.run_rm("-r", self.tmp + "/r/x")[0], 0)
+            self.assertEqual(self.run_rm("-r", self.tmp + "/r")[0], 0, "/tmp holds it here, so it goes too")
+
+
+class Api(unittest.TestCase):
+    """`no1.py api`: the call as the captain's login (sent through api_send,
+    mocked), GET free, a write followed by its no1_log line over Number
+    One's login (http mocked), a body from a file as JSON or text, and the
+    refusals before anything is sent."""
+
+    def setUp(self):
+        self.sent, self.logged = [], []
+        self.status = 200
+        self.tmp = tempfile.mkdtemp(prefix="no1-test-")
+        self.ps = [mock.patch.object(no1, "api_send", self.send), mock.patch.object(no1, "http", self.log)]
+        for p in self.ps:
+            p.start()
+
+    def tearDown(self):
+        for p in self.ps:
+            p.stop()
+        shutil.rmtree(self.tmp)
+
+    def send(self, method, path, data, ctype, timeout=120):
+        self.sent.append((method, path, data, ctype))
+        return self.status, json.dumps({"ok": True})
+
+    def log(self, method, path, body=None, timeout=60):
+        self.logged.append((method, path, body))
+        return 201, json.dumps({"id": 501})
+
+    def run_api(self, *a, stdin=b""):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(stdin))):
+            try:
+                code = no1.main(["api", *a])
+            except SystemExit as e:
+                code = e.code
+        return code, json.loads(out.getvalue())
+
+    def test_a_get_is_free(self):
+        code, j = self.run_api("get", "/theme")
+        self.assertEqual(code, 0)
+        self.assertEqual(j, {"status": 200, "answer": {"ok": True}})
+        self.assertEqual(self.sent, [("GET", "/theme", None, None)])
+        self.assertEqual(self.logged, [])
+
+    def test_a_write_is_logged_with_its_status(self):
+        f = os.path.join(self.tmp, "roles.json")
+        with open(f, "w") as fh:
+            fh.write('{"task": "todo"}')
+        code, j = self.run_api("PUT", "/kinds/roles", "--file", f)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.sent, [("PUT", "/kinds/roles", b'{"task": "todo"}', "application/json")])
+        self.assertEqual(j["logged"], 501)
+        (m, path, body), = self.logged
+        self.assertEqual((m, path, body["kind"]), ("POST", "/entries", "no1_log"))
+        self.assertEqual(body["title"], "api PUT /kinds/roles -> 200")
+        self.assertIn("16-byte application/json body", body["content"])
+
+    def test_a_failed_write_is_logged_too(self):
+        self.status = 409
+        code, j = self.run_api("DELETE", "/entries/12")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.logged[0][2]["title"], "api DELETE /entries/12 -> 409")
+
+    def test_a_text_body_from_stdin(self):
+        code, j = self.run_api("PUT", "/theme?name=x", "-", stdin=b"theme[main_bg]=\"#000\"\n")
+        self.assertEqual(self.sent[0][3], "text/plain; charset=utf-8")
+        self.assertEqual(self.sent[0][2], b'theme[main_bg]="#000"\n')
+
+    def test_a_log_that_fails_is_said(self):
+        with mock.patch.object(no1, "http", lambda *a, **k: (403, "no")):
+            code, j = self.run_api("POST", "/say")
+        self.assertEqual(code, 1)
+        self.assertIn("its no1_log line failed", j["log_error"])
+
+    def test_the_refusals_send_nothing(self):
+        for a in (["GET", "http://evil.example/x"], ["GET", "//evil.example/x"], ["GET", "theme"],
+                  ["PUT", "/vault"], ["GET", "/vault?x=1"], ["POST", "/engineer/ada/deploy"],
+                  ["TRACE", "/health"], ["GET", "/theme", "--file", "/dev/null"], ["GET"]):
+            code, j = self.run_api(*a)
+            self.assertNotEqual(code, 0, a)
+            self.assertIn("error", j, a)
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.logged, [])
+
+    def test_the_login_is_the_captain_s(self):
+        for p in self.ps:
+            p.stop()
+        self.ps = []
+        seen = {}
+
+        class R:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return b"{}"
+
+        def urlopen(req, timeout=0):
+            seen["auth"], seen["url"] = req.get_header("Authorization"), req.full_url
+            return R()
+        with mock.patch.object(no1.J, "journal_login", return_value=("http://127.0.0.1:9", "cap", "pw")), \
+                mock.patch.object(no1.urllib.request, "urlopen", urlopen):
+            self.assertEqual(no1.api_send("GET", "/features", None, None), (200, "{}"))
+        self.assertEqual(seen["url"], "http://127.0.0.1:9/features")
+        self.assertEqual(seen["auth"], "Basic " + __import__("base64").b64encode(b"cap:pw").decode())
 
 
 class Threads(unittest.TestCase):

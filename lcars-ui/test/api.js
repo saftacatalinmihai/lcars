@@ -3,6 +3,10 @@
 var DB = JSON.parse(JSON.stringify(FIX));
 var DBLOG = [];
 var DUMP_ON = false;
+// The server's login (CheckHTTPAuth): on, a request with no Authorization
+// header is answered 401, as the real one answers the page (no challenge);
+// "deny", every request (a wrong password).
+var AUTH_ON = false;
 // The embeddings (the star chart). Off - a server too old to have them, 404 -
 // unless a test sets EMB to {model, dim, rows: [[id, base64, embedded_at]]};
 // EMB_CODE is the status an off server answers with, EMBQ(text) the base64
@@ -306,6 +310,9 @@ function fetch(url, init) {
     return Promise.resolve({ ok: tt !== undefined, status: tt !== undefined ? 200 : 404, statusText: "",
                              text: function () { return Promise.resolve(tt === undefined ? "" : tt); } });
   }
+  if (AUTH_ON === "deny" || (AUTH_ON && !(init && init.headers && init.headers.Authorization)))
+    return Promise.resolve({ ok: false, status: 401, statusText: "Unauthorized",
+      text: function () { return Promise.resolve('{"error":"Unauthorized","status":401}'); } });
   var res;
   try {
     res = route((init && init.method) || "GET", path, qs,

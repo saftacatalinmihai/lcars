@@ -57,6 +57,51 @@ deckshots' screenshots timed out behind the bake).
    test (a rebase once left conflict markers in it that every web test
    passed).
 
+## A generated prop (deck-remodel.md slice 9)
+
+Scripted first (the steps above); generated only to beat a scripted
+piece, soft and organic ones (upholstery, plants), on credits the captain
+has given. Its files live in the media store, never in git:
+`MEDIA/media/deck-models/<prop>/` holds `<prop>.glb` (fitted, what a build
+takes), `LICENSE.txt` and `raw/` (the prompts, the views, Tripo's
+`raw.glb`, `gen.json`: every job, its price and the credits it took).
+
+1. **Write `raw/prompts.txt`** (`gen.py`'s docstring has every key): the
+   road, the object and the palette by name and hex, a line per view.
+   The kit's lead (deck-remodel.md section 3 item 3) is put before each
+   view by `gen.py`. **Side views** must say what the frame shows, not
+   only "its left side at 90 degrees": Seedream shown the front and the
+   back made one "left" a second front and one "right" a second back
+   (2026-10-30, the sofa's first try), and Tripo fused the four into a
+   two-faced sofa with its cushions heaped in the middle (9 credits
+   lost). Name the end-on look ("only its 0.86 m depth across the frame,
+   the arm's outer face in the middle, the seat's front at the left") and
+   show the side the front alone (`left_refs: front`).
+2. **Price it:** `scripts/deck-models/gen.py <prop>` asks `higgsfield
+   generate cost` for each step with its real parameters (prices move
+   with them: H3.1 with `texture_quality detailed` is 12, not 9) and
+   stops. Nothing is spent.
+3. **Make it:** `gen.py <prop> --spend N`, N a hard cap. Run it detached
+   (`setsid nohup ... &`): a view takes 1-2 minutes, the 3D job 3-5, and
+   a run killed with its turn has paid for the job it was waiting on (the
+   next run fetches that job from `gen.json`'s `pending`, not paying
+   again). **Look at each view as it lands** and stop the run before the
+   3D job if one is wrong: a view re-rolled is 0.5, a 3D job 9.
+   `--redo <view>` makes it and every step after it again; copy the old
+   files aside first for the report.
+4. **Fit it:** `blender -b --factory-startup -P scripts/deck-models/fit.py
+   -- raw/raw.glb raw/fitted.glb --turn -90 --box W D H` (or `--height H`
+   for a plant; `--drop-islands 0.01` for Tripo's loose wisps). Tripo's
+   multiview puts the front at +X: `--turn -90` brings it to -Y. Look at
+   it (Blender's workbench, four sides) before going on.
+5. **Judge it in the deck.** Copy `raw/fitted.glb` to `<prop>.glb` (that
+   is what `build.sh`'s `generated()` copies to the cache and the room
+   script imports with `C.import_pack`); build the room, and deckshots
+   main beside the branch, close and at a phone's distance. Kept only if
+   it beats the scripted one by eye and fits the room's budgets; if not,
+   delete `<prop>.glb` (the raw files stay, for the record) and the
+   scripted one is built again.
+
 ## How it works
 
 **Blender side (`scripts/deck-models/`).**
@@ -1263,6 +1308,11 @@ also casts against the lying pads (a handful of meshes).
 - `scripts/deck-models/<room>.py` - a room's Blender script
 - `scripts/deck-models/common.py`, `pack.py`, `fetch_polyhaven.py`,
   `build.sh` - the shared helpers, the converter, the fetcher, the build
+- `scripts/deck-models/gen.py`, `fit.py` - the generated road: the views
+  and the 3D job on Higgsfield, priced first, and the fit in Blender
+  ("A generated prop", above); `scripts/test_gen.py` its test
+- `MEDIA/media/deck-models/<prop>/` - a generated prop's glb, licence and
+  raw files (the media store; `build.sh` copies the glb into the cache)
 - `scripts/deck-model-assets.mjs` - the cleaner
 - `lcars-ui/deck/<room>.glb`, `<room>_{base,norm,orm}.webp` - what the
   page loads (served statically, as `lcars-ui/crew/`); committed, so the

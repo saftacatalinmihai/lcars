@@ -7,7 +7,7 @@
 // both together (minor for a feature, patch for a fix) - test/run.sh fails
 // when they disagree. It stays in the file's first kilobyte: that is all the
 // update check reads of the server's copy (updFetchVersion, a ranged GET).
-const APP_VERSION = "0.347.2";
+const APP_VERSION = "0.350.3";
 </script>
 <script>
 /* ===================== csp =====================
@@ -6112,6 +6112,7 @@ function kindsTake(m, j) {
   kindMap.err = typeof c.error === "string" ? c.error : "";
 })();
 function kindsLoad(force) {
+  if (!cfg.user) return Promise.resolve(kindMap.map);   // no login yet: the defaults, asked at the first
   const key = cfg.base + "\n" + cfg.user + "\n" + cfg.pass;
   if (!force && kindMap.key === key) return kindMap.ask || Promise.resolve(kindMap.map);
   kindMap.key = key;
@@ -7498,6 +7499,7 @@ const clsCrypto = {
 /* ---------- the vault ---------- */
 async function clsVaultRead(force) {
   if (cls.vault !== undefined && !force) return cls.vault;
+  if (!cfg.user) return cls.vault;     // no login yet: asked once there is one
   try {
     const d = await apiNet("/vault");
     cls.vault = d && d.vault ? d.vault : null;
@@ -7913,6 +7915,7 @@ function clsRepaint() {
 /* ---------- the doors ---------- */
 function clsCfgHtml() {
   if (!clsCrypto.ok()) return `<div class="hint">Needs a secure page (https) with WebCrypto: not here.</div>`;
+  if (cls.vault === undefined && !cfg.user) return `<div class="hint">read from the server once connected.</div>`;
   if (cls.vault === undefined) {
     if (!cls.err) setTimeout(() => clsVaultRead(), 0);
     return `<div class="hint">${cls.err ? esc(cls.err) : "reading&hellip;"}</div>`;
@@ -9216,6 +9219,7 @@ function landBody(e, fresh) {
 
 let bodyRun = 0;          // bumped by every load, so a reload abandons the old backfill
 
+let loadToast = "";      // the failure loadAll last toasted, for its next success to take down
 async function loadAll() {
   featLoad();       // what the server can do: once per login (the server's features)
   kindsLoad();      // which kind each role is (the journal's mapping), the same way
@@ -9287,16 +9291,26 @@ async function loadAll() {
     got = first.length;
     if (first.length) pin = first[0].id;
     flush(true);                             // <-- the UI is usable from this point
+    // the server answered: an earlier load's "cannot reach" or "refused" is
+    // no longer true, and must not stand over the journal for its 5 seconds
+    if (loadToast && toast._cur && toast._cur.msg === loadToast) hideToast();
+    loadToast = "";
     stats = await statsP;
   } catch (e) {
     st.loading = false;
-    $("#hstat").innerHTML =
+    // A 401 is the server answering: the login is wrong, not the link. It
+    // says so, and the dialog (below) is where it is put right.
+    const refused = e.http === 401;
+    $("#hstat").innerHTML = refused ? `<span class="cap bad">login refused</span>` :
       `<span class="cap bad">offline</span> <button class="mini" id="hRetry">Retry</button>`;
-    $("#hRetry").onclick = () => loadAll();
+    if (!refused) $("#hRetry").onclick = () => loadAll();
     // Rows from an earlier successful load are still on screen and still true;
     // only an empty list gets replaced by the offline panel.
-    if (!st.all.length) showOffline(e);
-    toast("cannot reach " + cfg.base + " — " + e.message, true);
+    if (!st.all.length && !refused) showOffline(e);
+    // kept, so a load that then works takes it down at once (loadToast below)
+    loadToast = refused ? cfg.base + " refused the login for " + cfg.user
+                        : "cannot reach " + cfg.base + " — " + e.message;
+    toast(loadToast, true);
     // A missing or rejected credential is a config problem worth a dialog.
     // Anything else is more likely the host being down, and the dialog would
     // only cover the Retry button.
@@ -50979,6 +50993,9 @@ function featParse(j) {
 }
 function featLoad(force) {
   if (DEMO) return Promise.resolve(null);
+  // no login yet: nothing to ask with (a 401 would read "refused"), and the
+  // key left unset so the first login asks
+  if (!cfg.user) { feat.key = ""; feat.map = null; feat.err = "no login yet"; return Promise.resolve(null); }
   const key = cfg.base + "\n" + cfg.user + "\n" + cfg.pass;
   if (!force && feat.key === key) return feat.ask || Promise.resolve(feat.map);
   feat.key = key;
@@ -51241,7 +51258,17 @@ const bootPage = parseRel(curRel());
 st.wantSel = applyQS(bootPage.qs || lsGetStr("lcars.filters") || "");
 if (bootPage.v === "entry") st.wantSel = Number(bootPage.a[0]) > 0 ? Number(bootPage.a[0]) : null;
 bootRoute = { v: bootPage.v, a: bootPage.a };
-if (!cfg.user && !WEB) {
+bootGo();
+stackPaint();     // whatever the tab was holding when it was last shut
+idleArm();
+// The first open with no login stored goes straight to the Connection dialog
+// and asks the server nothing: every route the load reads answers a page with
+// no Authorization a 401 (the server never challenges X-LCARS-Client, see
+// CheckHTTPAuth), so served from the server (WEB) or a file alike there was
+// only ever a "cannot reach" toast to be had before the dialog. Connect then
+// runs the load. A function so the behaviour suite can open the page afresh.
+function bootGo() {
+if (!cfg.user) {
   openCfg();
 } else {
   // With a mirror, the journal is on screen from local storage and one small
@@ -51260,8 +51287,7 @@ if (!cfg.user && !WEB) {
   // and before anything else can push a dialog in front of it.
   shareTarget();
 }
-stackPaint();     // whatever the tab was holding when it was last shut
-idleArm();
+}
 
 /* ===================== the public demo =====================
    (DEMO, "config / api"; docs/design/demo-static.md) A strip above the header

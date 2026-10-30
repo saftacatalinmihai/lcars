@@ -45,16 +45,32 @@ fetch() {
       # imports (kept there for a build while the NAS is away). A prop in
       # neither (the public repo, a box without the NAS) is not passed, and
       # bridge.py builds its scripted one; with neither chair, nothing is.
-      src="$cache/generated/bridge"
-      root=${LCARS_MEDIA_ROOT:-$(sed -n 's/^\(export \)\{0,1\}LCARS_MEDIA_ROOT=["'\'']\{0,1\}\([^"'\'']*\).*/\2/p' "$HOME/.env" 2>/dev/null | tail -n 1)}
-      for p in captain_chair conn_chair; do
-        if [ -n "$root" ] && [ -f "$root/media/deck-models/$p/$p.glb" ]; then
-          mkdir -p "$src/$p"
-          cp -p "$root/media/deck-models/$p/$p.glb" "$root/media/deck-models/$p/LICENSE.txt" "$src/$p/"
-        fi
-      done
-      if ls "$src"/*/*.glb >/dev/null 2>&1; then echo "$src"; fi ;;
+      generated bridge captain_chair conn_chair ;;
+    quarters)
+      # The sofa and the double bed by gen.py (deck-remodel.md slice 9, on
+      # the captain's word 2026-10-30), fitted by fit.py: as the bridge's
+      # chairs, kept in the media store; without them quarters.py builds
+      # its scripted ones.
+      generated quarters quarters_sofa quarters_bed ;;
   esac
+}
+# generated ROOM PROP...: each PROP's fitted glb and LICENSE.txt from the
+# media store (MEDIA/media/deck-models/<prop>/; the root from the
+# environment, else ~/.env's line) copied into the cache, one folder each
+# under the one the room imports (kept there for a build while the NAS is
+# away), and that folder printed when it holds any. A prop in neither (the
+# public repo, a box without the NAS) is not passed, and the room script
+# builds its scripted one.
+generated() {
+  src="$cache/generated/$1"; shift
+  root=${LCARS_MEDIA_ROOT:-$(sed -n 's/^\(export \)\{0,1\}LCARS_MEDIA_ROOT=["'\'']\{0,1\}\([^"'\'']*\).*/\2/p' "$HOME/.env" 2>/dev/null | tail -n 1)}
+  for p in "$@"; do
+    if [ -n "$root" ] && [ -f "$root/media/deck-models/$p/$p.glb" ]; then
+      mkdir -p "$src/$p"
+      cp -p "$root/media/deck-models/$p/$p.glb" "$root/media/deck-models/$p/LICENSE.txt" "$src/$p/"
+    fi
+  done
+  if ls "$src"/*/*.glb >/dev/null 2>&1; then echo "$src"; fi
 }
 # The packs: a room made of a downloaded pack alone, through pack.py, and
 # the triangle budget of each prop (--tris). None today: the ready room's
@@ -65,7 +81,7 @@ pack() {
   esac
 }
 PACKS=""
-ROOMS=$(cd "$here" && ls *.py | sed 's/\.py$//' | grep -vxE 'common|pack|fetch_polyhaven')
+ROOMS=$(cd "$here" && ls *.py | sed 's/\.py$//' | grep -vxE 'common|pack|fetch_polyhaven|gen|fit')
 ktx2only=; [ "${1:-}" = --ktx2 ] && { ktx2only=1; shift; }
 want=${*:-$ROOMS $PACKS}
 [ -n "$ktx2only" ] && want=

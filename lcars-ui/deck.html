@@ -3132,8 +3132,89 @@ function model(at, room, prop, { rot = 0, scale = 1, shadow = true } = {}) {
   else { g.userData.standin = []; g.traverse(o => { if (o.isMesh) parts.push(o); }); }
   const rec = { g, room, prop, rot, scale: Array.isArray(scale) ? scale : [scale, scale, scale], standin: !Array.isArray(at), shadow, frame: root, parts, name: "" };
   for (const o of parts) o.userData.place = rec;
+  // a code-built prop under it (prop, below): its footprint, seats and
+  // lights move with the placement when a patch lifts it
+  if (!Array.isArray(at) && at.userData.prop) { rec.propRec = at.userData.prop; at.userData.prop.place = rec; }
   modelPlaces.push(rec);
   return at;
+}
+
+/* ----- code-built props: named, and liftable (the architect's phase 2) -----
+   A builder's furniture (`table`, `chair`, `sofa`, a cabinet…) is a group
+   of meshes that the merge takes apart (mergeStatic, finishCell) and some
+   registrations made beside it: its footprint (`block`), its light spots,
+   a work spot; its seats are on its parts. `prop(name, fn)` runs a builder
+   and keeps all of that on one record, so a patch can name the thing
+   (`<deck>/<room>/<name>#<n>`, the design's 2.6, given once its room's
+   merge is done: nameProps) and move, turn, hide or remake it with
+   everything that belongs to it (propLift, in the architect's block). A
+   builder called inside another is the outer one's: a desk's chair built
+   by the desk is the desk. A prop a placement stands over (model() on its
+   group) is the placement's: named and lifted as the model, its footprint
+   and lights moving with it. The builders are wrapped once, below, where
+   they are declared as plain functions: none has been called yet. */
+const propList = [];               // every prop built and not dropped, in build order
+const propByName = new Map();      // a prop's name -> its record
+let propIn = null;                 // the prop being built
+function prop(name, fn) {
+  if (propIn) return fn();
+  const rec = { name: "", kind: name, g: null, parts: [], ranges: [], blocks: [], spots: [], works: [], place: null, cell: null, roomKey: "" };
+  const b0 = blocks.length, l0 = lightSpots.length, w0 = workSpots.length;
+  propIn = rec;
+  let g;
+  try { g = fn(); } finally { propIn = null; }
+  if (!g || !g.isObject3D || g.userData.prop) return g;
+  Object.assign(rec, { g, blocks: blocks.slice(b0), spots: lightSpots.slice(l0), works: workSpots.slice(w0) });
+  g.traverse(o => { if (o.isMesh) { rec.parts.push(o); o.userData.prop = rec; } });
+  g.userData.prop = rec;
+  // model() called by the builder itself (a wall console is its own model)
+  if (g.userData.standin) for (let i = modelPlaces.length - 1; i >= 0; i--) if (modelPlaces[i].g === g) { modelPlaces[i].propRec = rec; rec.place = modelPlaces[i]; break; }
+  propList.push(rec);
+  return g;
+}
+const propped = (name, fn) => (...a) => prop(name, () => fn(...a));
+chair = propped("chair", chair); table = propped("table", table); sofa = propped("sofa", sofa); lamp = propped("lamp", lamp);
+bench = propped("bench", bench); ringBench = propped("bench", ringBench); bookcase = propped("bookcase", bookcase); plant = propped("plant", plant);
+padShelf = propped("shelf", padShelf); deskChair = propped("chair", deskChair); officeDesk = propped("desk", officeDesk); bed = propped("bed", bed);
+biobed = propped("biobed", biobed); surgicalBed = propped("surgical_bed", surgicalBed); instrumentTray = propped("tray", instrumentTray);
+cabinet = propped("cabinet", cabinet); microscopeStation = propped("microscope", microscopeStation); wallConsole = propped("console", wallConsole);
+// Names, once the merge that took a frame's props apart is done: deck 8's
+// after mergeStatic (cell null), a cell's at the end of finishCell. Counted
+// per frame in build order, as placements are (placeName): the builders are
+// seeded, so a prop has the same name on every load. One a placement
+// stands over is not named: the placement's name is its own.
+function nameProps(cell) {
+  const counts = new Map();
+  for (const p of propList) {
+    if (p.name || p.cell !== cell || p.named) continue;
+    p.named = true;
+    if (p.place) continue;
+    p.g.getWorldPosition(_w);
+    const key = roomKeyOf(zoneNear(_w.x, _w.z));
+    if (!key) continue;
+    const base = key + "/" + p.kind, n = (counts.get(base) || 0) + 1;
+    counts.set(base, n);
+    p.name = base + "#" + n;
+    p.roomKey = key;
+    propByName.set(p.name, p);
+  }
+}
+// which cell a prop was built in (its group's nearest `cell` ancestor), at the
+// end of that cell's finishCell
+function propsOfCell(g) {
+  for (const p of propList) {
+    if (p.named || p.cell) continue;
+    for (let q = p.g; q; q = q.parent) if (q === g) { p.cell = g; break; }
+  }
+  nameProps(g);
+}
+function dropProps(g) {
+  for (let i = propList.length - 1; i >= 0; i--) {
+    const p = propList[i];
+    if (p.cell !== g) continue;
+    if (p.name && propByName.get(p.name) === p) propByName.delete(p.name);
+    propList.splice(i, 1);
+  }
 }
 // Called by mergeStatic and finishCell for each merged material: where in
 // the merged mesh `m` each stand-in's parts went (`list` and `counts` in the
@@ -3142,6 +3223,8 @@ function standinRanges(list, counts, m) {
   let at = 0;
   list.forEach((o, i) => {
     const n = counts[i];
+    // a code-built prop's every part, its shadow and lights too (propLift)
+    if (o.userData.prop) o.userData.prop.ranges.push(m ? [m, at, n, o] : [o]);
     if (o.material !== contactMat && o.material !== blinkMat && !o.userData.over)
       for (let p = o.parent; p; p = p.parent) if (p.userData.standin) { p.userData.standin.push(m ? [m, at, n] : [o]); break; }
     at += n;
@@ -3397,7 +3480,8 @@ function tickDressing(at, low = gfx === "low") {
   if (!at) { camera.getWorldPosition(_dressAt); at = _dressAt; }
   for (const m of dressing) {
     const [a, b, c, d, e, f] = m.userData.box, rm = m.userData.room;
-    m.visible = !low || (rm && at.x >= rm[0] && at.x <= rm[2] && at.z >= rm[1] && at.z <= rm[3]) || Math.hypot(Math.max(a - at.x, 0, at.x - d), Math.max(b - at.y, 0, at.y - e), Math.max(c - at.z, 0, at.z - f)) <= DRESS_R;
+    // (`off`: a patch cleared the room's dressing, deck.dress)
+    m.visible = m.userData.off !== true && (!low || (rm && at.x >= rm[0] && at.x <= rm[2] && at.z >= rm[1] && at.z <= rm[3]) || Math.hypot(Math.max(a - at.x, 0, at.x - d), Math.max(b - at.y, 0, at.y - e), Math.max(c - at.z, 0, at.z - f)) <= DRESS_R);
   }
 }
 // A cell's placements (finishCell recorded them, `p.cell`), by room: placed
@@ -3407,11 +3491,13 @@ function cellModels(g) {
   const byRoom = new Map();
   for (const p of g.userData.models) { if (!byRoom.has(p.room)) byRoom.set(p.room, []); byRoom.get(p.room).push(p); }
   const place = (a, places) => { try { if (a && !g.userData.dropped) placeModels(a, places, g, false); } catch (e) { console.warn("[deck] a room's models not placed:", e); } };
+  const waits = [];
   for (const [room, places] of byRoom) {
     if (modelReady.has(room)) { place(modelReady.get(room), places); continue; }
     modelsBusy++;
-    modelAsset(room).then(a => place(a, places)).finally(() => modelsBusy--);
+    waits.push(modelAsset(room).then(a => place(a, places)).finally(() => modelsBusy--));
   }
+  Promise.all(waits).finally(() => g.userData.placedDone && g.userData.placedDone());
 }
 async function loadModels() {
   modelsGo = true;
@@ -4000,6 +4086,7 @@ function plant(x, z, sc = 1, y = 0) {
   }
   root.add(grounded(g));
   if (!y) block(x - 0.22 * sc, z - 0.22 * sc, x + 0.22 * sc, z + 0.22 * sc);
+  return g;
 }
 
 // A PADD shelf: an open unit of boards against a wall, local +z facing the
@@ -5045,7 +5132,10 @@ const bookMat = std(0xffffff, { roughness: 0.7 });
 // Upholstered seating: a sofa (w wide) or an armchair (w ~0.9), local +z the
 // way it faces. Its cushions are the pinnable part, so a tablet can be left
 // lying on one.
-function sofa(x, z, rot, w, pillows = []) {
+// `pz` the pillows' depth: the cabins' generated sofa (quarters.py) has its
+// back cushions further forward than the code-built one, and at -0.18 its
+// pillows were buried in them, a coloured sliver showing
+function sofa(x, z, rot, w, pillows = [], pz = -0.18) {
   const g = new THREE.Group();
   g.position.set(x, 0, z); g.rotation.y = rot;
   const parts = [], pts = [];
@@ -5057,7 +5147,7 @@ function sofa(x, z, rot, w, pillows = []) {
   part(w, 0.52, 0.2, M.sofa, 0, 0.58, -0.33, 0.07);
   for (const s of [-1, 1]) part(0.16, 0.56, 0.86, M.sofa, s * (w / 2 - 0.08), 0.32, 0, 0.06);
   pillows.forEach(([px, mat, tilt], i) => {
-    const p = part(0.4, 0.36, 0.13, mat, px, 0.62, -0.18, 0.06);
+    const p = part(0.4, 0.36, 0.13, mat, px, 0.62, pz, 0.06);
     p.rotation.set(-0.25, 0, tilt);
     p.userData.over = true;   // kept over lounge.py's sofa: each sofa's pillows have their own colours
     void i;
@@ -7039,9 +7129,13 @@ function buildRoom(rec, lazy = true) {
   if (rec.staff) roomCrew(rec);
   // a holodeck taken down mid-program runs it again when it is rebuilt
   if (rec.prog) holoBuild(rec);
+  // the architect's patches to this room, once its models are placed
+  patchRoomUp(rec);
 }
 function unbuildRoom(rec) {
   const g = rec.g;
+  // its patches undone first, while what they changed is still there
+  patchRoomDown(rec);
   rec.g = null;
   if (rec.holo) { holoSoundOff(rec); rec.holo = null; holoLinks.length = 0; }
   dropCell(g);
@@ -7091,18 +7185,25 @@ function finishCell(g) {
     for (const o of list) o.removeFromParent();
   }
   g.traverse(o => { if (o.material === skyMat) o.renderOrder = 1; });
+  propsOfCell(g);
   // the prop library's placements made while this cell was built (`frame`:
   // the last in modelPlaces, as a cell is built in one go), its stand-ins'
   // ranges recorded by the merge above; their models come once the boot is
   // done (loadModels), and go with the cell (dropCell)
   const mine = [];
   for (let i = modelPlaces.length - 1; i >= 0 && modelPlaces[i].frame === g; i--) { modelPlaces[i].cell = g; mine.push(modelPlaces[i]); }
-  if (!mine.length) return;
+  // `placed`: settled once its models are placed (or never will be), which
+  // is when a generated room's patches can apply (patchRoomUp)
+  let done;
+  g.userData.placed = new Promise(r => { done = r; });
+  g.userData.placedDone = done;
+  if (!mine.length) { done(); return; }
   g.userData.models = mine;
   if (modelsGo) cellModels(g); else modelsWait.push(g);
 }
 function dropCell(g) {
   g.removeFromParent();
+  dropProps(g);
   if (g.userData.models) {
     g.userData.dropped = true;
     for (let i = modelPlaces.length - 1; i >= 0; i--) if (modelPlaces[i].cell === g) modelPlaces.splice(i, 1);
@@ -7467,7 +7568,7 @@ const ROOM_T = {
       // window take its armchair, above: the sofa squeezed to 0.92 would
       // have arms 6 cm thick)
       const sw = Math.min(2.2, D * 0.2);
-      model(sofa(sx * (W / 2 - 1.8), lz, -sx * Math.PI / 2, sw, [[-0.5, pick(r, [M.pillowA, M.pillowB, M.pillowC]), 0.1], [0.55, pick(r, [M.pillowA, M.pillowB, M.pillowC]), -0.1]]),
+      model(sofa(sx * (W / 2 - 1.8), lz, -sx * Math.PI / 2, sw, [[-0.5, pick(r, [M.pillowA, M.pillowB, M.pillowC]), 0.1], [0.55, pick(r, [M.pillowA, M.pillowB, M.pillowC]), -0.1]], -0.06),
             "quarters", "quarters_sofa", { scale: [sw / 2.3, 1, 1] });
       model(qPiece(1.1, 0.38, 0.6, sx * (W / 2 - 3.0), lz, -sx * Math.PI / 2, 0.03), "quarters", "quarters_coffee_table");
       if (r() < 0.6) mug(sx * (W / 2 - 3.0) + 0.1, 0.38, lz + 0.2, qDress);
@@ -8552,6 +8653,7 @@ function buildDeck(n) {
     batchDeck(deckCells.filter(g => g.own === deckOwn));
   } finally { [owner, buildingDeck] = prev; }
   staffDeck(n, plan);
+  patchDeckUp(n);
 }
 // A generated deck's corridors, junctions and lobby are ~30 cells, each
 // merged per material (finishCell), and nothing stops the camera's wedge
@@ -8636,6 +8738,9 @@ function batchDeck(cells) {
     }
     out.add(bm);
   }
+  // a prop's ranges likewise (propLift); a single's copy is not followed,
+  // and a prop with one is not lifted there (propLift says so)
+  for (const pr of propList) if (cells.includes(pr.cell)) for (const e of pr.ranges) if (e.length === 4 && moved.has(e[0])) { const [bm, at] = moved.get(e[0]); e[0] = bm; e[1] += at; }
   for (const p of modelPlaces) {
     const st = p.standin && cells.includes(p.cell) && p.g.userData.standin;
     if (st) for (const e of st) if (e.length === 3 && moved.has(e[0])) { const [bm, at] = moved.get(e[0]); e[0] = bm; e[1] += at; }
@@ -8667,6 +8772,7 @@ function batchDeck(cells) {
 }
 function unloadDeck() {
   if (!deckOwn) return;
+  patchDeckDown(curDeck);
   for (let i = genRooms.length - 1; i >= 0; i--) {
     const rec = genRooms[i];
     if (rec.rm.deck !== curDeck) continue;
@@ -9332,6 +9438,7 @@ function mergeStatic() {
   }
 }
 mergeStatic();
+nameProps(null);
 lmApply();
 if (NIGHT.on) nightWatch(true, true);
 nightTick(true);
@@ -15258,10 +15365,13 @@ function talkAnim(c, on) {
      freezes the page, so the id of the one running is in sessionStorage
      while it runs, and a load that finds it there skips that patch;
      deck.html?nopatch applies none.
-   Phase 1 (this): deck 8's rooms, which are built at boot and never
-   dropped. A generated room's patches wait for phase 2 (applied in
-   buildRoom, undone in unbuildRoom). */
-const DECK_API_V = 1;
+   Deck 8's rooms' patches apply at boot; a generated room's when it is
+   built and its models placed, undone before it is dropped (the scopes,
+   below: phase 2). A code-built prop (prop(), beside model()) is named and
+   lifted as a placement is (propLift). */
+// 2: phase 2's verbs (material, mat, dress, tick, sky, fog, materials) and
+// code-built props by name; a v1 patch runs as it did
+const DECK_API_V = 2;
 const PATCH_KIND = "deck_patch";
 // patches an engineer has moved into the builders: never applied again
 const DECK_BAKED = new Set([]);
@@ -15274,14 +15384,21 @@ const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
 const DECK_API_DOC = [
   "deck.room(name?)          the room (default: where the captain is); .name, .label, .box, .point(u, v, y?) in 0..1 of its floor,",
   "                          .at(x, z, y?) in metres from its middle (x to starboard, z aft), .objects(), .lights()",
-  "deck.obj(name)            a named object (a placement, a patch's own); throws if it is not in the ship as built",
+  "deck.obj(name)            a named object (a model placement, a code-built prop, a patch's own); throws if it is not built",
   "  .move([dx,dy,dz]) .moveTo([x,y,z]) .turn(deg) .scale(k|[x,y,z]) .tint(\"#rrggbb\", k?) .hide() .show() .at() .size()",
-  "  (each lifts a merged placement into a mesh of its own, and records its undo)",
+  "  .material(\"brass\" | {color, emissive, emissiveIntensity, roughness, metalness, opacity})   its own copy, nothing else changes",
+  "  .mat()                  the material it is drawn in, for a new part of it in the same",
+  "  (each lifts a merged object into a mesh of its own, its footprint, seats and lights moving with it, and records its undo)",
   "deck.model(glb, prop, {at, rot, scale})   a library model (a promise of it), added by deck.add",
   "deck.add(name, object3d) owned by the patch, named \"<patch>/<name>\", dynamic; a promise of one is awaited",
   "deck.light(name)          a light, or a room's every light: .color(\"#rrggbb\") .intensity(k) .range(m) .warm(k) .cool(k)",
   "deck.fill(room)           the room's fill light: .level(k) .warm(k)",
+  "deck.dress(room?)         the room's dressing (small things): .clear() hides it all, .add(name, object3d) adds to it, .count()",
+  "deck.tick(fn)             fn(t, dt) every frame while the patch is on (seconds): animation; one that throws is stopped",
+  "deck.sky(id?)             what the windows show: \"home\" | \"nebula\" | \"ocean\" | \"galaxy\" | \"binary\"; no id: the list",
+  "deck.fog(\"#rrggbb\", k?)   a haze in the patch's room (k 0..0.5, 0.04 light), eased in as the captain walks in",
   "deck.library()            the loaded glbs and their props: {glb: [{prop, size: [w, h, d]}]}",
+  "deck.materials()          the ship's materials by name, for .material(name)",
   "deck.onUndo(fn)           for anything raw the API cannot see",
   "deck.three, deck.scene    three.js and the scene, when no verb does it",
   "deck.gfx                  \"high\" | \"medium\" | \"low\"",
@@ -15303,7 +15420,8 @@ function zoneDeck(zn) {
   const m = /^Deck (\d+) /.exec(zn.name);
   return m ? +m[1] : 8;
 }
-const roomKeyOf = zn => zn ? zoneDeck(zn) + "/" + zn.name : "";
+// (a declaration: nameProps uses it at boot, before this block has run)
+function roomKeyOf(zn) { return zn ? zoneDeck(zn) + "/" + zn.name : ""; }
 // the zone at a point, or the nearest (a prop against a wall stands outside
 // the walkable rectangles, which are shrunk by the walker's radius)
 function zoneNear(x, z) {
@@ -15380,7 +15498,7 @@ function patchLift(p, ps) {
   const parts = p.parts.map(o => [o, o.matrixWorld.clone()]);
   // a placement with no stand-in has nothing the aim hits: the lifted mesh is
   if (!p.standin) { pinnable.push(m); m.userData.pinnable = true; pinVer++; }
-  p.lifted = { m, kept, world0, inv0: world0.clone().invert(), parts };
+  p.lifted = { m, kept, world0, inv0: world0.clone().invert(), parts, regs: regsOf(p.propRec) };
   ps.undo.push(() => patchUnlift(p));
   return p.lifted;
 }
@@ -15393,6 +15511,7 @@ function patchUnlift(p) {
   l.m.removeFromParent();
   l.m.geometry.dispose();
   for (const [o, w] of l.parts) { o.matrixWorld.copy(w); o.userData.ws = null; }
+  regsBack(l.regs);
   const i = pinnable.indexOf(l.m);
   if (i >= 0) pinnable.splice(i, 1);
   pinVer++;
@@ -15406,7 +15525,120 @@ function liftFollow(p) {
   _ld.multiplyMatrices(l.m.matrixWorld, l.inv0);
   for (const [o, w] of l.parts) { o.matrixWorld.multiplyMatrices(_ld, w); o.userData.ws = null; }
   l.m.userData.ws = null;
+  if (l.regs) regsFollow(l.regs, _ld, l.m.visible);
   pinVer++;
+}
+
+/* ----- what a prop registered beside its meshes, moving with it -----
+   Its footprints (`blocks`, world rectangles grown by the walker's radius),
+   light spots and work spots, kept as they were at the lift and laid again
+   from those through the move (`d`, the world change since the lift) on
+   every change, so nothing drifts; hidden, the footprints go (an empty
+   rectangle stops nobody), the lights go dark, the parts leave the aim (no
+   seat in a hidden sofa). Put back as they were by regsBack. */
+function regsOf(pr) {
+  if (!pr) return null;
+  return { pr, blocks: pr.blocks.map(b => [b, b.slice(0, 4)]), spots: pr.spots.map(s => [s, s.p.clone(), s.intensity]),
+           works: pr.works.map(w => [w, w.x, w.z, w.a]), parts: pr.parts.filter(o => pinnable.includes(o)), off: false };
+}
+const _rb = new THREE.Vector3();
+function regsFollow(R, d, shown) {
+  const yaw = Math.atan2(d.elements[8], d.elements[0]);
+  for (const [b, b0] of R.blocks) {
+    if (!shown) { b[0] = b[1] = 1e9; b[2] = b[3] = -1e9; continue; }
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    // the footprint as built (ungrown), its four corners moved, boxed, grown
+    for (const [x, z] of [[b0[0] + PR, b0[1] + PR], [b0[2] - PR, b0[1] + PR], [b0[0] + PR, b0[3] - PR], [b0[2] - PR, b0[3] - PR]]) {
+      _rb.set(x, 0, z).applyMatrix4(d);
+      x0 = Math.min(x0, _rb.x); z0 = Math.min(z0, _rb.z); x1 = Math.max(x1, _rb.x); z1 = Math.max(z1, _rb.z);
+    }
+    b[0] = x0 - PR; b[1] = z0 - PR; b[2] = x1 + PR; b[3] = z1 + PR;
+  }
+  for (const [s, p0, k0] of R.spots) { s.p.copy(p0).applyMatrix4(d); s.intensity = shown ? k0 : 0; }
+  for (const [w, x, z, a] of R.works) { _rb.set(x, 0, z).applyMatrix4(d); w.x = _rb.x; w.z = _rb.z; w.a = a + yaw; }
+  if (!shown !== R.off) {
+    R.off = !shown;
+    for (const o of R.parts) { const i = pinnable.indexOf(o); if (R.off && i >= 0) pinnable.splice(i, 1); else if (!R.off && i < 0) pinnable.push(o); }
+  }
+}
+function regsBack(R) {
+  if (!R) return;
+  for (const [b, b0] of R.blocks) for (let i = 0; i < 4; i++) b[i] = b0[i];
+  for (const [s, p0, k0] of R.spots) { s.p.copy(p0); s.intensity = k0; }
+  for (const [w, x, z, a] of R.works) Object.assign(w, { x, z, a });
+  if (R.off) for (const o of R.parts) if (!pinnable.includes(o)) pinnable.push(o);
+}
+
+/* ----- lifting a code-built prop -----
+   Its parts went into the frame's merged meshes, one a material (their
+   ranges, `pr.ranges`, recorded by standinRanges), or stayed meshes of
+   their own (a material alone in the room, an instanced mesh). Lifted: the
+   merged ranges zeroed (kept for the undo, as a placement's), the meshes
+   of their own moved under the lifted group (`attach` keeps where they
+   are), and the merged parts copied into the group, merged again by
+   material: a table of wood and metal is two draw calls until it is
+   baked. The originals stay in `pinnable` with their world matrices, so
+   the aim and the seats follow by liftFollow, as a stand-in's do. */
+function propLift(pr, ps) {
+  if (pr.lifted) return pr.lifted;
+  if (pr.ranges.some(r => r.length === 1 && !r[0].parent))
+    throw new Error(pr.name + " is in a deck's batched corridor, which a patch cannot take it out of yet");
+  const parent = pr.cell || scene;
+  parent.updateWorldMatrix(true, false);
+  pr.g.updateWorldMatrix(true, false);
+  const world0 = pr.g.matrixWorld.clone(), inv0 = world0.clone().invert();
+  const lg = new THREE.Group();
+  lg.name = pr.name;
+  new THREE.Matrix4().copy(parent.matrixWorld).invert().multiply(world0).decompose(lg.position, lg.quaternion, lg.scale);
+  lg.userData.dynamic = true; lg.userData.place = pr;
+  const merged = new Set(), kept = [], own = [], byMat = new Map(), M4 = new THREE.Matrix4();
+  for (const r of pr.ranges) {
+    if (r.length !== 4) continue;
+    const [m, at, n, o] = r, pos = m.geometry.attributes.position;
+    merged.add(o);
+    kept.push([pos, at * 3, pos.array.slice(at * 3, (at + n) * 3)]);
+    pos.array.fill(0, at * 3, (at + n) * 3);
+    pos.addUpdateRange(at * 3, n * 3); pos.needsUpdate = true;
+  }
+  for (const o of pr.parts) {
+    if (merged.has(o)) {
+      if (o.isInstancedMesh) continue;
+      const mat = o.material;
+      if (!byMat.has(mat)) byMat.set(mat, []);
+      const gg = copyGeo(o.geometry, mat.userData.attrs, mat.userData.fill);
+      byMat.get(mat).push((gg.index ? gg.toNonIndexed() : gg).applyMatrix4(M4.multiplyMatrices(inv0, o.matrixWorld)));
+    } else if (o.parent) {
+      // a mesh of its own: it goes with the group, and back where it was
+      own.push([o, o.parent, o.position.clone(), o.quaternion.clone(), o.scale.clone()]);
+    }
+  }
+  parent.add(lg);
+  lg.updateMatrixWorld(true);
+  for (const [o] of own) lg.attach(o);
+  for (const [mat, geos] of byMat) {
+    const m = new THREE.Mesh(geos.length > 1 ? mergeGeometries(geos) : geos[0], mat);
+    if (geos.length > 1) for (const g of geos) g.dispose();
+    m.receiveShadow = mat.isMeshStandardMaterial && !mat.transparent; m.castShadow = parent === scene && mat !== contactMat;
+    m.userData.dynamic = true;
+    lg.add(m);
+  }
+  lg.updateMatrixWorld(true);
+  const parts = pr.parts.filter(o => merged.has(o)).map(o => [o, o.matrixWorld.clone()]);
+  pr.lifted = { m: lg, kept, own, world0, inv0, parts, regs: regsOf(pr) };
+  ps.undo.push(() => propUnlift(pr));
+  return pr.lifted;
+}
+function propUnlift(pr) {
+  const l = pr.lifted;
+  if (!l) return;
+  for (const [pos, a, arr] of l.kept) { pos.array.set(arr, a); pos.addUpdateRange(a, arr.length); pos.needsUpdate = true; }
+  for (const [o, par, p, q, s] of l.own) { par.add(o); o.position.copy(p); o.quaternion.copy(q); o.scale.copy(s); o.userData.ws = null; }
+  for (const [o, w] of l.parts) { o.matrixWorld.copy(w); o.userData.ws = null; }
+  regsBack(l.regs);
+  l.m.removeFromParent();
+  l.m.traverse(x => { if (x.isMesh && x.userData.dynamic && x !== l.m) x.geometry.dispose(); });
+  pinVer++;
+  pr.lifted = null;
 }
 
 /* ----- the API a patch is handed: `deck`, bound to the patch ----- */
@@ -15419,7 +15651,8 @@ function psSave(ps, o, key) {
 function disposeTree(o) {
   o.traverse(x => {
     if (x.geometry && !(x.geometry.userData && x.geometry.userData.shared)) x.geometry.dispose();
-    for (const m of [].concat(x.material || [])) if (!(m.userData && m.userData.keep)) m.dispose();
+    // (a patch's mesh in a ship's material, deck.obj(…).mat(): the ship's)
+    for (const m of [].concat(x.material || [])) if (!(m.userData && m.userData.keep) && !sharedMats.has(m)) m.dispose();
   });
 }
 const WARM = new THREE.Color(0xffb070), COOL = new THREE.Color(0xb8d4ff), _pc = new THREE.Color(), _pv = new THREE.Vector3(), _apb = new THREE.Box3();
@@ -15447,8 +15680,29 @@ function deckApi(ps) {
         });
         touch(name); return h;
       },
-      hide() { const o = get(); psSave(ps, o, "visible"); o.visible = false; touch(name); return h; },
-      show() { const o = get(); psSave(ps, o, "visible"); o.visible = true; touch(name); return h; },
+      hide() { const o = get(); psSave(ps, o, "visible"); o.visible = false; after(); touch(name); return h; },
+      show() { const o = get(); psSave(ps, o, "visible"); o.visible = true; after(); touch(name); return h; },
+      // its look changed on its own meshes only: each material cloned (the
+      // ship's are shared deck-wide: M.wood is every wooden thing), then a
+      // ship's material by name ("brass", "leather": deck.materials()), or
+      // the fields given set on the clone
+      material(spec) {
+        const o = get(), named = typeof spec === "string";
+        if (named && !(M[spec] && M[spec].isMaterial)) throw new Error("no material " + JSON.stringify(spec) + " (deck.materials() lists them)");
+        if (!named && (!spec || typeof spec !== "object")) throw new Error("material() takes a name or {color, emissive, emissiveIntensity, roughness, metalness, opacity}");
+        o.traverse(x => {
+          if (!x.isMesh || !x.material || Array.isArray(x.material) || x.material === contactMat) return;
+          const was = x.material, mine = (named ? M[spec] : was).clone();
+          mine.userData = { patch: ps.id };
+          if (!named) matSet(mine, spec);
+          x.material = mine;
+          ps.undo.push(() => { if (x.material === mine) x.material = was; mine.dispose(); });
+        });
+        touch(name); return h;
+      },
+      // the material it is drawn in (its first mesh's), for a new part in
+      // the same: new deck.three.Mesh(geo, deck.obj(n).mat())
+      mat() { let m = null; get().traverse(x => { if (!m && x.isMesh && x.material !== contactMat) m = x.material; }); return m; },
       at() { const o = get(); o.getWorldPosition(_pv); return [_pv.x, _pv.y, _pv.z]; },
       size() { const o = get(); _apb.setFromObject(o); return [_apb.max.x - _apb.min.x, _apb.max.y - _apb.min.y, _apb.max.z - _apb.min.z]; },
     };
@@ -15475,13 +15729,13 @@ function deckApi(ps) {
       name: key, label: shown(key.slice(key.indexOf("/") + 1), +key.slice(0, key.indexOf("/"))), box: b.slice(),
       point: (u, v, y = 0) => [b[0] + (b[2] - b[0]) * (+u || 0), +y || 0, b[1] + (b[3] - b[1]) * (+v || 0)],
       at: (x, z, y = 0) => [cx + (+x || 0), +y || 0, cz + (+z || 0)],
-      objects: () => [...placeByName.values()].filter(p => p.roomKey === key).map(p => p.name)
+      objects: () => [...placeByName.values(), ...propByName.values()].filter(p => p.roomKey === key).map(p => p.name)
         .concat([...patchObjs.entries()].filter(([, o]) => { if (!o) return false; o.getWorldPosition(_pv); return inBox(b, _pv.x, _pv.z); }).map(([n]) => n)),
       lights: () => roomLights(key).map(l => l.name),
     };
   };
   const later = pr => { ps.pending.push(pr); return pr; };
-  return {
+  const api = {
     id: ps.id, three: THREE, scene,
     get gfx() { return gfx; },
     room: roomOf,
@@ -15489,8 +15743,10 @@ function deckApi(ps) {
       name = String(name);
       if (patchObjs.has(name)) { const o = patchObjs.get(name); return handle(name, () => o); }
       const p = placeByName.get(name);
-      if (!p) throw new Error("no object " + JSON.stringify(name) + " (names come from the context: <deck>/<room>/<glb>/<prop>#<n>)");
-      return handle(name, () => patchLift(p, ps).m, () => liftFollow(p));
+      if (p) return handle(name, () => patchLift(p, ps).m, () => liftFollow(p));
+      const pr = propByName.get(name);
+      if (pr) return handle(name, () => propLift(pr, ps).m, () => liftFollow(pr));
+      throw new Error("no object " + JSON.stringify(name) + " (names come from the context: <deck>/<room>/<glb>/<prop>#<n>, <deck>/<room>/<name>#<n>)");
     },
     model(glb, prop, { at = null, rot = 0, scale = 1 } = {}) {
       return later((async () => {
@@ -15570,7 +15826,98 @@ function deckApi(ps) {
       return out;
     },
     onUndo(fn) { if (typeof fn !== "function") throw new Error("deck.onUndo takes a function"); ps.undo.push(fn); },
+    materials: () => Object.keys(M).filter(k => M[k] && M[k].isMaterial),
+    // A room's dressing (the small things: bottles, books, trays, plaques;
+    // DRESSING and dressGroup), as one: cleared (hidden, not taken down: its
+    // merged ranges are the room's), and what the patch adds to it treated
+    // as dressing is (graphics low leaves it out past DRESS_R).
+    dress(key) {
+      const r = roomOf(key), b = r.box, mine = [...dressing].filter(d => {
+        const x = d.userData.box;
+        return x && !d.userData.byPatch && inBox(b, (x[0] + x[3]) / 2, (x[2] + x[5]) / 2);
+      });
+      const h = {
+        count: () => mine.length,
+        clear() {
+          for (const d of mine) {
+            const was = !!d.userData.off;
+            d.userData.off = true; d.visible = false;
+            ps.undo.push(() => { d.userData.off = was; tickDressing(); });
+          }
+          touch(r.name + "/dressing"); return h;
+        },
+        add(name, o) {
+          return api.add(name, o).then(obj => {
+            if (ps.dead) return obj;
+            _apb.setFromObject(obj);
+            const { min: a, max: c } = _apb;
+            obj.userData.box = [a.x, a.y, a.z, c.x, c.y, c.z]; obj.userData.byPatch = ps.id;
+            dressing.add(obj);
+            ps.undo.push(() => dressing.delete(obj));
+            tickDressing();
+            return obj;
+          });
+        },
+      };
+      return h;
+    },
+    // fn(t, dt) every frame while the patch is on (t in seconds); one that
+    // throws is stopped, and says so
+    tick(fn) {
+      if (typeof fn !== "function") throw new Error("deck.tick takes a function");
+      let last = -1;
+      const f = owned(t => {
+        const dt = last < 0 ? 0 : Math.min(0.1, t - last);
+        last = t;
+        try { fn(t, dt); }
+        catch (e) { ticksOff(f); console.warn("[deck] patch " + ps.id + ": its tick stopped:", e); flashHint("Patch " + ps.id + "'s animation stopped: " + (e && e.message || e), 5000); }
+      }, ps.own || null);
+      tickers.push(f);
+      ps.undo.push(() => ticksOff(f));
+    },
+    // what the windows show, the ship's (the helm's places: SKIES)
+    sky(id) {
+      if (id === undefined) return SKIES.map(x => x.id);
+      if (!SKIES.some(x => x.id === id)) throw new Error("no sky " + JSON.stringify(id) + " (deck.sky() lists them: " + SKIES.map(x => x.id).join(", ") + ")");
+      const was = SKIES[skyAt].id;
+      applySky(id);
+      ps.undo.push(() => applySky(was));
+      touch("sky");
+    },
+    // a haze in the patch's room (in the ship, a patch with none), eased in
+    // as the captain walks in: tickFog, in the frame loop
+    fog(hex, density = 0.04) {
+      const f = { key: ps.room || "", color: new THREE.Color(hex == null ? 0x8090a0 : hex), d: Math.max(0, Math.min(0.5, +density || 0)) };
+      patchFogs.push(f);
+      ps.undo.push(() => { const i = patchFogs.indexOf(f); if (i >= 0) patchFogs.splice(i, 1); if (!patchFogs.length) scene.fog = null; });
+      touch((ps.room || "ship") + "/fog");
+    },
   };
+  return api;
+}
+// a material's fields from a patch: colours as "#rrggbb", numbers clamped
+function matSet(m, spec) {
+  for (const [k, v] of Object.entries(spec)) {
+    if (k === "color" || k === "emissive") { if (m[k]) m[k].set(v); }
+    else if (k === "roughness" || k === "metalness" || k === "opacity") { if (k in m) m[k] = Math.max(0, Math.min(1, +v)); }
+    else if (k === "emissiveIntensity") { if (k in m) m[k] = Math.max(0, Math.min(20, +v)); }
+    else throw new Error("material(): no field " + JSON.stringify(k) + " (color, emissive, emissiveIntensity, roughness, metalness, opacity)");
+  }
+  if (spec.opacity != null) m.transparent = m.opacity < 1;
+  m.needsUpdate = true;
+}
+function ticksOff(f) { const i = tickers.indexOf(f); if (i >= 0) tickers.splice(i, 1); }
+// The patches' fogs (deck.fog): one FogExp2 for all, made with the first
+// (every lit material is compiled again once, with fog), its density eased
+// each frame to the fog of the room the captain is in, or the ship's, or
+// none: walking from room to room compiles nothing.
+const patchFogs = [];
+function tickFog(zn, dt) {
+  if (!patchFogs.length) return;
+  const key = roomKeyOf(zn), f = patchFogs.find(x => x.key && x.key === key) || patchFogs.find(x => !x.key);
+  if (!scene.fog) scene.fog = new THREE.FogExp2(f ? f.color.getHex() : 0x000000, 0);
+  if (f) scene.fog.color.lerp(f.color, Math.min(1, dt * 2));
+  scene.fog.density += ((f ? f.d : 0) - scene.fog.density) * Math.min(1, dt * 1.5);
 }
 
 /* ----- applying, undoing, the list ----- */
@@ -15599,8 +15946,11 @@ const consoleUnlocked = () => {
   catch (e) { return false; }
 };
 window.lcarsDeckPatched = () => patchRan;
-async function patchApply(c) {
-  const ps = { id: c.id, undo: [], pending: [], names: new Set(), dead: false };
+async function patchApply(c, sc = "8") {
+  const rec = sc.startsWith("room:") ? roomRec(sc.slice(5)) : null;
+  // own: a generated room's, so what the patch registers there (a tick) goes
+  // with the room (disown) even if an undo of it failed
+  const ps = { id: c.id, undo: [], pending: [], names: new Set(), dead: false, room: c.room || "", own: rec ? rec.own : null };
   if (consoleUnlocked())
     return { ok: false, id: c.id, err: "the console's classified entries are unlocked: lock them, then apply it", line: 0, names: [] };
   patchRan = true;
@@ -15631,21 +15981,91 @@ async function patchApply(c) {
 // `want` in order. A patch that fails stays in the list as failed (no ps),
 // so it is not tried again until it changes. Answers each applied one's
 // result by id.
-async function patchSync(want) {
+// `sc`: the scope (patchScope), each its own list: a room built or dropped
+// applies or undoes its own patches, and nothing else moves.
+async function patchSync(want, sc = "8") {
+  if (!patchScopes.has(sc)) patchScopes.set(sc, []);
+  const live = patchScopes.get(sc);
   let k = 0;
-  while (k < patchLive.length && k < want.length && patchLive[k].sig === patchSig(want[k])) k++;
-  for (let i = patchLive.length - 1; i >= k; i--) if (patchLive[i].ps) patchUndo(patchLive[i].ps);
-  patchLive.length = k;
+  while (k < live.length && k < want.length && live[k].sig === patchSig(want[k])) k++;
+  for (let i = live.length - 1; i >= k; i--) if (live[i].ps) patchUndo(live[i].ps);
+  live.length = k;
   const out = new Map();
   for (const c of want.slice(k)) {
-    const r = await patchApply(c);
+    const r = await patchApply(c, sc);
     out.set(c.id, r);
-    patchLive.push({ id: c.id, sig: patchSig(c), c, ps: r.ok ? r.ps : null, err: r.ok ? "" : r.err, line: r.line || 0 });
+    live.push({ id: c.id, sig: patchSig(c), c, ps: r.ok ? r.ps : null, err: r.ok ? "" : r.err, line: r.line || 0 });
     if (!r.ok) console.warn("[deck] patch " + c.id + " failed:", r.err);
+    // its room was dropped while a patch of it ran: what applied goes too
+    if (!scopeLive(sc)) { patchDown(sc, live); break; }
   }
   if (out.size) paintArch();
   return out;
 }
+/* ----- scopes: where and when a patch applies (the design's 2.4) -----
+   "8": deck 8's own rooms and the ship's (room null), applied once the
+   boot's models are in and never dropped; "room:<deck>/<name>": a
+   generated room's (the wings', another deck's), applied once the room is
+   built and its models placed (patchRoomUp, from buildRoom), undone before
+   it is dropped (patchRoomDown, from unbuildRoom): a patch to a room on
+   deck 12 costs nothing anywhere else; "deck:<n>": another deck's own
+   streets and lobby, while that deck is the one built. */
+const patchScopes = new Map([["8", patchLive]]);
+let patchBooted = false;
+const roomRecKey = rec => rec.rm.deck + "/" + rec.rm.name;
+const roomRec = key => genRooms.find(r => roomRecKey(r) === key) || null;
+function patchScope(c) {
+  if (!c.room) return "8";
+  const key = String(c.room), d = +key.slice(0, key.indexOf("/"));
+  if (roomRec(key)) return "room:" + key;
+  return d === 8 ? "8" : "deck:" + d;
+}
+let deckPatchOk = 0;   // the deck whose streets' models are placed
+function scopeLive(sc) {
+  if (!patchBooted) return false;
+  if (sc === "8") return true;
+  if (sc.startsWith("room:")) { const rec = roomRec(sc.slice(5)); return !!(rec && rec.g && rec.patchReady); }
+  return curDeck === +sc.slice(5) && deckPatchOk === curDeck;
+}
+const liveScopes = () => ["8", ...genRooms.filter(r => r.g && r.patchReady).map(r => "room:" + roomRecKey(r)),
+                          ...(curDeck !== 8 && deckPatchOk === curDeck ? ["deck:" + curDeck] : [])];
+const wantedIn = (sc, all) => patchWanted(all).filter(c => patchScope(c) === sc);
+async function patchSyncAll(all = patchAll()) {
+  const out = new Map();
+  for (const sc of liveScopes()) for (const [k, v] of await patchSync(wantedIn(sc, all), sc)) out.set(k, v);
+  return out;
+}
+// every live list's entry for a patch, or null
+const patchLiveOf = id => { for (const l of patchScopes.values()) { const x = l.find(y => y.id === id); if (x) return x; } return null; };
+function patchDown(sc, live = patchScopes.get(sc)) {
+  if (!live) return;
+  for (let i = live.length - 1; i >= 0; i--) if (live[i].ps) patchUndo(live[i].ps);
+  live.length = 0;
+  if (sc !== "8") patchScopes.delete(sc);
+}
+// most rooms have no patch: one is looked for before anything is queued
+function patchScopeUp(sc) {
+  if (!patchBooted || !wantedIn(sc, patchAll()).length) return;
+  patchQueue(() => (scopeLive(sc) ? patchSync(wantedIn(sc, patchAll()), sc) : null));
+}
+function patchRoomUp(rec) {
+  const g = rec.g;
+  rec.patchReady = false;
+  (g.userData.placed || Promise.resolve()).then(() => {
+    if (rec.g !== g) return;
+    rec.patchReady = true;
+    patchScopeUp("room:" + roomRecKey(rec));
+  });
+}
+function patchRoomDown(rec) { rec.patchReady = false; patchDown("room:" + roomRecKey(rec)); }
+function patchDeckUp(n) {
+  Promise.all(deckCells.filter(g => g.own === deckOwn).map(g => g.userData.placed)).then(() => {
+    if (curDeck !== n) return;
+    deckPatchOk = n;
+    patchScopeUp("deck:" + n);
+  });
+}
+function patchDeckDown(n) { deckPatchOk = 0; patchDown("deck:" + n); }
 // a patch as the page keeps it, or null if it is not one
 function patchClean(c, row) {
   if (!c || typeof c !== "object" || typeof c.code !== "string") return null;
@@ -15674,10 +16094,7 @@ function patchAll() {
   }
   return [...by.values()].sort(bySeq);
 }
-// Phase 1 applies deck 8's (and the ship's, room null): a generated room's
-// waits for its room to be built (phase 2)
-const patchHere = c => !c.room || +String(c.room).split("/")[0] === 8;
-const patchWanted = (all = patchAll()) => NOPATCH ? [] : all.filter(c => c.on && !DECK_BAKED.has(c.id) && !patchSkipped.has(c.id) && patchHere(c));
+const patchWanted = (all = patchAll()) => NOPATCH ? [] : all.filter(c => c.on && !DECK_BAKED.has(c.id) && !patchSkipped.has(c.id));
 function patchStore(all) {
   if (DEMO) lsSet(PATCH_LS, all.map(c => { const o = Object.assign({}, c); delete o.row; return o; }));
 }
@@ -15698,10 +16115,10 @@ function lcarsDeckPatch(x, op = "apply") {
     if (op === "delete") { const i = all.indexOf(old); if (i >= 0) all.splice(i, 1); }
     else if (old) all[all.indexOf(old)] = c; else all.push(c);
     all.sort(bySeq);
-    const res = await patchSync(patchWanted(all));
+    const res = await patchSyncAll(all);
     const r = res.get(c.id);
     if (op === "apply" && r && !r.ok) {
-      await patchSync(patchWanted(patchAll()));
+      await patchSyncAll();
       return { ok: false, id: c.id, seq: c.seq, err: r.err, line: r.line, names: r.names };
     }
     if (DEMO) patchStore(all);
@@ -15722,13 +16139,14 @@ function patchReplay() {
   return patchQueue(async () => {
     if (NOPATCH && patchAll().some(c => c.on)) flashHint("Patches off for this load (?nopatch)", 4000);
     if (hung) { patchSkipped.set(hung, "it did not finish on the last load, so it was skipped"); flashHint("Patch " + hung + " froze the last load: skipped", 6000); }
-    const bad = [...(await patchSync(patchWanted())).values()].filter(r => !r.ok);
+    patchBooted = true;
+    const bad = [...(await patchSyncAll()).values()].filter(r => !r.ok);
     if (bad.length) flashHint(bad.length === 1 ? "A patch failed: " + bad[0].err : bad.length + " patches failed (the architect's sheet, I, says which)", 6000);
   });
 }
 // the journal moved (refreshJournal): patches changed there are applied
 // from the first that changed on
-const patchRows = list => { if (list.some(r => r.kind === PATCH_KIND)) patchQueue(() => patchSync(patchWanted())); };
+const patchRows = list => { if (list.some(r => r.kind === PATCH_KIND)) patchQueue(() => patchSyncAll()); };
 
 /* ----- what the captain sees, for the architect (the design's 4.4) ----- */
 let matNames = null;
@@ -15748,7 +16166,9 @@ function archAim() {
   if (aimPad) { const id = aimPad.userData.entryId, r = rows.get(id); return { kind: "PADD", name: "entry #" + id + (r && r.title ? " " + JSON.stringify(r.title) : ""), dist: 0 }; }
   if (!aim) return null;
   const o = aim.object, dist = r2(aim.distance), p = o.userData.place;
-  if (p && p.name) return { kind: placeByName.get(p.name) ? "model" : "patch object", name: p.name, label: p.prop ? placeLabel(p) : "", dist, y: r2(aim.point.y) };
+  if (p && p.name) return { kind: placeByName.get(p.name) ? "model" : propByName.get(p.name) ? "code-built prop" : "patch object", name: p.name, label: p.prop ? placeLabel(p) : "", dist, y: r2(aim.point.y) };
+  const pr = o.userData.prop;
+  if (pr && pr.name) return { kind: "code-built prop", name: pr.name, label: propLabel(pr), dist, y: r2(aim.point.y) };
   if (o.userData.seat) return { kind: "seat", name: "a seat", dist, y: r2(aim.point.y) };
   let face = "surface";
   if (aim.face) {
@@ -15769,11 +16189,12 @@ function archSees(opts = {}) {
   const seen = [];
   const look = (name, o) => { o.getWorldPosition(_sv2); _sv2.y = Math.max(_sv2.y, 0.3); if (_fr.containsPoint(_sv2)) seen.push([Math.hypot(_sv2.x - p.x, _sv2.z - p.z), name]); };
   for (const pl of placeByName.values()) if (pl.roomKey === key) look(pl.name, pl.lifted ? pl.lifted.m : pl.g);
+  for (const pr of propByName.values()) if (pr.roomKey === key) look(pr.name, pr.lifted ? pr.lifted.m : pr.g);
   for (const [n, o] of patchObjs) if (o && (!b || (o.getWorldPosition(_sv2), inBox(b, _sv2.x, _sv2.z)))) look(n, o);
   seen.sort((x, y) => x[0] - y[0]);
   const lights = key ? roomLights(key).map(l => ({ name: l.name, color: "#" + l.s.color.getHexString(), intensity: r2(l.s.intensity) })) : [];
   const patches = patchAll().filter(c => !c.room || c.room === key).map(c => {
-    const l = patchLive.find(x => x.id === c.id);
+    const l = patchLiveOf(c.id);
     return { id: c.id, title: c.title, on: c.on, state: !c.on ? "off" : DECK_BAKED.has(c.id) ? "baked" : patchSkipped.has(c.id) ? "skipped: " + patchSkipped.get(c.id)
       : !l ? "waiting" : l.ps ? "applied" : "failed: " + l.err + (l.line ? " (line " + l.line + ")" : "") };
   });
@@ -15792,8 +16213,41 @@ function archSees(opts = {}) {
     " Patches here: " + (patches.length ? patches.map(x => x.id + " " + JSON.stringify(x.title) + " " + x.state).join("; ") : "none") + ".]",
   ];
   const lib = opts.library ? deckApi({ id: "", undo: [], pending: [], names: new Set() }).library() : null;
+  // the first message in a room (the console asks with `library`): the
+  // room's every named thing, where it stands in the room's frame and its size
+  const inv = opts.library && key ? archInventory(key) : null;
+  if (inv) lines.push("[Everything named in " + key + ", x z in metres from its middle (x to starboard, z aft), w x h x d: " +
+    (inv.objects.length ? inv.objects.map(o => o.name.slice(key.length + 1) + " (" + o.kind + ") at " + o.at.join(" ") + ", " + o.size.join("x")).join("; ") : "nothing") +
+    ". Dressing: " + inv.dressing + " group" + (inv.dressing === 1 ? "" : "s") + " (deck.dress). Ship materials: " + inv.materials.join(", ") + ".]");
   if (lib) lines.push("[The model library, glb: props (w x h x d m): " + Object.entries(lib).map(([g, l]) => g + ": " + l.map(x => x.prop + " " + x.size.join("x")).join(", ")).join("; ") + "]");
-  return { text: lines.join("\n"), room: key, label, at, yaw, pitch, aim: ai, inView: seen.map(x => x[1]), lights, device, gfx, patches, library: lib };
+  return { text: lines.join("\n"), room: key, label, at, yaw, pitch, aim: ai, inView: seen.map(x => x[1]), lights, device, gfx, patches, library: lib, inventory: inv };
+}
+const propLabel = pr => pr.kind.replace(/_/g, " ") + " " + pr.name.slice(pr.name.lastIndexOf("#") + 1);
+// A room's named things: its placements, its code-built props and what its
+// patches added, each where it stands (from the room's middle) and its size
+function archInventory(key) {
+  const b = roomBox(key);
+  if (!b) return null;
+  const cx = (b[0] + b[2]) / 2, cz = (b[1] + b[3]) / 2, objects = [];
+  // a merged thing's box from what it was merged from: a placement's prop
+  // geometry in its frame, a code-built prop's parts (out of the scene,
+  // their world matrices kept)
+  const geoBox = (geo, m) => { if (!geo.boundingBox) geo.computeBoundingBox(); return _pb.copy(geo.boundingBox).applyMatrix4(m); };
+  const one = (name, kind, o, rec) => {
+    _apb.makeEmpty();
+    if (o) { o.updateWorldMatrix(true, true); _apb.setFromObject(o); }
+    else if (rec.srcGeo) _apb.union(geoBox(rec.srcGeo, _fm.multiplyMatrices(rec.parent.matrixWorld, rec.base).multiply(rec.srcM)));
+    else for (const x of rec.parts) if (x.geometry && x.material !== contactMat) _apb.union(geoBox(x.geometry, x.matrixWorld));
+    const c = _apb.isEmpty() ? (o || rec.g).getWorldPosition(_sv2) : _apb.getCenter(_sv2);
+    const size = _apb.isEmpty() ? [0, 0, 0] : [_apb.max.x - _apb.min.x, _apb.max.y - _apb.min.y, _apb.max.z - _apb.min.z].map(r2);
+    objects.push({ name, kind, at: [r2(c.x - cx), r2(c.z - cz)], size });
+  };
+  for (const p of placeByName.values()) if (p.roomKey === key) one(p.name, "model", p.lifted && p.lifted.m, p);
+  for (const pr of propByName.values()) if (pr.roomKey === key) one(pr.name, "code-built", pr.lifted && pr.lifted.m, pr);
+  for (const [n, o] of patchObjs) if (o && (o.getWorldPosition(_sv2), inBox(b, _sv2.x, _sv2.z))) one(n, "a patch's", o);
+  objects.sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true }));
+  const dressingN = [...dressing].filter(d => { const x = d.userData.box; return x && inBox(b, (x[0] + x[3]) / 2, (x[2] + x[5]) / 2); }).length;
+  return { objects, dressing: dressingN, materials: Object.keys(M).filter(k => M[k] && M[k].isMaterial) };
 }
 window.lcarsDeckSees = opts => archSees(opts);
 // The canvas as a JPEG at most `max` px wide, with the crosshair drawn on:
@@ -15866,7 +16320,7 @@ function paintArch() {
   $("#talkstat").textContent = (key || "no room") + " · " + (NOPATCH ? "patches off for this load" : all.length ? all.length + " patch" + (all.length > 1 ? "es" : "") : "no patches yet");
   box.textContent = "";
   for (const c of all) {
-    const l = patchLive.find(x => x.id === c.id), skip = patchSkipped.get(c.id), failed = c.on && (skip || l && !l.ps);
+    const l = patchLiveOf(c.id), skip = patchSkipped.get(c.id), failed = c.on && (skip || l && !l.ps);
     const e = document.createElement("button");
     e.type = "button";
     e.className = "pill " + (failed ? "red" : c.on ? "blue" : "dim");
@@ -16726,6 +17180,7 @@ function frame() {
   const zn = zoneAt(player.position.x, player.position.z);
   if (zn) setText(hud.room, shown(zn.name));
   tickAmbience(zn && zn.name);
+  tickFog(zn, dt);
   const fill = (zn && ROOM_FILL[zn.name]) || [0.55, 0.35], ek = Math.min(1, dt * 1.5);
   // the bridge's fill at night watch a fraction of its own (an architect's
   // ROOM_FILL for the bridge still counts, and is scaled the same)
@@ -16818,7 +17273,7 @@ function setSync(s) { $("#sync").textContent = s; }
   loadModels().then(patchReplay, patchReplay);
   deckEvStart();
   // a hook for the headless screenshot harness: hand it the handles it needs
-  window.__deck = { atlasVia, takeRows, deckCells, doors, batchDeck, socialSeen, patchLive, patchAll, patchObjs, placeByName, archSees, deckApi, DECK_API_DOC, openArchitect, paintArch, patchSkipped,
+  window.__deck = { atlasVia, takeRows, deckCells, doors, batchDeck, socialSeen, patchLive, patchScopes, patchScope, propByName, propList, patchFogs, tickers, skyNow: () => SKIES[skyAt].id, patchIdle: () => patchQueue(() => {}), patchAll, patchObjs, placeByName, archSees, deckApi, DECK_API_DOC, openArchitect, paintArch, patchSkipped,
                     lightSpots, ROOM_FILL, NIGHT, onBridge, lmExport, lmStats, lmMeshes, LIGHTMAP, nightWatch, nightTick, watchAt, setNightClock, blocks, zones, pinnable, modelPlaces, NOPATCH, crew: () => crew, mats: { M, MX }, aoStats, blinkHold(on) { crewBlinkHold = !!on; }, READ_CLIP, SHIFT_CLIP, msdTex, padFace, padTexture, engOf, engSlug, sitAim: () => aimSeat && (sitDown(aimSeat), true), sitDown, standUp, jump, crouch, walkPace, tickBody, EYE, CROUCH_EYE, body: () => ({ seated: !!seated, crouched, aimSeat: !!aimSeat, eye: camera.position.y, jumpY }), seats: () => pinnable.filter(m => m.userData.seat), THREE, scene, player, camera, place, rows, carry, pinHere, rebuildPads, updateAim, renderer, composer, gtao, bloom, lights, openConsole, openMenu, holoHere, holoRun, holoGenerate, holoFind, holoJobs, openHolo, get aimHolo() { return aimHolo; }, talk, openTalk, personaOf, talkId, say, sayStop, crewAimed, get aimCrew() { return aimCrew; }, dict, dictFake(w) { dictWin = w; }, dictStart, dictEnd, get seated() { return seated; }, chart, chartLoad, chartAim, get active() { return active; }, get aimStar() { return aimStar; }, mediaLoad, mediaAssets, mediaRows, mediaPlaying, activate, padObjs, get aimPad() { return aimPad; },
                     setTone, M, setView(x, z, a, p) { player.position.set(x, 0, z); yaw = a; pitch = p || 0; },
                     aimInfo: () => ({ aim: !!aim, pad: aimPad && aimPad.userData.entryId, stack: aimStack && aimStack.userData.entryId }), aimHit: () => aim, deskAt: () => deskAt, pileOf, takePad, PILE_STEP, primary, throwPad, thrown, held, crew, walkable,

@@ -359,7 +359,8 @@ estimate includes one re-roll of its images.
    the deck, so what remained per cabin was a few calls. By eye at high
    the scripted sofa and bed read as furniture, not blocks, and beat
    main's (the report); the generated road (22 credits) is left for
-   later.
+   later. **Taken** (slice 9, 2026-10-30): the sofa and the double bed
+   generated, 32 credits with the sofa's re-roll.
 6. **Bare walls and the turbolift** (deck-polish.md slices 5 and 8, as
    planned there; the riding look first for 8). 0 credits.
 7. **Conference, classroom and mess, baked.** As 5, one glb a type: the
@@ -454,6 +455,58 @@ estimate includes one re-roll of its images.
 9. **`gen.py`** (section 3.4) and the prompt kit in deck-pipeline.md's
    steps. Built when 5 or 7 first takes the generated road. 0 credits
    to build.
+   **Built** (2026-10-30, on the captain's word: credits for the generated
+   pieces, a hard cap of 40 for the order): `scripts/deck-models/gen.py`
+   (the prop's `raw/prompts.txt` in the media store, every step priced by
+   `higgsfield generate cost` with its real parameters before anything is
+   spent, `--spend N` a hard cap, each job recorded as pending the moment
+   it is made so a stopped run's job is fetched and not paid again, the
+   result downloaded at once, `gen.json` and `LICENSE.txt`), `fit.py`
+   (Blender: turned, into the stand-in's box, loose wisps dropped),
+   `build.sh`'s `generated()` for any room, `scripts/test_gen.py` (a
+   stand-in CLI); deck-pipeline.md, "A generated prop". Checked against
+   the CLI 1.2.2 itself (`model get`, `generate cost`): the jobs and
+   parameters as section 7 had them; H3.1 multiview and image 9 with
+   standard texture, 12 with `texture_quality detailed`; Tripo's text to
+   3D (`tripo_3d`) 5, 7.5 detailed; Seedream 5.0 Flash 0.5. Two traps of
+   the CLI: given no `--prompt` it reads one from a stdin that is not a
+   terminal (an image-to-3D job hung on an open one: stdin is /dev/null
+   now), and `generate create --json` answers a bare list of job ids.
+   **Spent: 37 credits** (1200 before, 1163 after; the subscription's
+   reset on 2026-10-29 had taken the 747.25 to 1200):
+   - **the sofa, 21** (four views 2, H3.1 multiview 9, then the sides
+     and the job again, 10): the first sides came out a second front
+     and a second back (both shown the front and the back), and Tripo
+     fused them into a two-faced sofa with its cushions heaped in the
+     middle. Re-rolled with the end-on look spelt out and the front alone
+     as reference (`left_refs`): a true sofa, 1,994 triangles. **Kept.**
+   - **the double bed, 11**, its sides written the second way from the
+     start: 2,177 triangles, a loose wisp dropped; the narrow bed its
+     copy at 1.2 across. **Kept.**
+   - **the arboretum's pot plant, 5** (text to 3D): a good plant in
+     Blender, but in the deck darker and muddier than the code plant at
+     a phone's distance, and 21 pots at 1,200 each is +25 k triangles,
+     five times the room's 5 k. **Not kept**: the code plant stays, its
+     glb out of the tree (the raw files kept in the media store).
+   - **hydroponics' greens, not made**: a bay holds ~200 leaf clumps,
+     so the 5 k budget is ~25 triangles a plant, which no generated
+     mesh reads as; the crossed cards stay (5 credits not spent).
+   Measured against main 0.346.5 (deckshots, 390x844; two deck-7 cabins
+   and the arboretum, four looks each): at low, calls +0 in every look,
+   the cabins' triangles +0.7 to +1.9 k; the quarters' furniture 14,912
+   triangles (13.3 k on main; under 15 k), the sofa 1,994 and the bed
+   2,177 (under 3 k each); one 1024² atlas, its wire 598 kB with the KTX2
+   (514 on main; under 600 - the cleaner took the ORM map to 512² to keep
+   it there); boot within noise (38.5 s, main 37.7). The cabins' sofa
+   pillows (the page's, kept over the model) moved 12 cm forward
+   (`sofa()`'s `pz`): at -0.18 they were buried in the generated back
+   cushions. deckmem `--check` at low (decks 12 and 3's cabins on the
+   walk) passes: boot 274 MB of WebGL memory, peak 476 MB, textures at a
+   walk's end 272.6 MB (273.6 before), nothing growing loop to loop, the
+   lost context restored.
+   The report (main beside the branch, close and at a phone's distance,
+   the views and the failed first sofa):
+   <https://<server>/media/reports/2026/10/deck-remodel-slice-9-the-generated-sofa-and-bed-7055e550.html>.
 10. **Hydroponics and sickbay.** The grow lights' emissive under the
     threshold with a magenta wash on the plants from a pooled light (the
     light, not the panel, carries the colour); troughs with a soil top
@@ -486,7 +539,9 @@ estimate includes one re-roll of its images.
     41.5; deckmem `--check` at low over decks 12 and 11 passes (peak 478
     MB, nothing growing). The foliage (three crossed leaf cards) stays
     green under the magenta and reads flat close up: the weak part left,
-    the plant pack the captain's to decide.
+    the plant pack the captain's to decide. **Tried** (slice 9,
+    2026-10-30): the arboretum's pot plant generated and not kept, the
+    troughs' greens not made (slice 9's "Built" says why).
 
 **The credits, all ten:** 1.5-3 (4) + 0-24 (5) + 0-12 (7) + 0-12 (10):
 **about 2-50 Higgsfield credits**, most of it only if a scripted sofa,
