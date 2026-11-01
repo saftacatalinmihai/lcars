@@ -11,6 +11,8 @@ their own.
 **Try it in the browser, nothing installed:** [the demo](https://public.mihai-safta.dev/lcars-demo/index.html)
 (it runs on made-up entries in your browser, and saves nothing to a server).
 
+![LCARS — write a log in the console, then pin it to a wall of the 3D starship](https://github.com/yasirwhite/OpenDemo/releases/download/showcase-media/lcars-demo.gif)
+
 Built by a crew of Claude Code engineers run by an AI first officer: the
 rules they work to are [CLAUDE.md](CLAUDE.md), their roles [crew/](crew/),
 their seat and deploys [scripts/engineer.py](scripts/engineer.py). How it was made:
